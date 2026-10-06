@@ -38,7 +38,8 @@ make copy       # copy the core to a mounted Pocket SD card
 ```
 
 Put your `data.win` in this directory (on macOS it is `game.ios` inside
-`UNDERTALE.app/Contents/Resources/`, renamed). The build copies it to
+`UNDERTALE.app/Contents/Resources/`, renamed), and link the folder with the
+game's `.ogg` files as `music/`. The build copies it to
 `Assets/undertale/common/` in the SD tree.
 
 Desktop extras: `UT_DUMP_FRAME=<n> UT_DUMP_PATH=out.ppm ./undertale_pc`
@@ -64,6 +65,20 @@ decoding PNGs or allocating an RGBA intermediate. Without the pack the
 renderer falls back to the PNGs inside `data.win`. Decoded pages are kept
 in a least-recently-used cache of `TEXTURE_CACHE_MB` (default 20).
 
+## Music
+
+Undertale streams its music from external `.ogg` files. Decoding Vorbis live
+is too heavy for the 100 MHz CPU, so `make` runs `tools/mkmusic` over
+`music/` (a directory or symlink holding the game's `.ogg` files) to produce
+`music.bin` (data slot 6): every track as 32 kHz mono IMA ADPCM, about
+130 MB. `platform/of_audio_system.c` streams tracks from the pack, applies
+pitch and gain, mixes up to four at once and writes 48 kHz output.
+
+Sounds embedded in `data.win` (short effects) are not played yet.
+
+Desktop: `UT_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
+s16le) for checking without speakers.
+
 ## On-device diagnostics
 
 The boot log stays on screen while loading, and every Butterscotch log line
@@ -77,6 +92,7 @@ rebooting.
   the intro, name entry works, and the first room and menu are playable.
 - Use the os25 bitstream. The SDK's runtime `os.bin` paired with os20
   reboot-looped before the OS banner appeared.
-- No audio yet (Butterscotch's no-op audio backend).
+- Music plays on desktop (verified against a reference decode); not yet
+  heard on hardware. Sound effects are not implemented.
 - Saves are not mapped to save slots yet.
 - Loading `data.win` takes about 28 s on the Pocket before the first frame.

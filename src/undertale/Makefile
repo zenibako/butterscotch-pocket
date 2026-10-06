@@ -44,12 +44,12 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
                  $(BS_VENDOR)/base64/base64.c
 
 SRCS = main.c platform/of_platform.c platform/of_diag.c platform/of_log.c \
-       platform/of_perf.c \
+       platform/of_perf.c platform/of_audio_system.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS)
 SRCS_CXX =
 
-BS_INCLUDES = -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
+BS_INCLUDES = -Iplatform -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
               -I$(BS_SRC)/debug_font \
               -I$(BS_VENDOR)/stb/ds -I$(BS_VENDOR)/stb/image -I$(BS_VENDOR)/stb/vorbis \
               -I$(BS_VENDOR)/bzip2 -I$(BS_VENDOR)/sha1 -I$(BS_VENDOR)/md5 \
@@ -62,7 +62,7 @@ BS_INCLUDES = -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
 WADS ?= 16
 BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZE=16 \
           -DUSE_FLOAT_REALS -DNO_RVALUE_INT64 \
-          -DBUTTERSCOTCH_VIDEO_NULL \
+          -DBUTTERSCOTCH_VIDEO_NULL -DUSE_PLATFORM_AUDIO \
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
 
 # Budget for decoded texture pages kept in RAM (the app has about 51 MB of
@@ -84,7 +84,11 @@ CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN)
 # data.win is your own copy of the game data (gitignored); when present it is
 # placed next to the ELF in the SD tree, together with the texture pack
 # generated from it.
-MISTER_ASSETS ?= $(wildcard data.win) $(if $(wildcard data.win),textures.bin)
+#
+# music/ is a directory (or symlink) holding the game's .ogg files; when
+# present they are converted into music.bin.
+GAME_PACKS = $(if $(wildcard data.win),textures.bin) $(if $(wildcard music/*.ogg),music.bin)
+MISTER_ASSETS ?= $(wildcard data.win) $(GAME_PACKS)
 
 # Declare default target before sdk.mk's rules
 .DEFAULT_GOAL := all
@@ -104,14 +108,26 @@ $(MKTEXPACK): $(MKTEXPACK_SRCS)
 textures.bin: data.win $(MKTEXPACK)
 	$(MKTEXPACK) data.win $@
 
+# Host tool: converts the game's .ogg music to mono ADPCM so the device does
+# not have to decode Vorbis.
+MKMUSIC = $(ROOT)/.obj/$(APP)-tools/mkmusic
+MUSIC_RATE ?= 32000
+
+$(MKMUSIC): tools/mkmusic.c platform/ut_music_pack.h
+	@mkdir -p $(dir $@)
+	$(PC_CC) -O2 -w tools/mkmusic.c $(BS_VENDOR)/stb/vorbis/stb_vorbis.c -lm -o $@
+
+music.bin: $(MKMUSIC) $(wildcard music/*.ogg)
+	$(MKMUSIC) music $@ $(MUSIC_RATE)
+
 # Build ELF, then assemble SD card image in build/<app>/
-all: $(OBJ_DIR)/app.elf $(if $(wildcard data.win),textures.bin) release
+all: $(OBJ_DIR)/app.elf $(GAME_PACKS) release
 	@$(SIZE) $<
 
 # Assemble the per-target deliverable.  Each platform owns its layout
 # (pocket = APF tree, mister = disk image); the rule names no target —
 # adding a target = add platforms/<target>/image.sh.
-release: $(OBJ_DIR)/app.elf $(if $(wildcard data.win),textures.bin)
+release: $(OBJ_DIR)/app.elf $(GAME_PACKS)
 	@$(SDK_DIR)/platforms/$(TARGET)/image.sh "$(APP)" "$(OBJ_DIR)/app.elf" "$(ROOT)" "$(DIST)" $(MISTER_ASSETS)
 
 debug: all
@@ -148,7 +164,7 @@ $(PC_OBJ_DIR)/%.o: %.c
 undertale_pc: $(PC_OBJS)
 	$(PC_CC) $(PC_OBJS) $(PC_SDL_LIBS) -lm -o $@
 
-test: undertale_pc $(if $(wildcard data.win),textures.bin)
+test: undertale_pc $(GAME_PACKS)
 
 clean: sdk-clean
 	rm -rf $(PC_OBJ_DIR) undertale_pc

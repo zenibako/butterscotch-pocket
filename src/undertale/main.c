@@ -16,16 +16,20 @@
 #include <stdlib.h>
 
 /* Data slots (see the instance JSON under dist/). Slot 4 holds the game's
- * data.win, slot 5 the optional texture pack built from it. */
+ * data.win, slot 5 the optional texture pack built from it, slot 6 the
+ * optional music pack. */
 #define UT_SLOT_DATA_WIN 4
 #define UT_DATA_WIN_NAME "data.win"
 #define UT_SLOT_TEXTURES 5
 #define UT_TEXTURES_NAME "textures.bin"
+#define UT_SLOT_MUSIC 6
+#define UT_MUSIC_NAME "music.bin"
 
 int main(void) {
 #ifndef OF_PC
     of_file_slot_register(UT_SLOT_DATA_WIN, UT_DATA_WIN_NAME);
     of_file_slot_register(UT_SLOT_TEXTURES, UT_TEXTURES_NAME);
+    of_file_slot_register(UT_SLOT_MUSIC, UT_MUSIC_NAME);
 #endif
     utDiagInstall();
     utDiagCheckFile(UT_DATA_WIN_NAME);
