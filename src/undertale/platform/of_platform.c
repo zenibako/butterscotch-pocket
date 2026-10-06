@@ -35,7 +35,6 @@ static bool g_hiresAvailable = true;
 static int g_modeW = 0; /* 0 until the first frame sets a mode */
 static int g_modeH = 0;
 static int g_modeStride = 0; /* bytes per row of the display surface */
-static bool g_logOverlay = false;
 
 /* Pad button -> GML virtual key. Undertale reads Z/X/C with Enter/Shift/Ctrl
  * as aliases; the d-pad maps to the arrow keys. Select is not Esc (holding
@@ -196,13 +195,23 @@ static void dumpFrameIfRequested(void) {
 void platformSwapBuffers(void) {
     if (g_nextFb == NULL) return;
 #ifdef OF_PC
+    /* UT_OVERLAY=1 turns both overlays on, to check them in frame dumps. */
+    static bool overlaysChecked = false;
+    if (!overlaysChecked) {
+        overlaysChecked = true;
+        if (getenv("UT_OVERLAY") != NULL) {
+            utPerfToggle();
+            utPerfToggleLog();
+        }
+    }
+#endif
+    utPerfFrame(g_nextFb, g_nextW, g_nextH);
+#ifdef OF_PC
     dumpFrameIfRequested();
 #endif
 
-    utPerfFrame(g_nextFb, g_nextW, g_nextH);
-
     if (!g_showingFramebuffer) {
-        of_video_set_display_mode(g_logOverlay ? OF_DISPLAY_OVERLAY : OF_DISPLAY_FRAMEBUFFER);
+        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
         g_showingFramebuffer = true;
     }
 
@@ -269,12 +278,7 @@ static void runInputScript(void) {
 bool platformHandleEvents(void) {
     of_input_poll();
     if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1)) utPerfToggle();
-    if (of_btn_pressed(OF_BTN_R1)) {
-        /* Show the log over the game, to read load and warning lines on the device. */
-        g_logOverlay = !g_logOverlay;
-        if (g_showingFramebuffer)
-            of_video_set_display_mode(g_logOverlay ? OF_DISPLAY_OVERLAY : OF_DISPLAY_FRAMEBUFFER);
-    }
+    if (of_btn_pressed(OF_BTN_R1)) utPerfToggleLog();
 #ifdef OF_PC
     runInputScript();
 #endif

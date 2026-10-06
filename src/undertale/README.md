@@ -54,7 +54,7 @@ enables older bytecode versions for testing other games.
 D-pad = arrows, A = Z (confirm), B = X (cancel), X/Y = C (menu),
 Start = Enter. Select or L toggles a frame-time overlay: three numbers in
 milliseconds over the last 30 frames (average work, worst work, worst frame
-period; 33 means full speed). R toggles the log as an overlay on the game.
+period; 33 means full speed). R shows the last log lines over the game.
 
 ## Resolution
 

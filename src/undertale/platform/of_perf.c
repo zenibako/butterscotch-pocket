@@ -1,5 +1,5 @@
 /*
- * Frame-time overlay, toggled with Select.
+ * Frame-time overlay (Select or L) and log overlay (R).
  *
  * Shows three numbers in the top-left corner, in milliseconds, over the last
  * 30 frames:
@@ -10,12 +10,14 @@
 
 #include "of_perf.h"
 
+#include "debug_font.h"
 #include "gettime.h"
 
 #define UT_PERF_WINDOW 30
 #define UT_PERF_SCALE  2
 
 static bool g_enabled = false;
+static bool g_logEnabled = false;
 static uint64_t g_lastFrame = 0;
 static uint64_t g_sleepNanos = 0;
 static unsigned g_worstWork = 0, g_worstPeriod = 0, g_totalWork = 0;
@@ -30,6 +32,52 @@ static const uint16_t g_digits[10] = {
 
 void utPerfToggle(void) {
     g_enabled = !g_enabled;
+}
+
+void utPerfToggleLog(void) {
+    g_logEnabled = !g_logEnabled;
+}
+
+/* Log overlay text: Butterscotch's debug font atlas shrunk 3:1 by averaging
+ * coverage, which gives a 6x12 cell that still reads at 320x240. */
+#define UT_LOG_SHRINK 3
+#define UT_LOG_CELL_W 6
+#define UT_LOG_CELL_H 12
+
+static void drawLogChar(uint16_t *fb, int width, int x, int y, char c) {
+    if (c < DEBUGFONT_FIRST_CP || c > DEBUGFONT_LAST_CP) return;
+    const DebugFontGlyphEntry *glyph = &debugFontGlyphs[c - DEBUGFONT_FIRST_CP];
+
+    for (int gy = 0; gy < glyph->h; gy += UT_LOG_SHRINK) {
+        for (int gx = 0; gx < glyph->w; gx += UT_LOG_SHRINK) {
+            int sum = 0;
+            for (int sy = 0; sy < UT_LOG_SHRINK && gy + sy < glyph->h; sy++)
+                for (int sx = 0; sx < UT_LOG_SHRINK && gx + sx < glyph->w; sx++)
+                    sum += debugFontPixels[(glyph->y + gy + sy) * DEBUGFONT_ATLAS_W + glyph->x + gx + sx];
+            if (sum < 80 * UT_LOG_SHRINK * UT_LOG_SHRINK) continue;
+
+            int px = x + (glyph->xoffset + gx) / UT_LOG_SHRINK;
+            int py = y + (glyph->yoffset + gy) / UT_LOG_SHRINK;
+            if (px >= 0 && px < width && py >= 0) fb[py * width + px] = 0x7FFF;
+        }
+    }
+}
+
+static void drawLog(uint16_t *fb, int width, int height) {
+    int rows = UT_LOG_LINES - 1;
+    int columns = width / UT_LOG_CELL_W;
+    int top = height - rows * UT_LOG_CELL_H;
+    if (top < 16) return;
+
+    /* Darken the area behind the text so it reads over any scene. */
+    for (int i = top * width; i < height * width; i++) fb[i] = (uint16_t) ((fb[i] >> 2) & 0x1CE7);
+
+    for (int row = 0; row < rows; row++) {
+        const char *line = utLogLine(rows - 1 - row);
+        int y = top + row * UT_LOG_CELL_H;
+        for (int col = 0; col < columns && line[col] != '\0'; col++)
+            drawLogChar(fb, width, col * UT_LOG_CELL_W, y, line[col]);
+    }
 }
 
 void utPerfAddSleep(uint64_t nanos) {
@@ -80,6 +128,7 @@ void utPerfFrame(uint16_t *fb, int width, int height) {
     g_lastFrame = now;
     g_sleepNanos = 0;
 
+    if (g_logEnabled) drawLog(fb, width, height);
     if (!g_enabled || width < 96 || height < 16) return;
     int x = drawNumber(fb, width, 2, 2, g_shownAverage);
     x = drawNumber(fb, width, x + 2 * UT_PERF_SCALE, 2, g_shownWork);
