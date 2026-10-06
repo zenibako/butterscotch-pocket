@@ -3,7 +3,7 @@
         "magic": "APF_VER_1",
         "data_slots": [
             { "id": 1, "filename": "os.bin" },
-            { "id": 2, "filename": "undertale.ini" },
+            { "id": 2, "filename": "undertale_os.ini" },
             { "id": 3, "filename": "undertale.elf" },
             { "id": 4, "filename": "data.win" },
             { "id": 5, "filename": "textures.bin" },

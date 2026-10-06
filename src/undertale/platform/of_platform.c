@@ -28,10 +28,12 @@ static Runner *g_runner = NULL;
 static uint16_t *g_nextFb = NULL;
 static int g_nextW = 0;
 static int g_nextH = 0;
+static bool g_showingFramebuffer = false;
+static bool g_logOverlay = false;
 
 /* Pad button -> GML virtual key. Undertale reads Z/X/C with Enter/Shift/Ctrl
  * as aliases; the d-pad maps to the arrow keys. Select is not Esc (holding
- * Esc quits Undertale); Select, L and R toggle the frame-time overlay. */
+ * Esc quits Undertale); Select and L toggle the frame-time overlay, R the log overlay. */
 static const struct {
     uint32_t button;
     int32_t key;
@@ -146,10 +148,9 @@ void platformSwapBuffers(void) {
 
     utPerfFrame(g_nextFb, g_nextW, g_nextH);
 
-    static bool showingFramebuffer = false;
-    if (!showingFramebuffer) {
-        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
-        showingFramebuffer = true;
+    if (!g_showingFramebuffer) {
+        of_video_set_display_mode(g_logOverlay ? OF_DISPLAY_OVERLAY : OF_DISPLAY_FRAMEBUFFER);
+        g_showingFramebuffer = true;
     }
 
     uint16_t *dst = (uint16_t *) of_video_surface();
@@ -172,8 +173,9 @@ void *platformGetProcAddress(const char *name) {
 
 #ifdef OF_PC
 /* Desktop-only scripted input for repeatable test runs:
- *   UT_SCRIPT="300:Z,340:D,341:Z"
- * presses a key on the given frame and releases it two frames later.
+ *   UT_SCRIPT="300:Z,340:D,341:Z,400:R*90"
+ * presses a key on the given frame and releases it two frames later, or
+ * after N frames with "*N".
  * Keys: U D L R (arrows), Z X C, E (Enter). */
 static void runInputScript(void) {
     static int frame = 0;
@@ -199,8 +201,9 @@ static void runInputScript(void) {
             case 'E': key = VK_ENTER; break;
             default:  key = colon[1]; break;
         }
+        int hold = colon[2] == '*' ? atoi(colon + 3) : 2;
         if (frame == at) RunnerKeyboard_onKeyDown(g_runner->keyboard, key);
-        if (frame == at + 2) RunnerKeyboard_onKeyUp(g_runner->keyboard, key);
+        if (frame == at + hold) RunnerKeyboard_onKeyUp(g_runner->keyboard, key);
         const char *comma = strchr(colon, ',');
         if (comma == NULL) break;
         p = comma + 1;
@@ -211,7 +214,13 @@ static void runInputScript(void) {
 /* Returns true when the app should quit; a Pocket core never does. */
 bool platformHandleEvents(void) {
     of_input_poll();
-    if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1 | OF_BTN_R1)) utPerfToggle();
+    if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1)) utPerfToggle();
+    if (of_btn_pressed(OF_BTN_R1)) {
+        /* Show the log over the game, to read load and warning lines on the device. */
+        g_logOverlay = !g_logOverlay;
+        if (g_showingFramebuffer)
+            of_video_set_display_mode(g_logOverlay ? OF_DISPLAY_OVERLAY : OF_DISPLAY_FRAMEBUFFER);
+    }
 #ifdef OF_PC
     runInputScript();
 #endif

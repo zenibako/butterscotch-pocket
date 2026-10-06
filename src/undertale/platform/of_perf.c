@@ -1,10 +1,11 @@
 /*
  * Frame-time overlay, toggled with Select.
  *
- * Shows two numbers in the top-left corner, both in milliseconds and both the
- * worst case over the last 30 frames:
- *   left  = work time (frame period minus time spent sleeping for pacing)
- *   right = frame period (33 at full speed for a 30 fps game)
+ * Shows three numbers in the top-left corner, in milliseconds, over the last
+ * 30 frames:
+ *   average work time (frame period minus time spent sleeping for pacing)
+ *   worst work time
+ *   worst frame period (33 at full speed for a 30 fps game)
  */
 
 #include "of_perf.h"
@@ -17,8 +18,8 @@
 static bool g_enabled = false;
 static uint64_t g_lastFrame = 0;
 static uint64_t g_sleepNanos = 0;
-static unsigned g_worstWork = 0, g_worstPeriod = 0;
-static unsigned g_shownWork = 0, g_shownPeriod = 0;
+static unsigned g_worstWork = 0, g_worstPeriod = 0, g_totalWork = 0;
+static unsigned g_shownWork = 0, g_shownPeriod = 0, g_shownAverage = 0;
 static int g_count = 0;
 
 /* 3x5 digit glyphs, one row per 3 bits, top row first. */
@@ -67,17 +68,20 @@ void utPerfFrame(uint16_t *fb, int width, int height) {
         unsigned workMs = (unsigned) (work / 1000000u);
         if (periodMs > g_worstPeriod) g_worstPeriod = periodMs;
         if (workMs > g_worstWork) g_worstWork = workMs;
+        g_totalWork += workMs;
         if (++g_count >= UT_PERF_WINDOW) {
+            g_shownAverage = g_totalWork / UT_PERF_WINDOW;
             g_shownWork = g_worstWork;
             g_shownPeriod = g_worstPeriod;
-            g_worstWork = g_worstPeriod = 0;
+            g_worstWork = g_worstPeriod = g_totalWork = 0;
             g_count = 0;
         }
     }
     g_lastFrame = now;
     g_sleepNanos = 0;
 
-    if (!g_enabled || width < 64 || height < 16) return;
-    int x = drawNumber(fb, width, 2, 2, g_shownWork);
+    if (!g_enabled || width < 96 || height < 16) return;
+    int x = drawNumber(fb, width, 2, 2, g_shownAverage);
+    x = drawNumber(fb, width, x + 2 * UT_PERF_SCALE, 2, g_shownWork);
     drawNumber(fb, width, x + 2 * UT_PERF_SCALE, 2, g_shownPeriod);
 }

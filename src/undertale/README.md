@@ -52,9 +52,9 @@ enables older bytecode versions for testing other games.
 ## Controls
 
 D-pad = arrows, A = Z (confirm), B = X (cancel), X/Y = C (menu),
-Start = Enter. Select, L or R toggles a frame-time overlay: two numbers in
-milliseconds, worst case over the last 30 frames. Left is work time, right
-is the frame period (33 means full speed).
+Start = Enter. Select or L toggles a frame-time overlay: three numbers in
+milliseconds over the last 30 frames (average work, worst work, worst frame
+period; 33 means full speed). R toggles the log as an overlay on the game.
 
 ## Texture pack
 
@@ -63,7 +63,8 @@ is the frame period (33 means full speed).
 16-bit format and run-length encoded. The device then loads pages without
 decoding PNGs or allocating an RGBA intermediate. Without the pack the
 renderer falls back to the PNGs inside `data.win`. Decoded pages are kept
-in a least-recently-used cache of `TEXTURE_CACHE_MB` (default 20).
+in a least-recently-used cache that shrinks whenever less than
+`TEXTURE_RESERVE_MB` (default 4) of heap would be left for the game.
 
 ## Music
 

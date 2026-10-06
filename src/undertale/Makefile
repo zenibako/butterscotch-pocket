@@ -65,11 +65,13 @@ BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZ
           -DBUTTERSCOTCH_VIDEO_NULL -DUSE_PLATFORM_AUDIO \
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
 
-# Budget for decoded texture pages kept in RAM (the app has about 51 MB of
-# heap on the Pocket in total). Pages needed by the current frame are kept
-# even past this.
-TEXTURE_CACHE_MB ?= 20
-BS_DEFS += -DTEXTURE_CACHE_BYTES='($(TEXTURE_CACHE_MB)u*1024u*1024u)'
+# Decoded texture pages are cached up to TEXTURE_CACHE_MB, but on the device
+# the real limit is the heap (about 51 MB for everything): after each load
+# the cache drops old pages until TEXTURE_RESERVE_MB can still be allocated.
+TEXTURE_CACHE_MB ?= 40
+TEXTURE_RESERVE_MB ?= 4
+BS_DEFS += -DTEXTURE_CACHE_BYTES='($(TEXTURE_CACHE_MB)u*1024u*1024u)' \
+           -DTEXTURE_CACHE_RESERVE_BYTES='($(TEXTURE_RESERVE_MB)u*1024u*1024u)'
 
 ifeq ($(TRACE),1)
 BS_DEFS += -DUT_TRACE_FRAMES
