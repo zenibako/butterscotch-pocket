@@ -43,13 +43,24 @@ Put your `data.win` in this directory (on macOS it is `game.ios` inside
 
 Desktop extras: `UT_DUMP_FRAME=<n> UT_DUMP_PATH=out.ppm ./undertale_pc`
 writes frame `n` of the 320x240 output and exits. `UT_UNCAPPED=1` disables
-frame pacing for timing runs. `make test WADS="14 16"`
+frame pacing for timing runs. `UT_SEED=<n>` fixes the game's RNG and
+`UT_SCRIPT="300:Z,340:D"` presses keys on given frames (U D L R, Z X C,
+E = Enter), which together make runs repeatable for pixel comparisons. `make test WADS="14 16"`
 enables older bytecode versions for testing other games.
 
 ## Controls
 
 D-pad = arrows, A = Z (confirm), B = X (cancel), X/Y = C (menu),
-Start = Enter, Select = Esc.
+Start = Enter. Select toggles a frame-time overlay: two numbers in
+milliseconds, worst case over the last 30 frames. Left is work time, right
+is the frame period (33 means full speed).
+
+## On-device diagnostics
+
+The boot log stays on screen while loading, and every Butterscotch log line
+is prefixed with seconds since start, so load stages can be timed by eye.
+If the app exits or aborts it halts with the log visible instead of
+rebooting.
 
 ## Status
 

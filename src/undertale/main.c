@@ -13,6 +13,7 @@
 #include "stb_ds.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 /* Data slots (see instance.json). Slot 4 holds the game's data.win. */
 #define UT_SLOT_DATA_WIN 4
@@ -36,6 +37,14 @@ int main(void) {
     args.lazyAudio = true;
     args.renderer = SOFTWARE;
     args.dataWinPath = UT_DATA_WIN_NAME;
+#ifdef OF_PC
+    /* UT_SEED=<n> fixes the game's RNG so desktop runs are repeatable. */
+    const char *seed = getenv("UT_SEED");
+    if (seed != NULL) {
+        args.seed = atoi(seed);
+        args.hasSeed = true;
+    }
+#endif
 #ifdef UT_TRACE_FRAMES
     args.traceFrames = true;
 #endif

@@ -38,12 +38,13 @@ BS_SW_SRCS     = $(wildcard $(BS_SRC)/sw/*.c)
 BS_IMAGE_SRCS  = $(wildcard $(BS_SRC)/image/*.c)
 BS_FONT_SRCS   = $(wildcard $(BS_SRC)/debug_font/*.c)
 BS_VIDEO_SRCS  = $(BS_SRC)/video/null_video.c
-BS_STB_SRCS    = $(BS_SRC)/embedded/stb_impl.c $(BS_SRC)/embedded/log.c
+BS_STB_SRCS    = $(BS_SRC)/embedded/stb_impl.c
 BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
                  $(BS_VENDOR)/sha1/sha1.c $(BS_VENDOR)/md5/md5.c \
                  $(BS_VENDOR)/base64/base64.c
 
-SRCS = main.c platform/of_platform.c platform/of_diag.c \
+SRCS = main.c platform/of_platform.c platform/of_diag.c platform/of_log.c \
+       platform/of_perf.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS)
 SRCS_CXX =
