@@ -2,9 +2,9 @@
  * openfpgaOS platform backend for Butterscotch.
  *
  * Implements the platform* hooks declared in butterscotch/src/platformdefs.h
- * on top of the of_* API. The software renderer draws straight into a
- * 320x240 X1R5G5B5 buffer, which is exactly OF_VIDEO_MODE_RGB555, so
- * presenting a frame is a single copy into the back buffer plus a flip.
+ * on top of the of_* API. The software renderer draws X1R5G5B5 pixels, which
+ * is exactly OF_VIDEO_MODE_RGB555, at 320x240 or 640x480 depending on the
+ * room, so presenting a frame is a mode check, one copy and a flip.
  */
 
 #include "of.h"
@@ -23,12 +23,18 @@
 
 #define UT_SCREEN_W OF_SCREEN_W
 #define UT_SCREEN_H OF_SCREEN_H
+#define UT_HIRES_W 640
+#define UT_HIRES_H 480
 
 static Runner *g_runner = NULL;
 static uint16_t *g_nextFb = NULL;
 static int g_nextW = 0;
 static int g_nextH = 0;
 static bool g_showingFramebuffer = false;
+static bool g_hiresAvailable = true;
+static int g_modeW = 0; /* 0 until the first frame sets a mode */
+static int g_modeH = 0;
+static int g_modeStride = 0; /* bytes per row of the display surface */
 static bool g_logOverlay = false;
 
 /* Pad button -> GML virtual key. Undertale reads Z/X/C with Enter/Shift/Ctrl
@@ -73,13 +79,60 @@ void platformInitFunctions(Runner *runner) {
     runner->currentCursor = GML_CR_DEFAULT;
 }
 
-/* The renderer sizes its framebuffer from this, so reporting the panel size
- * makes it scale the game's 640x480 window down to 320x240 while drawing. */
+/* Width of what the current room shows, in game pixels: the view if the room
+ * uses one, the whole room otherwise. */
+static int32_t visibleWidth(Runner *runner) {
+    if (runner == NULL || runner->currentRoom == NULL) return UT_SCREEN_W;
+
+    if (runner->viewsEnabled) {
+        for (int i = 0; i < MAX_VIEWS; i++) {
+            if (!runner->views[i].enabled) continue;
+            GMLCamera *camera = Runner_getCameraForView(runner, i);
+            return camera != NULL ? camera->viewWidth : UT_HIRES_W;
+        }
+    }
+    return (int32_t) runner->currentRoom->width;
+}
+
+/* The renderer sizes its framebuffer from this. Undertale's window is always
+ * 640x480, but overworld rooms show a 320x240 view scaled up 2x, so drawing
+ * them at 320x240 loses nothing. Battles and menus use all 640x480 with small
+ * fonts, and need the full resolution to stay legible. */
 bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     if (!outW || !outH) return false;
-    *outW = UT_SCREEN_W;
-    *outH = UT_SCREEN_H;
+    int32_t shown = visibleWidth(g_runner);
+    static int32_t lastShown = 0;
+    if (shown != lastShown) {
+        logInfo("Video: room shows %d px across\n", (int) shown);
+        lastShown = shown;
+    }
+    bool hires = g_hiresAvailable && shown > UT_SCREEN_W;
+    *outW = hires ? UT_HIRES_W : UT_SCREEN_W;
+    *outH = hires ? UT_HIRES_H : UT_SCREEN_H;
     return true;
+}
+
+/* Switches the display to match the frame about to be presented. */
+static void matchVideoMode(int width, int height) {
+    if (width == g_modeW && height == g_modeH) return;
+
+    of_video_mode_t want = { (uint16_t) width, (uint16_t) height, 0, OF_VIDEO_MODE_RGB555, 0 };
+    if (of_video_set_mode(&want) < 0) {
+        if (width > UT_SCREEN_W) {
+            logWarn("Video: %dx%d is not available, staying at %dx%d.\n", width, height, UT_SCREEN_W, UT_SCREEN_H);
+            g_hiresAvailable = false;
+            return;
+        }
+        /* An OS without mode setting still has the boot 320x240 mode. */
+        g_modeStride = UT_SCREEN_W * (int) sizeof(uint16_t);
+    } else {
+        of_video_mode_t got;
+        of_video_get_mode(&got);
+        g_modeStride = got.stride;
+        logInfo("Video: %ux%u, stride %u\n", (unsigned) got.width, (unsigned) got.height, (unsigned) got.stride);
+    }
+    g_modeW = width;
+    g_modeH = height;
 }
 
 bool platformGetScaledWindowSize(int32_t *outW, int32_t *outH) {
@@ -153,15 +206,16 @@ void platformSwapBuffers(void) {
         g_showingFramebuffer = true;
     }
 
-    uint16_t *dst = (uint16_t *) of_video_surface();
-    int w = g_nextW < UT_SCREEN_W ? g_nextW : UT_SCREEN_W;
-    int h = g_nextH < UT_SCREEN_H ? g_nextH : UT_SCREEN_H;
+    matchVideoMode(g_nextW, g_nextH);
+    if (g_nextW != g_modeW || g_nextH != g_modeH) return; /* mode refused; the next frame is drawn at 320x240 */
 
-    if (g_nextW == UT_SCREEN_W) {
-        memcpy(dst, g_nextFb, (size_t) UT_SCREEN_W * h * sizeof(uint16_t));
+    uint8_t *dst = of_video_surface();
+    size_t rowBytes = (size_t) g_nextW * sizeof(uint16_t);
+    if ((size_t) g_modeStride == rowBytes) {
+        memcpy(dst, g_nextFb, rowBytes * (size_t) g_nextH);
     } else {
-        for (int y = 0; y < h; y++)
-            memcpy(dst + y * UT_SCREEN_W, g_nextFb + y * g_nextW, (size_t) w * sizeof(uint16_t));
+        for (int y = 0; y < g_nextH; y++)
+            memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
     }
     of_video_flip();
 }

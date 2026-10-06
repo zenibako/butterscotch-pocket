@@ -56,6 +56,14 @@ Start = Enter. Select or L toggles a frame-time overlay: three numbers in
 milliseconds over the last 30 frames (average work, worst work, worst frame
 period; 33 means full speed). R toggles the log as an overlay on the game.
 
+## Resolution
+
+Undertale's window is 640x480. Overworld rooms show a 320x240 view scaled
+2x, so they are rendered at 320x240. Battles and menus use the full 640x480
+with small fonts, so those rooms are rendered at 640x480 and the display
+mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
+everything stays at 320x240.
+
 ## Texture pack
 
 `make` runs `tools/mktexpack` on your `data.win` to produce `textures.bin`
