@@ -1,0 +1,139 @@
+# undertale — openfpgaOS custom core
+#
+# Butterscotch (open-source GameMaker: Studio runner) built against the
+# openfpgaOS SDK, with its software renderer drawing into the 320x240
+# RGB555 framebuffer. You supply your own Undertale data.win.
+#
+# Targets:
+#   make              Build the custom core
+#   make debug        Build, push via UART, stream console
+#   make copy         Copy this custom core to Pocket SD
+#   make package      Package this custom core into a ZIP
+#   make test         Test on desktop (SDL2) -> ./undertale_pc
+#   make clean        Remove build artifacts
+#
+
+APP       = undertale
+# Platform target: pocket (APF SD tree under build/pocket/<app>/) or
+# mister (disk-image bundle under build/mister/<app>/). Overridable per
+# invocation: `make TARGET=mister`, or from the SDK root Makefile.
+TARGET   ?= pocket
+# MiSTer network target for `make copy TARGET=mister` (override: MISTER_IP=...).
+MISTER_IP ?= mister.local
+SDK_DIR   = ../sdk
+ROOT      = $(realpath $(CURDIR)/../..)
+OBJ_DIR   = $(ROOT)/.obj/$(APP)
+BUILD_DIR = $(OBJ_DIR)
+DIST      = $(ROOT)/dist/$(APP)
+OUT       = $(ROOT)/build/$(TARGET)/$(APP)
+RUNTIME   = $(ROOT)/runtime
+
+# ── Butterscotch sources ─────────────────────────────────────────────
+BS        = butterscotch
+BS_SRC    = $(BS)/src
+BS_VENDOR = $(BS)/vendor
+
+BS_CORE_SRCS   = $(wildcard $(BS_SRC)/*.c)
+BS_SW_SRCS     = $(wildcard $(BS_SRC)/sw/*.c)
+BS_IMAGE_SRCS  = $(wildcard $(BS_SRC)/image/*.c)
+BS_FONT_SRCS   = $(wildcard $(BS_SRC)/debug_font/*.c)
+BS_VIDEO_SRCS  = $(BS_SRC)/video/null_video.c
+BS_STB_SRCS    = $(BS_SRC)/embedded/stb_impl.c $(BS_SRC)/embedded/log.c
+BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
+                 $(BS_VENDOR)/sha1/sha1.c $(BS_VENDOR)/md5/md5.c \
+                 $(BS_VENDOR)/base64/base64.c
+
+SRCS = main.c platform/of_platform.c \
+       $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
+       $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS)
+SRCS_CXX =
+
+BS_INCLUDES = -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
+              -I$(BS_SRC)/debug_font \
+              -I$(BS_VENDOR)/stb/ds -I$(BS_VENDOR)/stb/image -I$(BS_VENDOR)/stb/vorbis \
+              -I$(BS_VENDOR)/bzip2 -I$(BS_VENDOR)/sha1 -I$(BS_VENDOR)/md5 \
+              -I$(BS_VENDOR)/base64
+
+# Undertale v1.08 is WAD 16; building only that version shrinks the
+# interpreter hot path. The CPU's FPU is single-precision, so GML reals are
+# floats (same trade-off the PS2 port makes).
+# Override to test other games on desktop, e.g. `make test WADS="14 16"`.
+WADS ?= 16
+BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZE=16 \
+          -DUSE_FLOAT_REALS -DNO_RVALUE_INT64 \
+          -DBUTTERSCOTCH_VIDEO_NULL \
+          -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
+
+# Decoded texture pages kept in RAM at once. A 2048x2048 page is 8 MB at
+# 16 bpp and the whole app has roughly 50 MB of heap, so keep this small.
+TEXTURE_PAGES ?= 3
+BS_DEFS += -DTEXTURE_LRU_LENGTH=$(TEXTURE_PAGES)
+
+ifeq ($(TRACE),1)
+BS_DEFS += -DUT_TRACE_FRAMES
+endif
+
+BS_WARN = -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function \
+          -Wno-sign-compare -Wno-missing-field-initializers
+
+CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN)
+
+# Data files bundled into the per-target deliverable (override per core).
+MISTER_ASSETS ?= $(wildcard *.mid *.mod *.wav *.dat *.png *.bin *.cfg *.iso)
+
+# Declare default target before sdk.mk's rules
+.DEFAULT_GOAL := all
+
+include $(SDK_DIR)/sdk.mk
+
+# Build ELF, then assemble SD card image in build/<app>/
+all: $(OBJ_DIR)/app.elf release
+	@$(SIZE) $<
+
+# Assemble the per-target deliverable.  Each platform owns its layout
+# (pocket = APF tree, mister = disk image); the rule names no target —
+# adding a target = add platforms/<target>/image.sh.
+release: $(OBJ_DIR)/app.elf
+	@$(SDK_DIR)/platforms/$(TARGET)/image.sh "$(APP)" "$(OBJ_DIR)/app.elf" "$(ROOT)" "$(DIST)" $(MISTER_ASSETS)
+
+debug: all
+	@$(ROOT)/scripts/debug.sh $$(ls -d $(OUT)/Assets/*/common 2>/dev/null)/$(APP).elf
+
+# Deploy to the device.  MISTER_IP rides the environment so the same
+# invocation serves every platform's copy.sh (pocket ignores it and
+# auto-detects the SD card; mister uses it as the network host).
+copy: all
+	@MISTER_IP="$(MISTER_IP)" $(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
+
+package: all
+	@$(ROOT)/scripts/package.sh $(APP)
+
+# Desktop build. sdk.mk's app_pc rule assumes a Linux host (of_init.c needs
+# <sys/auxv.h>, and sdl2-config omits the SDL2 parent include dir on
+# Homebrew), so this core builds its own per-object desktop binary that
+# works on macOS too. of_init.c only fetches the kernel's caps/services
+# tables, which the PC shim does not use.
+PC_OBJ_DIR = $(ROOT)/.obj/$(APP)-pc
+PC_SDL_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null || sdl2-config --cflags)
+PC_SDL_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null || sdl2-config --libs)
+PC_SRCS = $(SRCS) $(SDK_DIR)/pc/of_sdl2.c
+PC_OBJS = $(patsubst %.c,$(PC_OBJ_DIR)/%.o,$(subst ../,up/,$(PC_SRCS)))
+
+$(PC_OBJ_DIR)/up/%.o: ../%.c
+	@mkdir -p $(dir $@)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -c -o $@ $<
+
+$(PC_OBJ_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -c -o $@ $<
+
+undertale_pc: $(PC_OBJS)
+	$(PC_CC) $(PC_OBJS) $(PC_SDL_LIBS) -lm -o $@
+
+test: undertale_pc
+
+clean: sdk-clean
+	rm -rf $(PC_OBJ_DIR) undertale_pc
+	rm -rf $(ROOT)/build/pocket/$(APP) $(ROOT)/build/mister/$(APP)
+
+.PHONY: all release debug copy package test clean

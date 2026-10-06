@@ -1,0 +1,6 @@
+# Butterscotch is a separate checkout (see README.md).
+/butterscotch/
+# Desktop test binary and user-supplied game data.
+/undertale_pc
+/data.win
+*.ppm
