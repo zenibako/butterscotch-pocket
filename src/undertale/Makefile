@@ -65,8 +65,8 @@ BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZ
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
 
 # Decoded texture pages kept in RAM at once. A 2048x2048 page is 8 MB at
-# 16 bpp and the whole app has roughly 50 MB of heap, so keep this small.
-TEXTURE_PAGES ?= 3
+# 16 bpp and the whole app has roughly 50 MB of heap, so keep this small. The cache is a ring that holds one fewer than this.
+TEXTURE_PAGES ?= 5
 BS_DEFS += -DTEXTURE_LRU_LENGTH=$(TEXTURE_PAGES)
 
 ifeq ($(TRACE),1)
@@ -79,7 +79,9 @@ BS_WARN = -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function \
 CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN)
 
 # Data files bundled into the per-target deliverable (override per core).
-MISTER_ASSETS ?= $(wildcard *.mid *.mod *.wav *.dat *.png *.bin *.cfg *.iso)
+# data.win is your own copy of the game data (gitignored); when present it is
+# placed next to the ELF in the SD tree.
+MISTER_ASSETS ?= $(wildcard data.win)
 
 # Declare default target before sdk.mk's rules
 .DEFAULT_GOAL := all

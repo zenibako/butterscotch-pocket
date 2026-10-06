@@ -37,10 +37,13 @@ make test       # desktop binary ./undertale_pc (run it next to a data.win)
 make copy       # copy the core to a mounted Pocket SD card
 ```
 
-`data.win` goes in `Assets/undertale/common/` on the SD card.
+Put your `data.win` in this directory (on macOS it is `game.ios` inside
+`UNDERTALE.app/Contents/Resources/`, renamed). The build copies it to
+`Assets/undertale/common/` in the SD tree.
 
 Desktop extras: `UT_DUMP_FRAME=<n> UT_DUMP_PATH=out.ppm ./undertale_pc`
-writes frame `n` of the 320x240 output and exits. `make test WADS="14 16"`
+writes frame `n` of the 320x240 output and exits. `UT_UNCAPPED=1` disables
+frame pacing for timing runs. `make test WADS="14 16"`
 enables older bytecode versions for testing other games.
 
 ## Controls
@@ -50,8 +53,11 @@ Start = Enter, Select = Esc.
 
 ## Status
 
-- Builds for RISC-V and desktop; desktop output verified with Butterscotch's
-  bundled test games.
-- Not yet run on hardware, and not yet run against Undertale's `data.win`.
+- Desktop build plays Undertale's intro (room_introstory) correctly through
+  at least frame 1500, with about 39 MB of live heap on a 64-bit host.
+- RISC-V build links and packages; it has not been run on hardware yet.
 - No audio yet (Butterscotch's no-op audio backend).
 - Saves are not mapped to save slots yet.
+- The texture cache is a count-limited ring. Undertale has four 2048x2048
+  pages (8 MB each at 16 bpp, 16 MB more while decoding), so later rooms
+  need a byte budget or pre-converted textures.

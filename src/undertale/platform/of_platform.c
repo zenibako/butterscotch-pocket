@@ -173,6 +173,12 @@ bool platformHandleEvents(void) {
 }
 
 void platformSleepUntil(uint64_t time) {
+#ifdef OF_PC
+    /* UT_UNCAPPED=1 runs flat out, so `time` reports pure work per frame. */
+    static int uncapped = -1;
+    if (uncapped < 0) uncapped = getenv("UT_UNCAPPED") != NULL;
+    if (uncapped) return;
+#endif
     int64_t remaining = (int64_t) time - (int64_t) nowNanos();
     if (remaining > 2000000)
         usleep((useconds_t) ((remaining - 1000000) / 1000));
