@@ -51,9 +51,18 @@ enables older bytecode versions for testing other games.
 ## Controls
 
 D-pad = arrows, A = Z (confirm), B = X (cancel), X/Y = C (menu),
-Start = Enter. Select toggles a frame-time overlay: two numbers in
+Start = Enter. Select, L or R toggles a frame-time overlay: two numbers in
 milliseconds, worst case over the last 30 frames. Left is work time, right
 is the frame period (33 means full speed).
+
+## Texture pack
+
+`make` runs `tools/mktexpack` on your `data.win` to produce `textures.bin`
+(data slot 5): every texture page already converted to the renderer's
+16-bit format and run-length encoded. The device then loads pages without
+decoding PNGs or allocating an RGBA intermediate. Without the pack the
+renderer falls back to the PNGs inside `data.win`. Decoded pages are kept
+in a least-recently-used cache of `TEXTURE_CACHE_MB` (default 20).
 
 ## On-device diagnostics
 
@@ -70,7 +79,4 @@ rebooting.
   reboot-looped before the OS banner appeared.
 - No audio yet (Butterscotch's no-op audio backend).
 - Saves are not mapped to save slots yet.
-- The texture cache is a count-limited ring. Undertale has four 2048x2048
-  pages (8 MB each at 16 bpp, 16 MB more while decoding), so later rooms
-  need a byte budget or pre-converted textures. The app has about 51 MB of
-  heap on the Pocket.
+- Loading `data.win` takes about 28 s on the Pocket before the first frame.

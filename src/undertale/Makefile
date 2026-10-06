@@ -65,10 +65,11 @@ BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZ
           -DBUTTERSCOTCH_VIDEO_NULL \
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
 
-# Decoded texture pages kept in RAM at once. A 2048x2048 page is 8 MB at
-# 16 bpp and the whole app has roughly 50 MB of heap, so keep this small. The cache is a ring that holds one fewer than this.
-TEXTURE_PAGES ?= 5
-BS_DEFS += -DTEXTURE_LRU_LENGTH=$(TEXTURE_PAGES)
+# Budget for decoded texture pages kept in RAM (the app has about 51 MB of
+# heap on the Pocket in total). Pages needed by the current frame are kept
+# even past this.
+TEXTURE_CACHE_MB ?= 20
+BS_DEFS += -DTEXTURE_CACHE_BYTES='($(TEXTURE_CACHE_MB)u*1024u*1024u)'
 
 ifeq ($(TRACE),1)
 BS_DEFS += -DUT_TRACE_FRAMES
@@ -81,22 +82,36 @@ CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN)
 
 # Data files bundled into the per-target deliverable (override per core).
 # data.win is your own copy of the game data (gitignored); when present it is
-# placed next to the ELF in the SD tree.
-MISTER_ASSETS ?= $(wildcard data.win)
+# placed next to the ELF in the SD tree, together with the texture pack
+# generated from it.
+MISTER_ASSETS ?= $(wildcard data.win) $(if $(wildcard data.win),textures.bin)
 
 # Declare default target before sdk.mk's rules
 .DEFAULT_GOAL := all
 
 include $(SDK_DIR)/sdk.mk
 
+# Host tool: converts data.win's texture pages to the renderer's 16-bit
+# format so the device does not have to decode PNGs.
+MKTEXPACK = $(ROOT)/.obj/$(APP)-tools/mktexpack
+MKTEXPACK_SRCS = tools/mktexpack.c platform/of_log.c $(BS_SRC)/log.c $(BS_SRC)/gettime.c \
+                 $(BS_IMAGE_SRCS) $(BS_STB_SRCS) $(wildcard $(BS_VENDOR)/bzip2/*.c)
+
+$(MKTEXPACK): $(MKTEXPACK_SRCS)
+	@mkdir -p $(dir $@)
+	$(PC_CC) -O2 $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(MKTEXPACK_SRCS) -lm -o $@
+
+textures.bin: data.win $(MKTEXPACK)
+	$(MKTEXPACK) data.win $@
+
 # Build ELF, then assemble SD card image in build/<app>/
-all: $(OBJ_DIR)/app.elf release
+all: $(OBJ_DIR)/app.elf $(if $(wildcard data.win),textures.bin) release
 	@$(SIZE) $<
 
 # Assemble the per-target deliverable.  Each platform owns its layout
 # (pocket = APF tree, mister = disk image); the rule names no target —
 # adding a target = add platforms/<target>/image.sh.
-release: $(OBJ_DIR)/app.elf
+release: $(OBJ_DIR)/app.elf $(if $(wildcard data.win),textures.bin)
 	@$(SDK_DIR)/platforms/$(TARGET)/image.sh "$(APP)" "$(OBJ_DIR)/app.elf" "$(ROOT)" "$(DIST)" $(MISTER_ASSETS)
 
 debug: all
@@ -133,7 +148,7 @@ $(PC_OBJ_DIR)/%.o: %.c
 undertale_pc: $(PC_OBJS)
 	$(PC_CC) $(PC_OBJS) $(PC_SDL_LIBS) -lm -o $@
 
-test: undertale_pc
+test: undertale_pc $(if $(wildcard data.win),textures.bin)
 
 clean: sdk-clean
 	rm -rf $(PC_OBJ_DIR) undertale_pc

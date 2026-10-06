@@ -31,7 +31,7 @@ static int g_nextH = 0;
 
 /* Pad button -> GML virtual key. Undertale reads Z/X/C with Enter/Shift/Ctrl
  * as aliases; the d-pad maps to the arrow keys. Select is not Esc (holding
- * Esc quits Undertale); it toggles the frame-time overlay instead. */
+ * Esc quits Undertale); Select, L and R toggle the frame-time overlay. */
 static const struct {
     uint32_t button;
     int32_t key;
@@ -211,7 +211,7 @@ static void runInputScript(void) {
 /* Returns true when the app should quit; a Pocket core never does. */
 bool platformHandleEvents(void) {
     of_input_poll();
-    if (of_btn_pressed(OF_BTN_SELECT)) utPerfToggle();
+    if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1 | OF_BTN_R1)) utPerfToggle();
 #ifdef OF_PC
     runInputScript();
 #endif

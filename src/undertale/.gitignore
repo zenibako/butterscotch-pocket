@@ -3,4 +3,5 @@
 # Desktop test binary and user-supplied game data.
 /undertale_pc
 /data.win
+/textures.bin
 *.ppm
