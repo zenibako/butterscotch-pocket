@@ -9,6 +9,7 @@
 #include "of.h"
 
 #include "loop.h"
+#include "platform/of_diag.h"
 #include "stb_ds.h"
 
 #include <stdio.h>
@@ -21,6 +22,8 @@ int main(void) {
 #ifndef OF_PC
     of_file_slot_register(UT_SLOT_DATA_WIN, UT_DATA_WIN_NAME);
 #endif
+    utDiagInstall();
+    utDiagCheckFile(UT_DATA_WIN_NAME);
 
     CommandLineArgs args = {0};
     args.exitAtFrame = -1;

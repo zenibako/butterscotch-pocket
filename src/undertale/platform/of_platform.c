@@ -52,9 +52,11 @@ bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless) 
     (void) title;
     (void) headless;
 
+    /* Stay on the text terminal until the first frame is ready, so load-time
+     * log lines (and any early failure) are visible on the device. */
     of_video_init();
     of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
-    of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+    of_video_set_display_mode(OF_DISPLAY_TERMINAL);
     return true;
 }
 
@@ -139,6 +141,12 @@ void platformSwapBuffers(void) {
 #ifdef OF_PC
     dumpFrameIfRequested();
 #endif
+
+    static bool showingFramebuffer = false;
+    if (!showingFramebuffer) {
+        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+        showingFramebuffer = true;
+    }
 
     uint16_t *dst = (uint16_t *) of_video_surface();
     int w = g_nextW < UT_SCREEN_W ? g_nextW : UT_SCREEN_W;
