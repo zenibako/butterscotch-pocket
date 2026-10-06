@@ -44,6 +44,42 @@ void utBenchStart(void) {
     utPlatformSetUncapped(true);
 }
 
+/* SD read throughput. Loading is dominated by file reads on the device, and
+ * how fast they go depends on request size and on whether the destination is
+ * 512-byte aligned (unaligned reads go through a bounce buffer in the OS). */
+#define UT_IO_TOTAL (2u * 1024u * 1024u)
+#define UT_IO_MAX_CHUNK (1024u * 1024u)
+
+static void ioTest(const char *label, uint32_t chunk, uint32_t misalign) {
+    static uint8_t buffer[UT_IO_MAX_CHUNK + 512] __attribute__((aligned(512)));
+
+    FILE *file = fopen("data.win", "rb");
+    if (file == NULL) return;
+    setvbuf(file, NULL, _IONBF, 0);
+    fseek(file, 1024 * 1024, SEEK_SET);
+
+    uint64_t start = nowNanos();
+    uint32_t done = 0;
+    while (done < UT_IO_TOTAL) {
+        size_t got = fread(buffer + misalign, 1, chunk, file);
+        if (got == 0) break;
+        done += (uint32_t) got;
+    }
+    uint64_t micros = (nowNanos() - start) / 1000u;
+    fclose(file);
+
+    unsigned kbPerSecond = micros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / micros) : 0;
+    printf("%-21s %6u KB/s\n", label, kbPerSecond);
+}
+
+static void ioReport(void) {
+    printf("SD read speed (2 MB of data.win):\n");
+    ioTest("4 KB reads", 4096, 0);
+    ioTest("64 KB reads", 65536, 0);
+    ioTest("1 MB reads", UT_IO_MAX_CHUNK, 0);
+    ioTest("64 KB, unaligned", 65536, 4);
+}
+
 void utBenchAddFlipTime(uint64_t nanos) {
     if (g_running) g_flipNanos += nanos;
 }
@@ -84,5 +120,6 @@ void utBenchFrame(void) {
     }
     printf("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
     printf("work = total minus display flip\n");
+    ioReport();
     utDiagHalt("benchmark finished");
 }
