@@ -10,10 +10,12 @@
 
 #include "loop.h"
 #include "platform/of_diag.h"
+#include "platform/ut_bench.h"
 #include "stb_ds.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Data slots (see the instance JSON under dist/). Slot 4 holds the game's
  * data.win, slot 5 the optional texture pack built from it, slot 6 the
@@ -25,7 +27,7 @@
 #define UT_SLOT_MUSIC 6
 #define UT_MUSIC_NAME "music.bin"
 
-int main(void) {
+int main(int argc, char **argv) {
 #ifndef OF_PC
     of_file_slot_register(UT_SLOT_DATA_WIN, UT_DATA_WIN_NAME);
     of_file_slot_register(UT_SLOT_TEXTURES, UT_TEXTURES_NAME);
@@ -45,7 +47,17 @@ int main(void) {
     args.lazyAudio = true;
     args.renderer = SOFTWARE;
     args.dataWinPath = UT_DATA_WIN_NAME;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--bench") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            utBenchStart();
+        }
+    }
+
 #ifdef OF_PC
+    if (getenv("UT_SCRIPT") != NULL) utPlatformSetInputScript(getenv("UT_SCRIPT"));
+    if (getenv("UT_UNCAPPED") != NULL) utPlatformSetUncapped(true);
     /* UT_SEED=<n> fixes the game's RNG so desktop runs are repeatable. */
     const char *seed = getenv("UT_SEED");
     if (seed != NULL) {

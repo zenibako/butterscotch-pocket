@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static void haltWithTerminal(const char *why) {
+void utDiagHalt(const char *why) {
     of_video_set_display_mode(OF_DISPLAY_TERMINAL);
     printf("\n[undertale] %s -- halted.\n", why);
     for (;;) {
@@ -27,13 +27,13 @@ static void haltWithTerminal(const char *why) {
 }
 
 static void onExit(void) {
-    haltWithTerminal("app exited");
+    utDiagHalt("app exited");
 }
 
 /* Replaces libc's abort(): Butterscotch's safeMalloc and friends call it on
  * allocation failure, right after logging what went wrong. */
 void abort(void) {
-    haltWithTerminal("abort() called (see message above)");
+    utDiagHalt("abort() called (see message above)");
 }
 
 void utDiagInstall(void) {

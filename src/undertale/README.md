@@ -88,6 +88,18 @@ Sounds embedded in `data.win` (short effects) are not played yet.
 Desktop: `UT_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
 s16le) for checking without speakers.
 
+## Benchmark and OS comparison
+
+`--bench` in the app arguments (the `ARGS=` line of the OS config) runs a
+fixed, scripted play-through of the opening with a fixed seed and no frame
+pacing, then prints milliseconds per frame for four sections and halts.
+
+`make compare` adds a Benchmark instance to this core and two more cores
+built against the v0.9 SDK and runtime (`SDK09`, by default the Diablo
+port's checkout next to this repo): `Undertale09os25` and
+`Undertale09os20`. All three share the game data. `make compare-copy`
+puts the lot on the SD card.
+
 ## On-device diagnostics
 
 The boot log stays on screen while loading, and every Butterscotch log line

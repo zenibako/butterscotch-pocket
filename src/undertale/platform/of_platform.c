@@ -15,6 +15,7 @@
 #include "runner_keyboard.h"
 
 #include "of_perf.h"
+#include "ut_bench.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,8 @@ static uint16_t *g_nextFb = NULL;
 static int g_nextW = 0;
 static int g_nextH = 0;
 static bool g_showingFramebuffer = false;
+static const char *g_inputScript = NULL;
+static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
 static int g_modeW = 0; /* 0 until the first frame sets a mode */
 static int g_modeH = 0;
@@ -54,6 +57,14 @@ static const struct {
     { OF_BTN_START,  VK_ENTER },
 };
 #define UT_KEYMAP_COUNT (sizeof(g_keymap) / sizeof(g_keymap[0]))
+
+void utPlatformSetInputScript(const char *script) {
+    g_inputScript = script;
+}
+
+void utPlatformSetUncapped(bool uncapped) {
+    g_uncapped = uncapped;
+}
 
 bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless) {
     (void) reqW;
@@ -206,6 +217,7 @@ void platformSwapBuffers(void) {
     }
 #endif
     utPerfFrame(g_nextFb, g_nextW, g_nextH);
+    utBenchFrame();
 #ifdef OF_PC
     dumpFrameIfRequested();
 #endif
@@ -226,7 +238,9 @@ void platformSwapBuffers(void) {
         for (int y = 0; y < g_nextH; y++)
             memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
     }
+    uint64_t flipStart = nowNanos();
     of_video_flip();
+    utBenchAddFlipTime(nowNanos() - flipStart);
 }
 
 void *platformGetProcAddress(const char *name) {
@@ -234,20 +248,15 @@ void *platformGetProcAddress(const char *name) {
     return NULL;
 }
 
-#ifdef OF_PC
-/* Desktop-only scripted input for repeatable test runs:
- *   UT_SCRIPT="300:Z,340:D,341:Z,400:R*90"
+/* Scripted input for repeatable runs (the benchmark, and UT_SCRIPT on
+ * desktop):
+ *   "300:Z,340:D,341:Z,400:R*90"
  * presses a key on the given frame and releases it two frames later, or
  * after N frames with "*N".
  * Keys: U D L R (arrows), Z X C, E (Enter). */
 static void runInputScript(void) {
     static int frame = 0;
-    static const char *script = NULL;
-    static bool loaded = false;
-    if (!loaded) {
-        script = getenv("UT_SCRIPT");
-        loaded = true;
-    }
+    const char *script = g_inputScript;
     frame++;
     if (script == NULL || g_runner == NULL) return;
 
@@ -272,16 +281,13 @@ static void runInputScript(void) {
         p = comma + 1;
     }
 }
-#endif
 
 /* Returns true when the app should quit; a Pocket core never does. */
 bool platformHandleEvents(void) {
     of_input_poll();
     if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1)) utPerfToggle();
     if (of_btn_pressed(OF_BTN_R1)) utPerfToggleLog();
-#ifdef OF_PC
     runInputScript();
-#endif
     if (g_runner == NULL) return false;
 
     for (size_t i = 0; i < UT_KEYMAP_COUNT; i++) {
@@ -294,12 +300,7 @@ bool platformHandleEvents(void) {
 }
 
 void platformSleepUntil(uint64_t time) {
-#ifdef OF_PC
-    /* UT_UNCAPPED=1 runs flat out, so `time` reports pure work per frame. */
-    static int uncapped = -1;
-    if (uncapped < 0) uncapped = getenv("UT_UNCAPPED") != NULL;
-    if (uncapped) return;
-#endif
+    if (g_uncapped) return;
     uint64_t start = nowNanos();
     int64_t remaining = (int64_t) time - (int64_t) start;
     if (remaining > 2000000)

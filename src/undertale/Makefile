@@ -44,7 +44,7 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
                  $(BS_VENDOR)/base64/base64.c
 
 SRCS = main.c platform/of_platform.c platform/of_diag.c platform/of_log.c \
-       platform/of_perf.c platform/of_audio_system.c \
+       platform/of_perf.c platform/of_audio_system.c platform/ut_bench.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS)
 SRCS_CXX =
@@ -141,6 +141,22 @@ debug: all
 copy: all
 	@MISTER_IP="$(MISTER_IP)" $(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
 
+# Side-by-side comparison of OS versions and CPU variants on one SD card.
+# SDK09 is a checkout carrying the v0.9 SDK and Pocket runtime (the Diablo
+# port's tree works). Adds Benchmark instances and two v0.9 cores next to
+# this one; see tools/mkcompare.sh.
+SDK09   ?= $(ROOT)/../Diablo
+OBJ09    = $(ROOT)/.obj/$(APP)-v09
+
+compare: all
+	$(MAKE) SDK_DIR=$(SDK09)/src/sdk OBJ_DIR=$(OBJ09) BUILD_DIR=$(OBJ09) $(OBJ09)/app.elf
+	@tools/mkcompare.sh "$(OUT)" "$(SDK09)/runtime/pocket" "$(OBJ09)/app.elf"
+
+# Like `copy`, but without re-running the assembly step, which would remove
+# the comparison cores again.
+compare-copy: compare
+	@$(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
+
 package: all
 	@$(ROOT)/scripts/package.sh $(APP)
 
@@ -172,4 +188,4 @@ clean: sdk-clean
 	rm -rf $(PC_OBJ_DIR) undertale_pc
 	rm -rf $(ROOT)/build/pocket/$(APP) $(ROOT)/build/mister/$(APP)
 
-.PHONY: all release debug copy package test clean
+.PHONY: all release debug copy compare compare-copy package test clean
