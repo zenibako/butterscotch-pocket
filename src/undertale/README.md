@@ -53,11 +53,13 @@ Start = Enter, Select = Esc.
 
 ## Status
 
-- Desktop build plays Undertale's intro (room_introstory) correctly through
-  at least frame 1500, with about 39 MB of live heap on a 64-bit host.
-- RISC-V build links and packages; it has not been run on hardware yet.
+- Runs on an Analogue Pocket (firmware 2.7, os25 bitstream): boots, plays
+  the intro, name entry works, and the first room and menu are playable.
+- Use the os25 bitstream. The SDK's runtime `os.bin` paired with os20
+  reboot-looped before the OS banner appeared.
 - No audio yet (Butterscotch's no-op audio backend).
 - Saves are not mapped to save slots yet.
 - The texture cache is a count-limited ring. Undertale has four 2048x2048
   pages (8 MB each at 16 bpp, 16 MB more while decoding), so later rooms
-  need a byte budget or pre-converted textures.
+  need a byte budget or pre-converted textures. The app has about 51 MB of
+  heap on the Pocket.
