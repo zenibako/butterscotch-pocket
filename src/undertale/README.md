@@ -103,6 +103,16 @@ archive in the first save slot (`undertale_0.sav`). The Pocket writes save
 slots back to the SD card when the core is closed from its menu. The
 benchmark neither reads nor writes saves.
 
+To carry a save over from the desktop game, `make import-save
+SAVE_DIR=<folder>` packs a desktop save folder into `undertale_0.sav`
+(`SAVE_DIR` defaults to the macOS location, `~/Library/Application
+Support/com.tobyfox.undertale`; on Windows it is `%LOCALAPPDATA%\UNDERTALE`,
+on Linux `~/.config/UNDERTALE`). Copy that file to
+`Saves/undertale/common/` on the SD card; it replaces any progress made on
+the Pocket. `make export-save EXPORT_DIR=<folder>` goes the other way, and
+`tools/mksave list <file>` shows what a slot file holds. The slot file is
+deliberately not part of the SD tree, so copying a build never touches saves.
+
 ## Button prompts
 
 The game's on-screen key prompts ("[Z or ENTER]", "[C]", the instruction

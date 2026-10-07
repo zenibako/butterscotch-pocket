@@ -17,31 +17,12 @@
 
 #include "file_system.h"
 #include "log.h"
+#include "ut_save_format.h"
 #include "utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define UT_SAVE_SLOT_FILE "undertale_0.sav"
-#define UT_SAVE_MAGIC 0x31565455u /* "UTV1" */
-#define UT_SAVE_MAX_FILES 16
-#define UT_SAVE_NAME_LEN 40
-/* Stay well inside the 256 KB slot. */
-#define UT_SAVE_MAX_BYTES (192 * 1024)
-
-typedef struct {
-    uint32_t magic;
-    uint32_t fileCount;
-    uint32_t totalBytes; /* size of the whole archive, header included */
-    uint32_t reserved;
-} UtSaveHeader;
-
-typedef struct {
-    char name[UT_SAVE_NAME_LEN];
-    uint32_t size;
-    uint32_t offset; /* from the start of the archive */
-} UtSaveEntry;
 
 typedef struct {
     char name[UT_SAVE_NAME_LEN];

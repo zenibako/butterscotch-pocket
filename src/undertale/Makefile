@@ -123,6 +123,27 @@ $(MKMUSIC): tools/mkmusic.c platform/ut_music_pack.h
 music.bin: $(MKMUSIC) data.win $(wildcard music/*.ogg)
 	$(MKMUSIC) data.win music $@ $(MUSIC_RATE)
 
+# Host tool: packs a desktop save folder into the save slot file and back.
+#   make import-save SAVE_DIR=<desktop save folder>   -> undertale_0.sav
+#   make export-save EXPORT_DIR=<folder to write>     <- undertale_0.sav
+# The slot file belongs at Saves/undertale/common/ on the SD card. It is not
+# part of the SD tree, so copying a build never replaces progress on the card.
+MKSAVE = $(ROOT)/.obj/$(APP)-tools/mksave
+SAVE_DIR ?= $(HOME)/Library/Application Support/com.tobyfox.undertale
+SAVE_FILE ?= undertale_0.sav
+
+$(MKSAVE): tools/mksave.c platform/ut_save_format.h
+	@mkdir -p $(dir $@)
+	$(PC_CC) -O2 -Wall -Wextra tools/mksave.c -o $@
+
+.PHONY: import-save export-save
+import-save: $(MKSAVE)
+	$(MKSAVE) pack "$(SAVE_DIR)" $(SAVE_FILE)
+
+export-save: $(MKSAVE)
+	@[ -n "$(EXPORT_DIR)" ] || { echo "export-save: give EXPORT_DIR=<folder to write the save files into>"; exit 1; }
+	$(MKSAVE) unpack $(SAVE_FILE) "$(EXPORT_DIR)"
+
 # Build ELF, then assemble SD card image in build/<app>/
 all: $(OBJ_DIR)/app.elf $(GAME_PACKS) release
 	@$(SIZE) $<

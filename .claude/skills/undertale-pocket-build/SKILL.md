@@ -104,6 +104,11 @@ wake it; if no disk appears at all, the card needs reseating.
 | `music.bin` | 6 | `tools/mkmusic` from data.win + `music/*.ogg` |
 | `undertale_0.sav` | 10 | written by the game (save archive) |
 
+`undertale_0.sav` lives under `Saves/undertale/common/` on the card and is
+never part of the build tree. `make import-save SAVE_DIR=<desktop save
+folder>` builds one from a desktop save (`tools/mksave`); copying it to the
+card replaces the Pocket's own progress, so only do that when asked.
+
 Only slots 4–6 are available for data, and file names are limited to 23
 characters. The OS config must not be called `undertale.ini`: the game
 reads and writes a file of that name itself.
