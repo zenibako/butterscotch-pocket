@@ -38,6 +38,8 @@ write_instance() { # <dest> <os.bin name> <ini name> <elf name>
 # Benchmark instance for the base (v0.7) core.
 write_ini undertale_bench.ini undertale.elf --bench os25
 write_instance "$OUT/Assets/undertale/chanderson.Undertale/Benchmark.json" os.bin undertale_bench.ini undertale.elf
+write_ini undertale_b320.ini undertale.elf --bench-lowres os25
+write_instance "$OUT/Assets/undertale/chanderson.Undertale/Benchmark 320.json" os.bin undertale_b320.ini undertale.elf
 
 cp "$RT09/os.bin" "$COMMON/os09.bin"
 cp "$ELF09" "$COMMON/undertale09.elf"
@@ -58,6 +60,10 @@ for variant in os25 os20; do
     write_ini "ut09_${variant}_bench.ini" undertale09.elf --bench "$variant"
     write_instance "$OUT/Assets/undertale/chanderson.$name/Undertale.json" os09.bin "ut09_$variant.ini" undertale09.elf
     write_instance "$OUT/Assets/undertale/chanderson.$name/Benchmark.json" os09.bin "ut09_${variant}_bench.ini" undertale09.elf
+    # The same benchmark held at 320x240 throughout, in case a bitstream's
+    # 640x480 mode is the thing that fails.
+    write_ini "ut09_${variant}_b320.ini" undertale09.elf --bench-lowres "$variant"
+    write_instance "$OUT/Assets/undertale/chanderson.$name/Benchmark 320.json" os09.bin "ut09_${variant}_b320.ini" undertale09.elf
 done
 
 echo "Comparison cores added: Undertale (v0.7), Undertale09os25, Undertale09os20"

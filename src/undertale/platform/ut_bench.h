@@ -20,6 +20,7 @@ void utBenchAddFlipTime(uint64_t nanos);
 
 /* Platform hooks the benchmark drives. */
 bool utPlatformShowLogAndHalt(void);
+void utPlatformSetHiresAllowed(bool allowed);
 void utPlatformSetInputScript(const char *script);
 void utPlatformSetUncapped(bool uncapped);
 

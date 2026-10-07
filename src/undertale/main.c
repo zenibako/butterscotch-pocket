@@ -48,9 +48,13 @@ int main(int argc, char **argv) {
     args.renderer = SOFTWARE;
     args.dataWinPath = UT_DATA_WIN_NAME;
     for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "--bench") == 0) {
+        /* --bench-lowres keeps every room at 320x240, for bitstreams whose
+         * 640x480 mode misbehaves. */
+        bool lowres = strcmp(argv[i], "--bench-lowres") == 0;
+        if (lowres || strcmp(argv[i], "--bench") == 0) {
             args.seed = 7;
             args.hasSeed = true;
+            if (lowres) utPlatformSetHiresAllowed(false);
             utBenchStart();
         }
     }

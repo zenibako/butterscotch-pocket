@@ -62,6 +62,10 @@ void utPlatformSetInputScript(const char *script) {
     g_inputScript = script;
 }
 
+void utPlatformSetHiresAllowed(bool allowed) {
+    g_hiresAvailable = allowed;
+}
+
 void utPlatformSetUncapped(bool uncapped) {
     g_uncapped = uncapped;
 }

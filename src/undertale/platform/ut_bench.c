@@ -24,7 +24,7 @@ static const UtBenchSection g_sections[] = {
     { "intro, menu, naming", 650 },
     { "first room 320x240", 1220 },
     { "Flowey talk 320x240", 2060 },
-    { "Flowey battle 640x480", 2600 },
+    { "Flowey battle (640x480)", 2600 },
 };
 #define UT_BENCH_SECTIONS ((int) (sizeof(g_sections) / sizeof(g_sections[0])))
 
