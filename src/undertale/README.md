@@ -13,19 +13,17 @@ You must supply your own `data.win` from Undertale v1.08.
 |------|------|
 | `main.c` | Entry point: registers `data.win` on data slot 4 and starts the runner |
 | `platform/of_platform.c` | Butterscotch platform hooks on the `of_*` API (video, pad, timing) |
-| `butterscotch/` | Butterscotch checkout, `sw-renderer` PR branch plus two small patches (not tracked here) |
+| `butterscotch/` | Butterscotch checkout, `openfpga` branch of the fork below (not tracked here) |
 | `../../dist/undertale/` | Pocket core definition (core, data slots, instance JSON) |
 
 Getting `butterscotch/`:
 
 ```bash
-git clone https://github.com/ButterscotchRunner/Butterscotch.git butterscotch
-cd butterscotch && git fetch origin pull/429/head:sw-renderer && git checkout sw-renderer
+git clone -b openfpga https://github.com/zenibako/Butterscotch.git butterscotch
 ```
 
-Then apply the two local patches on the `openfpga` branch of that checkout
-(build-time overrides for `PIXEL_SIZE` / `TEXTURE_LRU_LENGTH`, and a typo fix
-in the 16-bit colour blend).
+That branch is upstream's `sw-renderer` (draft PR #429) plus this port's
+renderer, loader and platform-hook changes.
 
 ## Build
 
