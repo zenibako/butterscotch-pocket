@@ -16,6 +16,7 @@
 
 #include "of_perf.h"
 #include "ut_bench.h"
+#include "ut_strings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,6 +99,7 @@ void platformExit(void) {
 
 void platformInitFunctions(Runner *runner) {
     g_runner = runner;
+    utPatchStrings(runner->dataWin);
     runner->setCursor = NULL;
     runner->currentCursor = GML_CR_DEFAULT;
 }

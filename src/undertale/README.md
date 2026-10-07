@@ -106,6 +106,12 @@ port's checkout next to this repo): `Undertale09os25` and
 `Undertale09os20`. All three share the game data. `make compare-copy`
 puts the lot on the SD card.
 
+## Button prompts
+
+The game's on-screen key prompts ("[Z or ENTER]", "[C]", the instruction
+screen) are renamed to the Pocket's buttons in memory after loading; see
+`platform/ut_strings.c`. `data.win` itself is not modified.
+
 ## On-device diagnostics
 
 The boot log stays on screen while loading, and every Butterscotch log line
