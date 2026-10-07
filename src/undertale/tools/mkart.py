@@ -76,10 +76,12 @@ def draw_word(image, word, top, scale):
 
 def banner():
     image = Image.new("L", (521, 165), 0)
-    big, small, gap = 6, 4, 18
-    top = (165 - (7 * big + gap + 7 * small)) // 2
-    draw_word(image, "BUTTERSCOTCH", top, big)
-    draw_word(image, "POCKET", top + 7 * big + gap, small)
+    heart, big, small, gap = 4, 6, 4, 13
+    heart_w, heart_h = len(HEART[0]) * heart, len(HEART) * heart
+    top = (165 - (heart_h + gap + 7 * big + gap + 7 * small)) // 2
+    stamp(image, HEART, (521 - heart_w) // 2, top, heart)
+    draw_word(image, "BUTTERSCOTCH", top + heart_h + gap, big)
+    draw_word(image, "POCKET", top + heart_h + gap + 7 * big + gap, small)
     return image
 
 
