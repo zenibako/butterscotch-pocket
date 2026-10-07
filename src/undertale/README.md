@@ -15,6 +15,7 @@ You must supply your own `data.win` from Undertale v1.08.
 | `platform/of_platform.c` | Butterscotch platform hooks on the `of_*` API (video, pad, timing) |
 | `butterscotch/` | Butterscotch checkout, `openfpga` branch of the fork below (not tracked here) |
 | `../../dist/undertale/` | Pocket core definition (core, data slots, instance JSON) |
+| `tools/mkart.py` | Draws the menu banner and core icon into `dist/` (run by hand after changing the art; needs Pillow) |
 
 Getting `butterscotch/`:
 

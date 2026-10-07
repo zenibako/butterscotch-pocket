@@ -4,11 +4,11 @@
         "metadata": {
             "platform_ids": ["undertale"],
             "shortname": "Undertale",
-            "description": "Undertale on openfpgaOS",
+            "description": "Undertale (bring your own game data), running on Butterscotch and openfpgaOS",
             "author": "chanderson",
-            "url": "",
-            "version": "1.0.0",
-            "date_release": "2026-10-06"
+            "url": "https://github.com/zenibako/undertale-pocket",
+            "version": "0.1.0",
+            "date_release": "2026-10-07"
         },
         "framework": {
             "target_product": "Analogue Pocket",
