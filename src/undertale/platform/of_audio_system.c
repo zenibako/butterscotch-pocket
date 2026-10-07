@@ -225,7 +225,9 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
          * The idle hook may mix from this voice while fread blocks; it only
          * touches bytes below bufferLen, which is not advanced until after. */
         static uint8_t scratch[UT_READAHEAD] __attribute__((aligned(512)));
+        uint64_t readStart = nowNanos();
         size_t got = fread(scratch, 1, want, ut->file);
+        utPerfAddLoad(UT_LOAD_MUSIC, nowNanos() - readStart);
         if (got == 0) break;
         memcpy(voice->data + voice->bufferLen, scratch, got);
         voice->bufferLen += (uint32_t) got;
@@ -303,6 +305,7 @@ static void mixAndWrite(UtAudioSystem *ut, int pairs) {
     static int32_t mix[UT_MIX_CHUNK_PAIRS];
     static int16_t out[UT_MIX_CHUNK_PAIRS * 2];
     int32_t master = (int32_t) (ut->masterGain * (float) UT_GAIN_ONE);
+    uint64_t mixStart = nowNanos();
 
     while (pairs > 0) {
         int chunk = pairs < UT_MIX_CHUNK_PAIRS ? pairs : UT_MIX_CHUNK_PAIRS;
@@ -331,6 +334,7 @@ static void mixAndWrite(UtAudioSystem *ut, int pairs) {
         of_audio_write(out, chunk);
         pairs -= chunk;
     }
+    utPerfAddLoad(UT_LOAD_MIX, nowNanos() - mixStart);
 }
 
 /* Keeps the output queue topped up to the target. Does no file I/O, so it is
@@ -455,8 +459,15 @@ static void utDestroy(AudioSystem *audio) {
     free(ut);
 }
 
+static void updateAudio(UtAudioSystem *ut, float deltaTime);
+
 static void utUpdate(AudioSystem *audio, float deltaTime) {
-    UtAudioSystem *ut = (UtAudioSystem *) audio;
+    utPerfPhase(UT_PHASE_AUDIO);
+    updateAudio((UtAudioSystem *) audio, deltaTime);
+    utPerfPhase(UT_PHASE_DRAW);
+}
+
+static void updateAudio(UtAudioSystem *ut, float deltaTime) {
     if (ut->file == NULL) return;
 
     for (int v = 0; v < UT_MAX_VOICES; v++) {

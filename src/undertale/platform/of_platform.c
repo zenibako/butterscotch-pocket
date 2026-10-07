@@ -272,6 +272,7 @@ void platformSwapBuffers(void) {
     uint64_t flipStart = nowNanos();
     of_video_flip();
     utBenchAddFlipTime(nowNanos() - flipStart);
+    utPerfPhase(UT_PHASE_OTHER);
 }
 
 /* Shows the recent log full-screen and never returns. Used for the benchmark
@@ -342,6 +343,7 @@ static void runInputScript(void) {
 
 /* Returns true when the app should quit; a Pocket core never does. */
 bool platformHandleEvents(void) {
+    utPerfPhase(UT_PHASE_STEP);
     of_input_poll();
     if (of_btn_pressed(OF_BTN_SELECT)) utPerfToggle();
     if (of_btn_pressed(OF_BTN_L1)) {

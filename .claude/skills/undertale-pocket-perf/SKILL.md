@@ -70,12 +70,21 @@ when a dialogue box or new room first appears.
 
 ## Instruments
 
-**Slow-frame log line.** Any frame over 150 ms of work logs
-`Perf: slow frame N ms: room A, textures B (count), sounds C (count)`.
-The remainder (N minus the three) is game code and drawing. For a hitch at
-a room change, ask the user to press R straight afterwards and screenshot
-the log; that attributes it without a benchmark run. Texture lines also
-carry their own `took N ms`.
+**Slow-frame log lines.** Any frame over 150 ms of work logs two lines that
+fit the overlay's 53 columns:
+
+```
+slow 555: step 300 draw 200 out 20 snd 10
+  load: room 0 tex 0 sfx 0 mix 12 music 0
+```
+
+Phases first (game code, drawing, presenting, audio update), then jobs
+inside them (room, texture and sound-effect loads, audio mixing, streamed
+music reads). For a hitch, ask the user to press R straight afterwards and
+screenshot the log. Two traps when reading these: a Pocket screenshot
+freezes the core for 2-4 s and appears as one huge frame with nothing
+attributed, and the log overlay only shows the first 53 characters of a
+line, so anything longer is invisible on the device.
 
 **Benchmark** (`--bench` in the OS config's `ARGS=`; `make compare` adds a
 "Benchmark" entry to each core). It plays a fixed input script with a

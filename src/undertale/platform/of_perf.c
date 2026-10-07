@@ -25,7 +25,9 @@ static unsigned g_worstWork = 0, g_worstPeriod = 0, g_totalWork = 0;
 static unsigned g_shownWork = 0, g_shownPeriod = 0, g_shownAverage = 0;
 static int g_count = 0;
 static uint64_t g_loadNanos[UT_LOAD_KINDS];
-static unsigned g_loadCount[UT_LOAD_KINDS];
+static uint64_t g_phaseNanos[UT_PHASES];
+static UtPhase g_phase = UT_PHASE_OTHER;
+static uint64_t g_phaseStart = 0;
 
 /* 3x5 digit glyphs, one row per 3 bits, top row first. */
 static const uint16_t g_digits[10] = {
@@ -35,20 +37,27 @@ static const uint16_t g_digits[10] = {
 
 void utPerfAddLoad(UtLoadKind kind, uint64_t nanos) {
     g_loadNanos[kind] += nanos;
-    g_loadCount[kind]++;
+}
+
+void utPerfPhase(UtPhase phase) {
+    uint64_t now = nowNanos();
+    if (g_phaseStart != 0) g_phaseNanos[g_phase] += now - g_phaseStart;
+    g_phase = phase;
+    g_phaseStart = now;
 }
 
 static void reportSlowFrame(unsigned workMs) {
-    unsigned ms[UT_LOAD_KINDS];
-    for (int i = 0; i < UT_LOAD_KINDS; i++) ms[i] = (unsigned) (g_loadNanos[i] / 1000000u);
     if (workMs >= UT_PERF_SLOW_FRAME_MS) {
-        logInfo("Perf: slow frame %u ms: room %u, textures %u (%u), sounds %u (%u)\n", workMs, ms[UT_LOAD_ROOM],
-                ms[UT_LOAD_TEXTURE], g_loadCount[UT_LOAD_TEXTURE], ms[UT_LOAD_SOUND], g_loadCount[UT_LOAD_SOUND]);
+        unsigned load[UT_LOAD_KINDS], phase[UT_PHASES];
+        for (int i = 0; i < UT_LOAD_KINDS; i++) load[i] = (unsigned) (g_loadNanos[i] / 1000000u);
+        for (int i = 0; i < UT_PHASES; i++) phase[i] = (unsigned) (g_phaseNanos[i] / 1000000u);
+        logInfo("slow %u: step %u draw %u out %u snd %u\n", workMs, phase[UT_PHASE_STEP], phase[UT_PHASE_DRAW],
+                phase[UT_PHASE_OUT], phase[UT_PHASE_AUDIO]);
+        logInfo("  load: room %u tex %u sfx %u mix %u music %u\n", load[UT_LOAD_ROOM], load[UT_LOAD_TEXTURE],
+                load[UT_LOAD_SOUND], load[UT_LOAD_MIX], load[UT_LOAD_MUSIC]);
     }
-    for (int i = 0; i < UT_LOAD_KINDS; i++) {
-        g_loadNanos[i] = 0;
-        g_loadCount[i] = 0;
-    }
+    for (int i = 0; i < UT_LOAD_KINDS; i++) g_loadNanos[i] = 0;
+    for (int i = 0; i < UT_PHASES; i++) g_phaseNanos[i] = 0;
 }
 
 void utPerfToggle(void) {
@@ -145,6 +154,9 @@ static int drawNumber(uint16_t *fb, int width, int x, int y, unsigned value) {
 }
 
 void utPerfFrame(uint16_t *fb, int width, int height) {
+    /* The frame ends here: whatever follows (overlays, copy, flip) is "out"
+     * and is reported with the next frame. */
+    utPerfPhase(UT_PHASE_OUT);
     uint64_t now = nowNanos();
     if (g_lastFrame != 0) {
         uint64_t period = now - g_lastFrame;
