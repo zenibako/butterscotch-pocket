@@ -198,10 +198,14 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
         if (want > total - voice->fileBytePos) want = total - voice->fileBytePos;
 
         if (fseek(ut->file, (long) (track->offset + voice->fileBytePos), SEEK_SET) != 0) break;
-        /* The idle hook may mix from this voice while fread blocks; it only
+        /* Read into static memory and copy: on openfpgaOS a read straight
+         * into the heap (where the voices live) is about ten times slower.
+         * The idle hook may mix from this voice while fread blocks; it only
          * touches bytes below bufferLen, which is not advanced until after. */
-        size_t got = fread(voice->buffer + voice->bufferLen, 1, want, ut->file);
+        static uint8_t scratch[UT_READAHEAD] __attribute__((aligned(512)));
+        size_t got = fread(scratch, 1, want, ut->file);
         if (got == 0) break;
+        memcpy(voice->buffer + voice->bufferLen, scratch, got);
         voice->bufferLen += (uint32_t) got;
         voice->fileBytePos += (uint32_t) got;
     }

@@ -75,12 +75,17 @@ static void ioTest(const char *label, uint32_t chunk, uint32_t misalign, bool bu
     utLogPrint("%-21s %6u KB/s\n", label, kbPerSecond);
 }
 
-/* The loader reads into freshly allocated heap blocks, not a static buffer. */
+/* The loader reads into freshly allocated heap blocks, not a static buffer.
+ * Kept small so it still fits once the texture cache has filled the heap. */
+#define UT_HEAP_TEST_BYTES (512u * 1024u)
 static void heapTest(void) {
     uint64_t start = nowNanos();
-    uint8_t *block = malloc(UT_IO_TOTAL);
+    uint8_t *block = malloc(UT_HEAP_TEST_BYTES);
     unsigned allocMicros = (unsigned) ((nowNanos() - start) / 1000u);
-    if (block == NULL) return;
+    if (block == NULL) {
+        utLogPrint("heap test: no %u KB block free\n", UT_HEAP_TEST_BYTES / 1024u);
+        return;
+    }
 
     FILE *file = fopen("data.win", "rb");
     uint32_t done = 0;
@@ -88,7 +93,7 @@ static void heapTest(void) {
     if (file != NULL) {
         setvbuf(file, NULL, _IONBF, 0);
         fseek(file, 1024 * 1024, SEEK_SET);
-        while (done < UT_IO_TOTAL) {
+        while (done < UT_HEAP_TEST_BYTES) {
             size_t got = fread(block + done, 1, 65536, file);
             if (got == 0) break;
             done += (uint32_t) got;
@@ -100,17 +105,17 @@ static void heapTest(void) {
     /* Touch every byte, as parsing would. */
     start = nowNanos();
     uint32_t sum = 0;
-    for (uint32_t i = 0; i < UT_IO_TOTAL; i++) sum += block[i];
+    for (uint32_t i = 0; i < UT_HEAP_TEST_BYTES; i++) sum += block[i];
     unsigned scanMicros = (unsigned) ((nowNanos() - start) / 1000u);
 
     start = nowNanos();
     free(block);
     unsigned freeMicros = (unsigned) ((nowNanos() - start) / 1000u);
 
-    utLogPrint("64 KB into malloc     %6u KB/s\n",
+    utLogPrint("64 KB reads into heap %6u KB/s\n",
                readMicros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / readMicros) : 0);
-    utLogPrint("2 MB: malloc %u ms, scan %u ms, free %u ms (%u)\n", allocMicros / 1000, scanMicros / 1000,
-               freeMicros / 1000, (unsigned) (sum & 0xFF));
+    utLogPrint("512 KB: malloc %u us, scan %u us, free %u us (%u)\n", allocMicros, scanMicros, freeMicros,
+               (unsigned) (sum & 0xFF));
 }
 
 static void ioReport(void) {
