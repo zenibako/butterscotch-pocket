@@ -163,6 +163,16 @@ void platformGetMousePos(double *xPos, double *yPos) {
     if (yPos) *yPos = 0.0;
 }
 
+/* The renderer draws each frame straight into the display's back buffer, so
+ * presenting is just a flip. Returns NULL (renderer keeps its own buffer and
+ * the frame is copied) if the mode is unavailable or its rows are padded. */
+uint16_t *platformAcquireFramebuffer(int width, int height) {
+    matchVideoMode(width, height);
+    if (width != g_modeW || height != g_modeH) return NULL;
+    if (g_modeStride != width * (int) sizeof(uint16_t)) return NULL;
+    return (uint16_t *) (void *) of_video_surface();
+}
+
 void platformSetNextFramebuffer(uint16_t *framebuffer, int width, int height, int bpp) {
     if (bpp != 16) {
         g_nextFb = NULL;
@@ -235,7 +245,9 @@ void platformSwapBuffers(void) {
 
     uint8_t *dst = of_video_surface();
     size_t rowBytes = (size_t) g_nextW * sizeof(uint16_t);
-    if ((size_t) g_modeStride == rowBytes) {
+    if ((uint8_t *) g_nextFb == dst) {
+        /* Drawn in place (platformAcquireFramebuffer): nothing to copy. */
+    } else if ((size_t) g_modeStride == rowBytes) {
         memcpy(dst, g_nextFb, rowBytes * (size_t) g_nextH);
     } else {
         for (int y = 0; y < g_nextH; y++)
@@ -254,23 +266,20 @@ void platformSwapBuffers(void) {
 bool utPlatformShowLogAndHalt(void) {
     if (g_nextFb == NULL || !g_showingFramebuffer) return false;
 
-    /* Reuse the renderer's buffer as a 320x240 page; it is at least that big. */
+    matchVideoMode(UT_SCREEN_W, UT_SCREEN_H);
+    if (g_modeW != UT_SCREEN_W || g_modeH != UT_SCREEN_H) return false;
+    if (g_modeStride != UT_SCREEN_W * (int) sizeof(uint16_t)) return false;
     g_nextW = UT_SCREEN_W;
     g_nextH = UT_SCREEN_H;
-    matchVideoMode(g_nextW, g_nextH);
-    if (g_modeW != g_nextW || g_modeH != g_nextH) return false;
 
     for (;;) {
+        g_nextFb = (uint16_t *) (void *) of_video_surface();
         utPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
-        uint8_t *dst = of_video_surface();
-        size_t rowBytes = (size_t) g_nextW * sizeof(uint16_t);
-        for (int y = 0; y < g_nextH; y++)
-            memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
-        of_video_flip();
 #ifdef OF_PC
         if (getenv("UT_DUMP_PATH") != NULL) writeFrameDump();
         exit(0);
 #endif
+        of_video_flip();
         of_input_poll();
         usleep(100000);
     }

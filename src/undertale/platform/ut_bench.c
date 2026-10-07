@@ -104,6 +104,15 @@ void utBenchFrame(void) {
 
     g_running = false;
     utLogPrint("=== Undertale benchmark ===\n");
+#ifndef OF_PC
+    {
+        /* Say which OS and bitstream this ran on; tables look alike otherwise. */
+        const struct of_capabilities *caps = of_get_caps();
+        utLogPrint("OS %u.%u.%u, core variant %u, CPU %u MHz\n", (unsigned) ((caps->os_version >> 16) & 0xFF),
+                   (unsigned) ((caps->os_version >> 8) & 0xFF), (unsigned) (caps->os_version & 0xFF),
+                   (unsigned) caps->core_variant, (unsigned) (caps->cpu_freq_hz / 1000000u));
+    }
+#endif
     utLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
     utLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
