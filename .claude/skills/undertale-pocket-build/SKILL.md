@@ -1,6 +1,6 @@
 ---
 name: undertale-pocket-build
-description: Build, package and deploy the Undertale port for the Analogue Pocket (Butterscotch on openfpgaOS) in this repo. Use this whenever the task involves building src/undertale, running make here, producing the SD card tree, copying to the Pocket's SD card (from this Mac or the MacBook Pro), regenerating textures.bin or music.bin, the v0.9 comparison cores, or committing work in this repo — even if the user only says "rebuild it", "copy it" or "is it ready to copy?".
+description: Build, package and deploy the Undertale port for the Analogue Pocket (Butterscotch on openfpgaOS) in this repo. Use this whenever the task involves building src/undertale, running make here, producing the SD card tree, copying to the Pocket's SD card (from this Mac or another one), regenerating textures.bin or music.bin, the v0.9 comparison cores, or committing work in this repo — even if the user only says "rebuild it", "copy it" or "is it ready to copy?".
 ---
 
 # Building and deploying the Undertale Pocket port
@@ -75,13 +75,13 @@ Three routes, in order of preference:
    (or `copy` for the single core). This runs `tools/sdcopy.sh`, which waits
    for the card, mounts it, copies, removes `._*` sidecar files, verifies,
    and unmounts. It prints a specific message on each failure.
-2. **Card in the user's MacBook Pro:** SSH from here cannot touch the card
+2. **Card in a second Mac:** SSH from here cannot touch the card
    (macOS blocks removable volumes for remote logins; that restriction is
    the user's and is not to be worked around). Give the user these to run in
-   a Terminal on the MacBook:
+   a Terminal on that Mac:
 
    ```bash
-   rsync -rc --exclude '._*' --exclude '.DS_Store' chanderson@mac-mini.local:Projects/undertale-pocket/openfpgaSDK/build/pocket/undertale/ /Volumes/Pocket/
+   rsync -rc --exclude '._*' --exclude '.DS_Store' <user>@<build-mac>:<path to>/openfpgaSDK/build/pocket/undertale/ /Volumes/Pocket/
    dot_clean -m /Volumes/Pocket/Assets/undertale /Volumes/Pocket/Cores /Volumes/Pocket/Platforms
    diskutil eject /Volumes/Pocket
    ```
@@ -90,8 +90,8 @@ Three routes, in order of preference:
 Plain `copy` after a `compare-copy` leaves stale v0.9 cores on the card; use
 `compare-copy` again if those cores should stay current.
 
-The card reader in this Mac's Satechi stand often fails to notice a card
-inserted while the machine is idle. `sdcopy.sh` declares user activity to
+A card reader on an idle, headless Mac can fail to notice a card inserted
+while the machine is idle. `sdcopy.sh` declares user activity to
 wake it; if no disk appears at all, the card needs reseating.
 
 ## What is on the card
