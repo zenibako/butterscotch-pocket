@@ -85,5 +85,15 @@ while IFS= read -r file; do
 done < <(find "$TREE" -type f \( -name '*.elf' -o -name '*.bin' -o -name '*.rbf_r' -o -name '*.json' -o -name '*.ini' \) ! -name 'music.bin' ! -name 'textures.bin')
 [ $failed -eq 0 ] || { echo "sdcopy: verification failed; the card was left mounted"; exit 1; }
 
-diskutil eject "$CARD" >/dev/null && echo "sdcopy: done, verified and ejected. Safe to remove the card." \
-    || echo "sdcopy: copied and verified, but could not eject $CARD; eject it before removing."
+# With nobody at the screen, loginwindow refuses a normal eject. Everything is
+# written and verified by now, so a forced unmount after a sync is safe.
+if diskutil eject "$CARD" >/dev/null 2>&1; then
+    echo "sdcopy: done, verified and ejected. Safe to remove the card."
+else
+    sync
+    if diskutil unmount force "$CARD" >/dev/null 2>&1; then
+        echo "sdcopy: done, verified and unmounted. Safe to remove the card."
+    else
+        echo "sdcopy: copied and verified, but could not unmount $CARD; eject it before removing."
+    fi
+fi
