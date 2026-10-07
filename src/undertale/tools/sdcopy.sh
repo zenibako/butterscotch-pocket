@@ -7,8 +7,8 @@
 # often is not: the card reader stops noticing insertions while the machine
 # counts as idle, and macOS only auto-mounts removable disks into an active
 # desktop session. This script declares user activity, waits for the card,
-# mounts it if needed, copies, removes macOS sidecar files, verifies and
-# ejects, and says what went wrong when it cannot.
+# mounts it if needed, removes renamed-away cores of the same platform,
+# copies, removes macOS sidecar files, verifies and ejects, and says what went wrong when it cannot.
 #
 # Usage: sdcopy.sh <build tree> [seconds to wait for the card, default 90]
 #
@@ -64,6 +64,18 @@ for ((waited = 0; waited <= WAIT; waited += 2)); do
     sleep 2
 done
 [ -n "$CARD" ] || { echo "sdcopy: no Pocket SD card appeared. The reader did not report a card at all."; exit 1; }
+
+# Cores of the platforms being copied that the tree no longer contains are
+# leftovers from a rename; the Pocket would list them next to the new ones.
+for platform in "$TREE"/Assets/*/; do
+    platform=$(basename "$platform")
+    for old in "$CARD/Assets/$platform"/*/; do
+        name=$(basename "$old")
+        [ -d "$old" ] && [ "$name" != common ] && [ ! -d "$TREE/Assets/$platform/$name" ] || continue
+        echo "sdcopy: removing old core $name"
+        rm -rf "$CARD/Assets/$platform/$name" "$CARD/Cores/$name"
+    done
+done
 
 echo "sdcopy: copying to $CARD"
 for dir in Cores Assets Platforms; do

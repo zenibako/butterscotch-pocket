@@ -4,7 +4,7 @@
         "metadata": {
             "platform_ids": ["undertale"],
             "shortname": "Butterscotch",
-            "description": "Butterscotch, an open-source GameMaker: Studio runner, on openfpgaOS. Runs Undertale v1.08 (bring your own game data)",
+            "description": "GameMaker runner. Runs Undertale v1.08 (own data needed)",
             "author": "zenibako",
             "url": "https://github.com/zenibako/butterscotch-pocket",
             "version": "0.1.0",
