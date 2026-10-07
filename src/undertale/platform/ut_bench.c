@@ -51,12 +51,13 @@ void utBenchStart(void) {
 #define UT_IO_TOTAL (2u * 1024u * 1024u)
 #define UT_IO_MAX_CHUNK (1024u * 1024u)
 
-static void ioTest(const char *label, uint32_t chunk, uint32_t misalign) {
+static void ioTest(const char *label, uint32_t chunk, uint32_t misalign, bool buffered) {
     static uint8_t buffer[UT_IO_MAX_CHUNK + 512] __attribute__((aligned(512)));
 
     FILE *file = fopen("data.win", "rb");
     if (file == NULL) return;
-    setvbuf(file, NULL, _IONBF, 0);
+    /* Buffered is how Butterscotch's loader opens the file (128 KB buffer). */
+    setvbuf(file, NULL, buffered ? _IOFBF : _IONBF, buffered ? 128 * 1024 : 0);
     fseek(file, 1024 * 1024, SEEK_SET);
 
     uint64_t start = nowNanos();
@@ -75,10 +76,10 @@ static void ioTest(const char *label, uint32_t chunk, uint32_t misalign) {
 
 static void ioReport(void) {
     utLogPrint("SD read speed (2 MB of data.win):\n");
-    ioTest("4 KB reads", 4096, 0);
-    ioTest("64 KB reads", 65536, 0);
-    ioTest("1 MB reads", UT_IO_MAX_CHUNK, 0);
-    ioTest("64 KB, unaligned", 65536, 4);
+    ioTest("4 KB reads", 4096, 0, false);
+    ioTest("64 KB reads", 65536, 0, false);
+    ioTest("1 MB reads", UT_IO_MAX_CHUNK, 0, false);
+    ioTest("1 MB, buffered FILE", UT_IO_MAX_CHUNK, 0, true);
 }
 
 void utBenchAddFlipTime(uint64_t nanos) {
