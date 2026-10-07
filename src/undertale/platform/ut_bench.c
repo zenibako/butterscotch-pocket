@@ -114,6 +114,7 @@ void utBenchFrame(void) {
     }
 #endif
     utLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
+    utLogPrint("%s\n", utLogLoadSummary());
     utLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
     unsigned totalMs = 0;

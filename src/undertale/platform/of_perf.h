@@ -15,6 +15,8 @@ void utPerfToggleLog(void);
 const char *utLogLine(int age);
 /* printf to the console and the overlay buffer, without a timestamp. */
 void utLogPrint(const char *format, ...);
+/* "slowest chunks: ..." once data.win has loaded, empty before that. */
+const char *utLogLoadSummary(void);
 
 /* Fills the frame with the most recent log lines on black. */
 void utPerfDrawLogScreen(uint16_t *fb, int width, int height);

@@ -36,6 +36,48 @@ const char *utLogLine(int age) {
     return g_lines[(g_lineHead - 1 - age + 2 * UT_LOG_LINES) % UT_LOG_LINES];
 }
 
+/* Load breakdown: DATAWIN_LOG_CHUNKS makes the loader log "DataWin: NAME, ..."
+ * as it starts each chunk. Time between consecutive lines is the time spent
+ * on the earlier chunk; the slowest few are kept so the benchmark report can
+ * show where loading time goes after the boot log has scrolled away. */
+#define UT_LOAD_TOP 4
+static char g_chunkName[5];
+static uint64_t g_chunkStart = 0;
+static struct { char name[5]; unsigned ms; } g_slowest[UT_LOAD_TOP];
+static char g_loadSummary[UT_LOG_LINE_LEN];
+
+static void finishChunk(uint64_t now) {
+    if (g_chunkStart == 0) return;
+    unsigned ms = (unsigned) ((now - g_chunkStart) / 1000000u);
+    for (int i = 0; i < UT_LOAD_TOP; i++) {
+        if (ms <= g_slowest[i].ms) continue;
+        for (int j = UT_LOAD_TOP - 1; j > i; j--) g_slowest[j] = g_slowest[j - 1];
+        memcpy(g_slowest[i].name, g_chunkName, sizeof(g_chunkName));
+        g_slowest[i].ms = ms;
+        break;
+    }
+    g_chunkStart = 0;
+}
+
+static void trackLoad(const char *format, const char *text, uint64_t now) {
+    if (strncmp(format, "DataWin: %.4s", 13) == 0) {
+        finishChunk(now);
+        memcpy(g_chunkName, text + 9, 4);
+        g_chunkName[4] = '\0';
+        g_chunkStart = now;
+    } else if (strncmp(format, "Loaded \"", 8) == 0 || strncmp(format, "Unknown chunk", 13) == 0) {
+        finishChunk(now);
+        int n = snprintf(g_loadSummary, sizeof(g_loadSummary), "slowest chunks:");
+        for (int i = 0; i < UT_LOAD_TOP && g_slowest[i].ms > 0; i++)
+            n += snprintf(g_loadSummary + n, sizeof(g_loadSummary) - (size_t) n, " %s %u.%us", g_slowest[i].name,
+                          g_slowest[i].ms / 1000, (g_slowest[i].ms % 1000) / 100);
+    }
+}
+
+const char *utLogLoadSummary(void) {
+    return g_loadSummary;
+}
+
 void utLogPrint(const char *format, ...) {
     char text[256];
     va_list va;
@@ -74,6 +116,7 @@ void platformLog(const logType type, const char *format, va_list va) {
     vsnprintf(text, sizeof(text), format, va);
     fputs(text, stdout);
     keepText(text);
+    trackLoad(format, text, now);
 
     size_t len = strlen(format);
     atLineStart = len > 0 && format[len - 1] == '\n';
