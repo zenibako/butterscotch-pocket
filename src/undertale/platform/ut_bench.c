@@ -46,83 +46,44 @@ void utBenchStart(void) {
     utPlatformSetUncapped(true);
 }
 
-/* SD read throughput. Loading is dominated by file reads on the device, and
- * how fast they go depends on request size and on whether the destination is
- * 512-byte aligned (unaligned reads go through a bounce buffer in the OS). */
-#define UT_IO_TOTAL (2u * 1024u * 1024u)
-#define UT_IO_MAX_CHUNK (1024u * 1024u)
+/* SD read throughput, cold and warm.
+ *
+ * Earlier versions of this test read the same 2 MB of data.win several times
+ * and reported 13 MB/s for everything but the first pass, while the loader,
+ * reading the file for the first time, managed about 1.2 MB/s. That pattern
+ * says repeat reads are served from a cache somewhere below the app. So each
+ * test here reads its own, previously untouched megabyte of music.bin (far
+ * larger than anything played during the benchmark), and one region is read
+ * twice to show the warm figure. */
+#define UT_IO_BYTES (1024u * 1024u)
+#define UT_IO_FILE "music.bin"
 
-static void ioTest(const char *label, uint32_t chunk, uint32_t misalign, bool buffered) {
-    static uint8_t buffer[UT_IO_MAX_CHUNK + 512] __attribute__((aligned(512)));
+static unsigned ioTest(uint32_t megabyteOffset, uint32_t chunk) {
+    static uint8_t buffer[UT_IO_BYTES] __attribute__((aligned(512)));
 
-    FILE *file = fopen("data.win", "rb");
-    if (file == NULL) return;
-    /* Buffered is how Butterscotch's loader opens the file (128 KB buffer). */
-    setvbuf(file, NULL, buffered ? _IOFBF : _IONBF, buffered ? 128 * 1024 : 0);
-    fseek(file, 1024 * 1024, SEEK_SET);
+    FILE *file = fopen(UT_IO_FILE, "rb");
+    if (file == NULL) return 0;
+    setvbuf(file, NULL, _IONBF, 0);
+    fseek(file, (long) megabyteOffset * 1024 * 1024, SEEK_SET);
 
     uint64_t start = nowNanos();
     uint32_t done = 0;
-    while (done < UT_IO_TOTAL) {
-        size_t got = fread(buffer + misalign, 1, chunk, file);
+    while (done < UT_IO_BYTES) {
+        size_t got = fread(buffer, 1, chunk, file);
         if (got == 0) break;
         done += (uint32_t) got;
     }
     uint64_t micros = (nowNanos() - start) / 1000u;
     fclose(file);
 
-    unsigned kbPerSecond = micros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / micros) : 0;
-    utLogPrint("%-21s %6u KB/s\n", label, kbPerSecond);
-}
-
-/* The loader reads into freshly allocated heap blocks, not a static buffer.
- * Kept small so it still fits once the texture cache has filled the heap. */
-#define UT_HEAP_TEST_BYTES (512u * 1024u)
-static void heapTest(void) {
-    uint64_t start = nowNanos();
-    uint8_t *block = malloc(UT_HEAP_TEST_BYTES);
-    unsigned allocMicros = (unsigned) ((nowNanos() - start) / 1000u);
-    if (block == NULL) {
-        utLogPrint("heap test: no %u KB block free\n", UT_HEAP_TEST_BYTES / 1024u);
-        return;
-    }
-
-    FILE *file = fopen("data.win", "rb");
-    uint32_t done = 0;
-    start = nowNanos();
-    if (file != NULL) {
-        setvbuf(file, NULL, _IONBF, 0);
-        fseek(file, 1024 * 1024, SEEK_SET);
-        while (done < UT_HEAP_TEST_BYTES) {
-            size_t got = fread(block + done, 1, 65536, file);
-            if (got == 0) break;
-            done += (uint32_t) got;
-        }
-        fclose(file);
-    }
-    uint64_t readMicros = (nowNanos() - start) / 1000u;
-
-    /* Touch every byte, as parsing would. */
-    start = nowNanos();
-    uint32_t sum = 0;
-    for (uint32_t i = 0; i < UT_HEAP_TEST_BYTES; i++) sum += block[i];
-    unsigned scanMicros = (unsigned) ((nowNanos() - start) / 1000u);
-
-    start = nowNanos();
-    free(block);
-    unsigned freeMicros = (unsigned) ((nowNanos() - start) / 1000u);
-
-    utLogPrint("64 KB reads into heap %6u KB/s\n",
-               readMicros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / readMicros) : 0);
-    utLogPrint("512 KB: malloc %u us, scan %u us, free %u us (%u)\n", allocMicros, scanMicros, freeMicros,
-               (unsigned) (sum & 0xFF));
+    return micros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / micros) : 0;
 }
 
 static void ioReport(void) {
-    utLogPrint("SD read speed (2 MB of data.win):\n");
-    ioTest("4 KB reads", 4096, 0, false);
-    ioTest("64 KB reads", 65536, 0, false);
-    heapTest();
+    /* Offsets are spread through the second half of the 130 MB pack. */
+    utLogPrint("SD read, KB/s, 1 MB each from " UT_IO_FILE ":\n");
+    utLogPrint("cold: 4K %u, 64K %u, 1M %u\n", ioTest(70, 4096), ioTest(85, 65536), ioTest(100, UT_IO_BYTES));
+    utLogPrint("same 64K region again: %u\n", ioTest(85, 65536));
 }
 
 void utBenchAddFlipTime(uint64_t nanos) {
