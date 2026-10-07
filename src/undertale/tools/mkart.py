@@ -8,8 +8,8 @@ Writes Platforms/_images/undertale.bin (521x165, the banner shown in the
 openFPGA menu) and Cores/<core>/icon.bin (36x36). With a preview directory
 it also writes PNGs of both as the Pocket shows them.
 
-The artwork is drawn here from scratch (a block-letter wordmark and
-monogram), so nothing from any game or from Butterscotch is redistributed.
+The artwork is drawn here from scratch (a block-letter wordmark and a
+heart), so nothing from any game or from Butterscotch is redistributed.
 
 File format, taken from the SDK's own images: two bytes per pixel, the first
 holding 255 for the dark background down to 0 for full white, the second
@@ -38,6 +38,20 @@ LETTERS = {
     "P": ["####.", "#...#", "#...#", "####.", "#....", "#....", "#...."],
     "K": ["#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"],
 }
+
+HEART = [
+    "..##...##..",
+    ".####.####.",
+    "###########",
+    "###########",
+    "###########",
+    ".#########.",
+    "..#######..",
+    "...#####...",
+    "....###....",
+    ".....#.....",
+]
+
 
 def stamp(image, rows, left, top, scale):
     """Draws a bitmap of '#' cells in white, each cell scale x scale pixels."""
@@ -71,7 +85,8 @@ def banner():
 
 def icon():
     image = Image.new("L", (36, 36), 0)
-    draw_word(image, "B", (36 - 7 * 4) // 2, 4)
+    scale = 3
+    stamp(image, HEART, (36 - len(HEART[0]) * scale) // 2, (36 - len(HEART) * scale) // 2, scale)
     return image
 
 
