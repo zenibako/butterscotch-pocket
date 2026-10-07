@@ -45,6 +45,7 @@ static char g_chunkName[5];
 static uint64_t g_chunkStart = 0;
 static struct { char name[5]; unsigned ms; } g_slowest[UT_LOAD_TOP];
 static char g_loadSummary[UT_LOG_LINE_LEN];
+static char g_loadPhases[UT_LOG_LINE_LEN];
 
 static void finishChunk(uint64_t now) {
     if (g_chunkStart == 0) return;
@@ -60,7 +61,12 @@ static void finishChunk(uint64_t now) {
 }
 
 static void trackLoad(const char *format, const char *text, uint64_t now) {
-    if (strncmp(format, "DataWin: %.4s", 13) == 0) {
+    if (strncmp(format, "DataWin: phases:", 16) == 0) {
+        /* Keep the loader's own phase totals, minus the "DataWin: " prefix. */
+        snprintf(g_loadPhases, sizeof(g_loadPhases), "%s", text + 9);
+        size_t len = strlen(g_loadPhases);
+        if (len > 0 && g_loadPhases[len - 1] == '\n') g_loadPhases[len - 1] = '\0';
+    } else if (strncmp(format, "DataWin: %.4s", 13) == 0) {
         finishChunk(now);
         memcpy(g_chunkName, text + 9, 4);
         g_chunkName[4] = '\0';
@@ -76,6 +82,10 @@ static void trackLoad(const char *format, const char *text, uint64_t now) {
 
 const char *utLogLoadSummary(void) {
     return g_loadSummary;
+}
+
+const char *utLogLoadPhases(void) {
+    return g_loadPhases;
 }
 
 void utLogPrint(const char *format, ...) {

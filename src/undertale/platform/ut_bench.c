@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* Key presses that walk from boot to the first battle; see runInputScript()
  * in of_platform.c for the syntax. Frame numbers assume a fresh save state. */
@@ -74,12 +75,49 @@ static void ioTest(const char *label, uint32_t chunk, uint32_t misalign, bool bu
     utLogPrint("%-21s %6u KB/s\n", label, kbPerSecond);
 }
 
+/* The loader reads into freshly allocated heap blocks, not a static buffer. */
+static void heapTest(void) {
+    uint64_t start = nowNanos();
+    uint8_t *block = malloc(UT_IO_TOTAL);
+    unsigned allocMicros = (unsigned) ((nowNanos() - start) / 1000u);
+    if (block == NULL) return;
+
+    FILE *file = fopen("data.win", "rb");
+    uint32_t done = 0;
+    start = nowNanos();
+    if (file != NULL) {
+        setvbuf(file, NULL, _IONBF, 0);
+        fseek(file, 1024 * 1024, SEEK_SET);
+        while (done < UT_IO_TOTAL) {
+            size_t got = fread(block + done, 1, 65536, file);
+            if (got == 0) break;
+            done += (uint32_t) got;
+        }
+        fclose(file);
+    }
+    uint64_t readMicros = (nowNanos() - start) / 1000u;
+
+    /* Touch every byte, as parsing would. */
+    start = nowNanos();
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < UT_IO_TOTAL; i++) sum += block[i];
+    unsigned scanMicros = (unsigned) ((nowNanos() - start) / 1000u);
+
+    start = nowNanos();
+    free(block);
+    unsigned freeMicros = (unsigned) ((nowNanos() - start) / 1000u);
+
+    utLogPrint("64 KB into malloc     %6u KB/s\n",
+               readMicros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / readMicros) : 0);
+    utLogPrint("2 MB: malloc %u ms, scan %u ms, free %u ms (%u)\n", allocMicros / 1000, scanMicros / 1000,
+               freeMicros / 1000, (unsigned) (sum & 0xFF));
+}
+
 static void ioReport(void) {
     utLogPrint("SD read speed (2 MB of data.win):\n");
     ioTest("4 KB reads", 4096, 0, false);
     ioTest("64 KB reads", 65536, 0, false);
-    ioTest("1 MB reads", UT_IO_MAX_CHUNK, 0, false);
-    ioTest("1 MB, buffered FILE", UT_IO_MAX_CHUNK, 0, true);
+    heapTest();
 }
 
 void utBenchAddFlipTime(uint64_t nanos) {
@@ -116,6 +154,7 @@ void utBenchFrame(void) {
 #endif
     utLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
     utLogPrint("%s\n", utLogLoadSummary());
+    utLogPrint("%s\n", utLogLoadPhases());
     utLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
     unsigned totalMs = 0;

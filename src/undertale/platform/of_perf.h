@@ -17,6 +17,8 @@ const char *utLogLine(int age);
 void utLogPrint(const char *format, ...);
 /* "slowest chunks: ..." once data.win has loaded, empty before that. */
 const char *utLogLoadSummary(void);
+/* The loader's "phases: alloc ..., read ..., parse ..., free ..." totals. */
+const char *utLogLoadPhases(void);
 
 /* Fills the frame with the most recent log lines on black. */
 void utPerfDrawLogScreen(uint16_t *fb, int width, int height);
