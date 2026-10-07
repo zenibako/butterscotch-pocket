@@ -48,13 +48,16 @@ int main(int argc, char **argv) {
     args.renderer = SOFTWARE;
     args.dataWinPath = UT_DATA_WIN_NAME;
     for (int i = 0; i < argc; i++) {
-        /* --bench-lowres keeps every room at 320x240, for bitstreams whose
-         * 640x480 mode misbehaves. */
+        /* --bench-lowres keeps every room at 320x240 with plain point
+         * sampling, for bitstreams whose 640x480 mode misbehaves;
+         * --bench-smooth does the same with 2x2 averaging. */
         bool lowres = strcmp(argv[i], "--bench-lowres") == 0;
-        if (lowres || strcmp(argv[i], "--bench") == 0) {
+        bool smooth = strcmp(argv[i], "--bench-smooth") == 0;
+        if (lowres || smooth || strcmp(argv[i], "--bench") == 0) {
             args.seed = 7;
             args.hasSeed = true;
             if (lowres) utPlatformSetHiresAllowed(false);
+            if (smooth) utPlatformSetSmoothLowres(true);
             utBenchStart();
         }
     }
@@ -62,6 +65,7 @@ int main(int argc, char **argv) {
 #ifdef OF_PC
     if (getenv("UT_SCRIPT") != NULL) utPlatformSetInputScript(getenv("UT_SCRIPT"));
     if (getenv("UT_UNCAPPED") != NULL) utPlatformSetUncapped(true);
+    if (getenv("UT_SMOOTH") != NULL) utPlatformSetSmoothLowres(true);
     /* UT_SEED=<n> fixes the game's RNG so desktop runs are repeatable. */
     const char *seed = getenv("UT_SEED");
     if (seed != NULL) {

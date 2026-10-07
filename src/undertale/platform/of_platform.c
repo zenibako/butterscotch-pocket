@@ -35,13 +35,18 @@ static bool g_showingFramebuffer = false;
 static const char *g_inputScript = NULL;
 static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
+/* Alternative to 640x480: keep every room at 320x240 and let the renderer
+ * average 2x2 texels when it shrinks. Faster, slightly soft small text. */
+static bool g_smoothLowres = false;
+extern bool swrSmoothMinify; /* butterscotch/src/sw/sw_drawing.c */
 static int g_modeW = 0; /* 0 until the first frame sets a mode */
 static int g_modeH = 0;
 static int g_modeStride = 0; /* bytes per row of the display surface */
 
 /* Pad button -> GML virtual key. Undertale reads Z/X/C with Enter/Shift/Ctrl
  * as aliases; the d-pad maps to the arrow keys. Select is not Esc (holding
- * Esc quits Undertale); Select and L toggle the frame-time overlay, R the log overlay. */
+ * Esc quits Undertale); Select toggles the frame-time overlay, R the log overlay, and L switches
+ * 640x480 rooms between native resolution and smoothed 320x240. */
 static const struct {
     uint32_t button;
     int32_t key;
@@ -60,6 +65,10 @@ static const struct {
 
 void utPlatformSetInputScript(const char *script) {
     g_inputScript = script;
+}
+
+void utPlatformSetSmoothLowres(bool enabled) {
+    g_smoothLowres = enabled;
 }
 
 void utPlatformSetHiresAllowed(bool allowed) {
@@ -120,7 +129,8 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
         logInfo("Video: room shows %d px across\n", (int) shown);
         lastShown = shown;
     }
-    bool hires = g_hiresAvailable && shown > UT_SCREEN_W;
+    bool hires = g_hiresAvailable && !g_smoothLowres && shown > UT_SCREEN_W;
+    swrSmoothMinify = g_smoothLowres;
     *outW = hires ? UT_HIRES_W : UT_SCREEN_W;
     *outH = hires ? UT_HIRES_H : UT_SCREEN_H;
     return true;
@@ -331,7 +341,11 @@ static void runInputScript(void) {
 /* Returns true when the app should quit; a Pocket core never does. */
 bool platformHandleEvents(void) {
     of_input_poll();
-    if (of_btn_pressed(OF_BTN_SELECT | OF_BTN_L1)) utPerfToggle();
+    if (of_btn_pressed(OF_BTN_SELECT)) utPerfToggle();
+    if (of_btn_pressed(OF_BTN_L1)) {
+        g_smoothLowres = !g_smoothLowres;
+        logInfo("Video: 640x480 rooms drawn at %s\n", g_smoothLowres ? "320x240, smoothed" : "640x480");
+    }
     if (of_btn_pressed(OF_BTN_R1)) utPerfToggleLog();
     runInputScript();
     if (g_runner == NULL) return false;

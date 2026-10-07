@@ -38,8 +38,8 @@ write_instance() { # <dest> <os.bin name> <ini name> <elf name>
 # Benchmark instance for the base (v0.7) core.
 write_ini undertale_bench.ini undertale.elf --bench os25
 write_instance "$OUT/Assets/undertale/chanderson.Undertale/Benchmark.json" os.bin undertale_bench.ini undertale.elf
-write_ini undertale_b320.ini undertale.elf --bench-lowres os25
-write_instance "$OUT/Assets/undertale/chanderson.Undertale/Benchmark 320.json" os.bin undertale_b320.ini undertale.elf
+write_ini undertale_b320.ini undertale.elf --bench-smooth os25
+write_instance "$OUT/Assets/undertale/chanderson.Undertale/Benchmark 320 smooth.json" os.bin undertale_b320.ini undertale.elf
 
 cp "$RT09/os.bin" "$COMMON/os09.bin"
 cp "$ELF09" "$COMMON/undertale09.elf"

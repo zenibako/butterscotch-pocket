@@ -52,9 +52,10 @@ enables older bytecode versions for testing other games.
 ## Controls
 
 D-pad = arrows, A = Z (confirm), B = X (cancel), X/Y = C (menu),
-Start = Enter. Select or L toggles a frame-time overlay: three numbers in
+Start = Enter. Select toggles a frame-time overlay: three numbers in
 milliseconds over the last 30 frames (average work, worst work, worst frame
 period; 33 means full speed). R shows the last log lines over the game.
+L switches 640x480 rooms between native resolution and smoothed 320x240.
 
 ## Resolution
 
@@ -63,6 +64,11 @@ Undertale's window is 640x480. Overworld rooms show a 320x240 view scaled
 with small fonts, so those rooms are rendered at 640x480 and the display
 mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
 everything stays at 320x240.
+
+L switches to the alternative: every room at 320x240, with the renderer
+averaging each 2x2 block of texels when it shrinks a 640x480 screen. Small
+text is slightly soft but readable, and those screens cost about a quarter
+of the pixels.
 
 ## Texture pack
 
