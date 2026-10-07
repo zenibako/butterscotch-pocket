@@ -8,8 +8,8 @@ Writes Platforms/_images/undertale.bin (521x165, the banner shown in the
 openFPGA menu) and Cores/<core>/icon.bin (36x36). With a preview directory
 it also writes PNGs of both as the Pocket shows them.
 
-The artwork is drawn here from scratch (a block-letter wordmark and a heart)
-so that nothing from the game is redistributed.
+The artwork is drawn here from scratch (a block-letter wordmark and
+monogram), so nothing from any game or from Butterscotch is redistributed.
 
 File format, taken from the SDK's own images: two bytes per pixel, the first
 holding 255 for the dark background down to 0 for full white, the second
@@ -30,21 +30,14 @@ LETTERS = {
     "T": ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
     "A": [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
     "L": ["#....", "#....", "#....", "#....", "#....", "#....", "#####"],
+    "B": ["####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."],
+    "S": [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
+    "C": [".####", "#....", "#....", "#....", "#....", "#....", ".####"],
+    "O": [".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."],
+    "H": ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+    "P": ["####.", "#...#", "#...#", "####.", "#....", "#....", "#...."],
+    "K": ["#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"],
 }
-
-HEART = [
-    "..##...##..",
-    ".####.####.",
-    "###########",
-    "###########",
-    "###########",
-    ".#########.",
-    "..#######..",
-    "...#####...",
-    "....###....",
-    ".....#.....",
-]
-
 
 def stamp(image, rows, left, top, scale):
     """Draws a bitmap of '#' cells in white, each cell scale x scale pixels."""
@@ -57,25 +50,28 @@ def stamp(image, rows, left, top, scale):
                     image.putpixel((left + x * scale + dx, top + y * scale + dy), 255)
 
 
+def word_width(word, scale):
+    return len(word) * 5 * scale + (len(word) - 1) * scale
+
+
+def draw_word(image, word, top, scale):
+    left = (image.width - word_width(word, scale)) // 2
+    for i, letter in enumerate(word):
+        stamp(image, LETTERS[letter], left + i * 6 * scale, top, scale)
+
+
 def banner():
     image = Image.new("L", (521, 165), 0)
-    heart_scale, text_scale, gap = 5, 7, 16
-    heart_w, heart_h = len(HEART[0]) * heart_scale, len(HEART) * heart_scale
-    word = "UNDERTALE"
-    text_w = len(word) * 5 * text_scale + (len(word) - 1) * text_scale
-    text_h = 7 * text_scale
-    top = (165 - (heart_h + gap + text_h)) // 2
-    stamp(image, HEART, (521 - heart_w) // 2, top, heart_scale)
-    left = (521 - text_w) // 2
-    for i, letter in enumerate(word):
-        stamp(image, LETTERS[letter], left + i * 6 * text_scale, top + heart_h + gap, text_scale)
+    big, small, gap = 6, 4, 18
+    top = (165 - (7 * big + gap + 7 * small)) // 2
+    draw_word(image, "BUTTERSCOTCH", top, big)
+    draw_word(image, "POCKET", top + 7 * big + gap, small)
     return image
 
 
 def icon():
     image = Image.new("L", (36, 36), 0)
-    scale = 3
-    stamp(image, HEART, (36 - len(HEART[0]) * scale) // 2, (36 - len(HEART) * scale) // 2, scale)
+    draw_word(image, "B", (36 - 7 * 4) // 2, 4)
     return image
 
 

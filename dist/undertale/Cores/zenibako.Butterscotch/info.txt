@@ -1,9 +1,9 @@
-Undertale for the Pocket (unofficial)
+Butterscotch Pocket (unofficial)
 
 Butterscotch, an open-source GameMaker
-runner, on openfpgaOS. No game data is
-included: you need your own copy of
-Undertale v1.08.
+runner by MrPowerGamerBR, on openfpgaOS.
+It currently runs Undertale v1.08. You
+need to provide your own game files.
 
 Put in Assets/undertale/common:
   data.win      from your game
@@ -22,6 +22,6 @@ Controls
 Starting takes about 20 seconds.
 Quit from the Analogue menu to save.
 
-github.com/zenibako/undertale-pocket
-Undertale is by Toby Fox.
-Not affiliated.
+github.com/zenibako/butterscotch-pocket
+No association with or endorsement by
+any software it runs.

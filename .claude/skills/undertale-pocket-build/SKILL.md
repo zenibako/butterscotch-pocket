@@ -128,7 +128,7 @@ git -C openfpgaSDK add -A src/undertale dist/undertale && git ... commit # branc
 - Conventional commit messages; commits are GPG signed automatically.
 - `butterscotch/` is a nested clone that the outer repo ignores. Its
   `openfpga` branch sits on top of upstream's draft PR #429 (`sw-renderer`).
-- Both repos have a `fork` remote on GitHub (`zenibako/undertale-pocket` branch
+- Both repos have a `fork` remote on GitHub (`zenibako/butterscotch-pocket` branch
   `undertale`, `zenibako/Butterscotch` branch `openfpga`); `origin` is
   upstream. Push to `fork` only when asked, and never open PRs or comment
   upstream on the user's behalf.

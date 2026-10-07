@@ -3,10 +3,10 @@
         "magic": "APF_VER_1",
         "metadata": {
             "platform_ids": ["undertale"],
-            "shortname": "Undertale",
-            "description": "Undertale (bring your own game data), running on Butterscotch and openfpgaOS",
+            "shortname": "Butterscotch",
+            "description": "Butterscotch, an open-source GameMaker: Studio runner, on openfpgaOS. Runs Undertale v1.08 (bring your own game data)",
             "author": "zenibako",
-            "url": "https://github.com/zenibako/undertale-pocket",
+            "url": "https://github.com/zenibako/butterscotch-pocket",
             "version": "0.1.0",
             "date_release": "2026-10-07"
         },

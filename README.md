@@ -1,15 +1,16 @@
-# Undertale for the Analogue Pocket
+# Butterscotch Pocket
 
-An unofficial port of Undertale to the [Analogue Pocket](https://www.analogue.co/pocket),
-built from [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch)
-(an open-source GameMaker: Studio runner) running on
+An unofficial port of [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch),
+MrPowerGamerBR's open-source GameMaker: Studio runner, to the
+[Analogue Pocket](https://www.analogue.co/pocket). It currently runs one
+game, Undertale v1.08, and is built on
 [openfpgaOS](https://github.com/openfpgaOS/openfpgaSDK). This repository is a
 fork of the openfpgaOS SDK; the port lives in [`src/undertale/`](src/undertale/)
 and its core definition in [`dist/undertale/`](dist/undertale/).
 
-**No game data is included.** You need your own copy of Undertale v1.08; the
-build reads its `data.win` and music files and nothing from the game is
-redistributed here.
+**No game data is included.** You need to provide your own game files
+(Undertale v1.08, WAD version 16); the build reads its `data.win` and music
+files and nothing from the game is redistributed here.
 
 ## Status
 
@@ -33,8 +34,8 @@ hardware. MiSTer is untested.
 Only built on macOS so far, with Homebrew's `riscv64-elf-gcc` and `gnu-sed`.
 
 ```bash
-git clone https://github.com/zenibako/undertale-pocket.git
-cd undertale-pocket/src/undertale
+git clone https://github.com/zenibako/butterscotch-pocket.git
+cd butterscotch-pocket/src/undertale
 git clone -b openfpga https://github.com/zenibako/Butterscotch.git butterscotch
 
 # Your own game data: data.win (named game.ios inside the macOS app) and
@@ -54,13 +55,20 @@ on-device diagnostics are described in
 
 ## Licences and credits
 
-- Undertale is by Toby Fox. This project is not affiliated with or endorsed
-  by him, and requires a legitimately owned copy of the game.
-- Butterscotch is AGPL-3.0, so a core built from this repository is covered
-  by the AGPL. The changes this port makes to it are on the
+- Butterscotch is by MrPowerGamerBR and contributors, and is AGPL-3.0, so a
+  core built from this repository is covered by the AGPL. The changes this
+  port makes to it are on the
   [`openfpga` branch](https://github.com/zenibako/Butterscotch/tree/openfpga)
   of a fork, on top of its software renderer (draft PR #429).
 - The openfpgaOS SDK is Apache-2.0; its own README follows unchanged.
+
+## Disclaimer
+
+Following Butterscotch's own disclaimer: Butterscotch Pocket has no
+association, endorsement, or any connection whatsoever with any of the
+software that it facilitates, and does not provide any of the software it can
+run by itself. In order to use it, you will need to provide your own game
+files.
 
 ---
 

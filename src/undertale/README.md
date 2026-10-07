@@ -1,4 +1,4 @@
-# Undertale for openfpgaOS (Analogue Pocket / MiSTer)
+# Butterscotch Pocket: Undertale on openfpgaOS (Analogue Pocket / MiSTer)
 
 [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch), an
 open-source GameMaker: Studio runner, built as an openfpgaOS app. It uses
