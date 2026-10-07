@@ -138,8 +138,16 @@ debug: all
 # Deploy to the device.  MISTER_IP rides the environment so the same
 # invocation serves every platform's copy.sh (pocket ignores it and
 # auto-detects the SD card; mister uses it as the network host).
+# On macOS the Pocket copy goes through tools/sdcopy.sh, which also works over
+# SSH on a headless machine (waits for the card, mounts, verifies, ejects).
+ifeq ($(shell uname -s)-$(TARGET),Darwin-pocket)
+COPY_CMD = tools/sdcopy.sh "$(OUT)"
+else
+COPY_CMD = MISTER_IP="$(MISTER_IP)" $(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
+endif
+
 copy: all
-	@MISTER_IP="$(MISTER_IP)" $(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
+	@$(COPY_CMD)
 
 # Side-by-side comparison of OS versions and CPU variants on one SD card.
 # SDK09 is a checkout carrying the v0.9 SDK and Pocket runtime (the Diablo
@@ -155,7 +163,7 @@ compare: all
 # Like `copy`, but without re-running the assembly step, which would remove
 # the comparison cores again.
 compare-copy: compare
-	@$(SDK_DIR)/platforms/$(TARGET)/copy.sh "$(APP)" "$(OBJ_DIR)/app.elf"
+	@$(COPY_CMD)
 
 package: all
 	@$(ROOT)/scripts/package.sh $(APP)
