@@ -1,5 +1,7 @@
 # Butterscotch Pocket
 
+<p align="center"><img src="src/undertale/docs/banner.png" alt="Butterscotch Pocket menu banner: a pixel heart above the words BUTTERSCOTCH POCKET" width="521"></p>
+
 An unofficial port of [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch),
 MrPowerGamerBR's open-source GameMaker: Studio runner, to the
 [Analogue Pocket](https://www.analogue.co/pocket). It currently runs one
