@@ -66,6 +66,13 @@ int main(int argc, char **argv) {
     if (getenv("UT_SCRIPT") != NULL) utPlatformSetInputScript(getenv("UT_SCRIPT"));
     if (getenv("UT_UNCAPPED") != NULL) utPlatformSetUncapped(true);
     if (getenv("UT_SMOOTH") != NULL) utPlatformSetSmoothLowres(true);
+    /* UT_DUMP_STATE=<frame> prints every instance and its variables at that
+     * frame; UT_DISASM=<code entry name, or *> prints its bytecode at start. */
+    if (getenv("UT_DUMP_STATE") != NULL) {
+        int frame = atoi(getenv("UT_DUMP_STATE"));
+        hmput(args.dumpFrames, frame, true);
+    }
+    if (getenv("UT_DISASM") != NULL) shput(args.disassemble, getenv("UT_DISASM"), true);
     /* UT_SEED=<n> fixes the game's RNG so desktop runs are repeatable. */
     const char *seed = getenv("UT_SEED");
     if (seed != NULL) {

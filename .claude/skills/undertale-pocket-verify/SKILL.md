@@ -47,6 +47,8 @@ device):
 | `UT_OVERLAY=1` | turn on the frame-time and log overlays |
 | `UT_AUDIO_DUMP=f.raw` | write the mixed output, 48 kHz stereo s16le |
 | `UT_AUDIO_LOG=1` | log every sound effect as it starts |
+| `UT_DUMP_STATE=n` | print every instance and its variables at frame n |
+| `UT_DISASM=name` | print that code entry's bytecode at start (`*` for all, about a million lines) |
 
 `./undertale_pc --bench` runs the built-in benchmark; desktop numbers are
 meaningless for speed, but it exercises the whole scripted path and the

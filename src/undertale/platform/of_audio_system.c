@@ -47,6 +47,7 @@
 
 /* Compressed bytes buffered per voice: 4 s at 32 kHz. Blocking file reads
  * elsewhere (room and texture loads) are bridged from this buffer. */
+#define UT_SEEK_PROBE_BYTES 4096
 #define UT_READAHEAD 65536
 #define UT_REFILL_BELOW (UT_READAHEAD / 2)
 
@@ -219,14 +220,20 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
         uint32_t want = UT_READAHEAD - voice->bufferLen;
         if (want > total - voice->fileBytePos) want = total - voice->fileBytePos;
 
+        /* Getting to the right place in the pack is timed apart from the
+         * bulk of the read: the seek plus the first block. */
+        uint64_t seekStart = nowNanos();
         if (fseek(ut->file, (long) (track->offset + voice->fileBytePos), SEEK_SET) != 0) break;
         /* Read into static memory and copy: on openfpgaOS a read straight
          * into the heap (where the voices live) is about ten times slower.
          * The idle hook may mix from this voice while fread blocks; it only
          * touches bytes below bufferLen, which is not advanced until after. */
         static uint8_t scratch[UT_READAHEAD] __attribute__((aligned(512)));
+        size_t first = want < UT_SEEK_PROBE_BYTES ? want : UT_SEEK_PROBE_BYTES;
+        size_t got = fread(scratch, 1, first, ut->file);
         uint64_t readStart = nowNanos();
-        size_t got = fread(scratch, 1, want, ut->file);
+        utPerfAddLoad(UT_LOAD_SEEK, readStart - seekStart);
+        if (got == first && want > first) got += fread(scratch + first, 1, want - first, ut->file);
         utPerfAddLoad(UT_LOAD_MUSIC, nowNanos() - readStart);
         if (got == 0) break;
         memcpy(voice->data + voice->bufferLen, scratch, got);

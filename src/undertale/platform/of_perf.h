@@ -32,18 +32,19 @@ void utPerfAddSleep(uint64_t nanos);
  * can be attributed without a benchmark run:
  *
  *   slow 555: step 300 draw 200 out 20 snd 10
- *     load: room 0 tex 0 sfx 0 mix 12 music 0
+ *     load: rm 0 tx 0 fx 0 mix 12 mus 0 sk 0
  *     draw: s5/380 p437/20 t12/40 b1/3 r0/0
  *
  * The first line splits the frame by phase: game code, drawing, presenting
  * (overlays, copy, flip) and the audio update. The second gives time spent
  * inside those phases on particular jobs: loading the room, texture pages
- * and sound effects, mixing audio, and reading streamed music. The third
+ * and sound effects, mixing audio, reading streamed music, and (sk) seeking
+ * to it in the pack plus reading its first 4 KB. The third
  * gives calls/ms for each kind of draw call: sprites, sprite parts (tiles),
  * text, tiled backgrounds and rectangles. All times in ms. */
 #define UT_DRAW_KINDS 5
 void platformDrawProfile(int kind, uint64_t nanos);
-typedef enum { UT_LOAD_ROOM, UT_LOAD_TEXTURE, UT_LOAD_SOUND, UT_LOAD_MIX, UT_LOAD_MUSIC, UT_LOAD_KINDS } UtLoadKind;
+typedef enum { UT_LOAD_ROOM, UT_LOAD_TEXTURE, UT_LOAD_SOUND, UT_LOAD_MIX, UT_LOAD_MUSIC, UT_LOAD_SEEK, UT_LOAD_KINDS } UtLoadKind;
 typedef enum { UT_PHASE_OTHER, UT_PHASE_STEP, UT_PHASE_AUDIO, UT_PHASE_DRAW, UT_PHASE_OUT, UT_PHASES } UtPhase;
 #define UT_PERF_SLOW_FRAME_MS 150
 void utPerfAddLoad(UtLoadKind kind, uint64_t nanos);
