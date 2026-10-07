@@ -70,6 +70,13 @@ when a dialogue box or new room first appears.
 
 ## Instruments
 
+**Slow-frame log line.** Any frame over 150 ms of work logs
+`Perf: slow frame N ms: room A, textures B (count), sounds C (count)`.
+The remainder (N minus the three) is game code and drawing. For a hitch at
+a room change, ask the user to press R straight afterwards and screenshot
+the log; that attributes it without a benchmark run. Texture lines also
+carry their own `took N ms`.
+
 **Benchmark** (`--bench` in the OS config's `ARGS=`; `make compare` adds a
 "Benchmark" entry to each core). It plays a fixed input script with a
 fixed seed, no frame pacing and saves disabled, then draws a report:

@@ -126,12 +126,18 @@ is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
 rebooting.
 
+Any frame that takes longer than 150 ms logs a line such as
+`Perf: slow frame 1840 ms: room 390, textures 1240 (1), sounds 90 (2)`:
+the frame's work time, then the parts of it spent loading the room, texture
+pages and sound effects (with counts). Whatever is left over is game code
+and drawing. Press R after a hitch to read it.
+
 ## Status
 
 - Runs on an Analogue Pocket (firmware 2.7, os25 bitstream): boots, plays
   the intro, name entry works, and the first room and menu are playable.
 - Use the os25 bitstream. The SDK's runtime `os.bin` paired with os20
   reboot-looped before the OS banner appeared.
-- Music plays on hardware. Sound effects and saves work on desktop; not yet
-  tried on hardware.
+- Music, sound effects and saves work on hardware, including a save
+  imported from the desktop game.
 - Loading `data.win` takes about 28 s on the Pocket before the first frame.

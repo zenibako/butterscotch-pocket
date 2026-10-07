@@ -12,6 +12,7 @@
 
 #include "debug_font.h"
 #include "gettime.h"
+#include "log.h"
 
 #define UT_PERF_WINDOW 30
 #define UT_PERF_SCALE  2
@@ -23,12 +24,32 @@ static uint64_t g_sleepNanos = 0;
 static unsigned g_worstWork = 0, g_worstPeriod = 0, g_totalWork = 0;
 static unsigned g_shownWork = 0, g_shownPeriod = 0, g_shownAverage = 0;
 static int g_count = 0;
+static uint64_t g_loadNanos[UT_LOAD_KINDS];
+static unsigned g_loadCount[UT_LOAD_KINDS];
 
 /* 3x5 digit glyphs, one row per 3 bits, top row first. */
 static const uint16_t g_digits[10] = {
     075557, 022222, 071747, 071717, 055711,
     074717, 074757, 071111, 075757, 075717,
 };
+
+void utPerfAddLoad(UtLoadKind kind, uint64_t nanos) {
+    g_loadNanos[kind] += nanos;
+    g_loadCount[kind]++;
+}
+
+static void reportSlowFrame(unsigned workMs) {
+    unsigned ms[UT_LOAD_KINDS];
+    for (int i = 0; i < UT_LOAD_KINDS; i++) ms[i] = (unsigned) (g_loadNanos[i] / 1000000u);
+    if (workMs >= UT_PERF_SLOW_FRAME_MS) {
+        logInfo("Perf: slow frame %u ms: room %u, textures %u (%u), sounds %u (%u)\n", workMs, ms[UT_LOAD_ROOM],
+                ms[UT_LOAD_TEXTURE], g_loadCount[UT_LOAD_TEXTURE], ms[UT_LOAD_SOUND], g_loadCount[UT_LOAD_SOUND]);
+    }
+    for (int i = 0; i < UT_LOAD_KINDS; i++) {
+        g_loadNanos[i] = 0;
+        g_loadCount[i] = 0;
+    }
+}
 
 void utPerfToggle(void) {
     g_enabled = !g_enabled;
@@ -133,6 +154,7 @@ void utPerfFrame(uint16_t *fb, int width, int height) {
         if (periodMs > g_worstPeriod) g_worstPeriod = periodMs;
         if (workMs > g_worstWork) g_worstWork = workMs;
         g_totalWork += workMs;
+        reportSlowFrame(workMs);
         if (++g_count >= UT_PERF_WINDOW) {
             g_shownAverage = g_totalWork / UT_PERF_WINDOW;
             g_shownWork = g_worstWork;

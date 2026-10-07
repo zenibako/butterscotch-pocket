@@ -24,6 +24,13 @@ const char *utLogLoadPhases(void);
 void utPerfDrawLogScreen(uint16_t *fb, int width, int height);
 
 void utPerfAddSleep(uint64_t nanos);
+
+/* Time spent loading during the current frame. A frame that takes longer
+ * than UT_PERF_SLOW_FRAME_MS is logged with these totals, so a hitch seen on
+ * the device can be attributed from the log overlay. */
+typedef enum { UT_LOAD_ROOM, UT_LOAD_TEXTURE, UT_LOAD_SOUND, UT_LOAD_KINDS } UtLoadKind;
+#define UT_PERF_SLOW_FRAME_MS 150
+void utPerfAddLoad(UtLoadKind kind, uint64_t nanos);
 void utPerfFrame(uint16_t *fb, int width, int height);
 
 #endif /* UT_OF_PERF_H */

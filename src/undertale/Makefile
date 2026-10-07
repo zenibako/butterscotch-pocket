@@ -106,7 +106,7 @@ MKTEXPACK_SRCS = tools/mktexpack.c platform/of_log.c $(BS_SRC)/log.c $(BS_SRC)/g
 
 $(MKTEXPACK): $(MKTEXPACK_SRCS)
 	@mkdir -p $(dir $@)
-	$(PC_CC) -O2 $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(MKTEXPACK_SRCS) -lm -o $@
+	$(PC_CC) -O2 -DUT_HOST_TOOL $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(MKTEXPACK_SRCS) -lm -o $@
 
 textures.bin: data.win $(MKTEXPACK)
 	$(MKTEXPACK) data.win $@

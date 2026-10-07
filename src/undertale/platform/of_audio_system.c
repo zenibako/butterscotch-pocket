@@ -15,6 +15,8 @@
 #include "of.h"
 
 #include "audio_system.h"
+#include "gettime.h"
+#include "of_perf.h"
 #include "log.h"
 #include "stb_ds.h"
 #include "utils.h"
@@ -383,10 +385,12 @@ static uint8_t *cachedSound(UtAudioSystem *ut, int32_t track) {
 
     uint8_t *data = malloc(bytes);
     if (data == NULL) return NULL;
+    uint64_t start = nowNanos();
     if (fseek(ut->file, (long) ut->tracks[track].offset, SEEK_SET) != 0 || fread(data, 1, bytes, ut->file) != bytes) {
         free(data);
         return NULL;
     }
+    utPerfAddLoad(UT_LOAD_SOUND, nowNanos() - start);
     ut->cachedSounds[track] = data;
     ut->cachedBytes += bytes;
     return data;

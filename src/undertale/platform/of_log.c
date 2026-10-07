@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The last few lines, kept for the on-screen log overlay. */
@@ -60,7 +61,30 @@ static void finishChunk(uint64_t now) {
     g_chunkStart = 0;
 }
 
+/* Room and texture loads announce themselves in the log; their time goes
+ * into the slow-frame report (see of_perf.h). The host tools share this file
+ * but have no frames to report on. */
+#ifdef UT_HOST_TOOL
+static void trackFrameLoads(const char *format, const char *text, uint64_t now) {
+    (void) format; (void) text; (void) now;
+}
+#else
+static void trackFrameLoads(const char *format, const char *text, uint64_t now) {
+    static uint64_t roomStart = 0;
+    if (strncmp(format, "Room changed:", 13) == 0) {
+        roomStart = now;
+    } else if (strncmp(format, "Runner: Room loaded:", 20) == 0) {
+        if (roomStart != 0) utPerfAddLoad(UT_LOAD_ROOM, now - roomStart);
+        roomStart = 0;
+    } else if (strncmp(format, "SWR: Loaded TXTR", 16) == 0) {
+        const char *took = strstr(text, " took ");
+        if (took != NULL) utPerfAddLoad(UT_LOAD_TEXTURE, strtoull(took + 6, NULL, 10) * 1000000u);
+    }
+}
+#endif
+
 static void trackLoad(const char *format, const char *text, uint64_t now) {
+    trackFrameLoads(format, text, now);
     if (strncmp(format, "DataWin: phases:", 16) == 0) {
         /* Keep the loader's own phase totals, minus the "DataWin: " prefix. */
         snprintf(g_loadPhases, sizeof(g_loadPhases), "%s", text + 9);
