@@ -45,7 +45,7 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
 
 SRCS = main.c platform/of_platform.c platform/of_diag.c platform/of_log.c \
        platform/of_perf.c platform/of_audio_system.c platform/ut_bench.c \
-       platform/ut_strings.c \
+       platform/ut_strings.c platform/ut_save_fs.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS)
 SRCS_CXX =
@@ -63,7 +63,7 @@ BS_INCLUDES = -Iplatform -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC
 WADS ?= 16
 BS_DEFS = $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZE=16 \
           -DUSE_FLOAT_REALS -DNO_RVALUE_INT64 \
-          -DBUTTERSCOTCH_VIDEO_NULL -DUSE_PLATFORM_AUDIO -DSW_PLATFORM_FRAMEBUFFER -DDATAWIN_LOG_CHUNKS \
+          -DBUTTERSCOTCH_VIDEO_NULL -DUSE_PLATFORM_AUDIO -DUSE_PLATFORM_FILE_SYSTEM -DSW_PLATFORM_FRAMEBUFFER -DDATAWIN_LOG_CHUNKS \
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"'
 
 # Decoded texture pages are cached up to TEXTURE_CACHE_MB, but on the device
@@ -111,8 +111,8 @@ $(MKTEXPACK): $(MKTEXPACK_SRCS)
 textures.bin: data.win $(MKTEXPACK)
 	$(MKTEXPACK) data.win $@
 
-# Host tool: converts the game's .ogg music to mono ADPCM so the device does
-# not have to decode Vorbis.
+# Host tool: converts the game's .ogg music and the sounds embedded in
+# data.win to mono ADPCM so the device does not have to decode Vorbis.
 MKMUSIC = $(ROOT)/.obj/$(APP)-tools/mkmusic
 MUSIC_RATE ?= 32000
 
@@ -120,8 +120,8 @@ $(MKMUSIC): tools/mkmusic.c platform/ut_music_pack.h
 	@mkdir -p $(dir $@)
 	$(PC_CC) -O2 -w tools/mkmusic.c $(BS_VENDOR)/stb/vorbis/stb_vorbis.c -lm -o $@
 
-music.bin: $(MKMUSIC) $(wildcard music/*.ogg)
-	$(MKMUSIC) music $@ $(MUSIC_RATE)
+music.bin: $(MKMUSIC) data.win $(wildcard music/*.ogg)
+	$(MKMUSIC) data.win music $@ $(MUSIC_RATE)
 
 # Build ELF, then assemble SD card image in build/<app>/
 all: $(OBJ_DIR)/app.elf $(GAME_PACKS) release

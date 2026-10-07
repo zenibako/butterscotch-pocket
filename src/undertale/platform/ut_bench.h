@@ -22,6 +22,7 @@ void utBenchAddFlipTime(uint64_t nanos);
 bool utPlatformShowLogAndHalt(void);
 void utPlatformSetHiresAllowed(bool allowed);
 void utPlatformSetSmoothLowres(bool enabled);
+void utSaveFsSetVolatile(bool enabled);
 void utPlatformSetInputScript(const char *script);
 void utPlatformSetUncapped(bool uncapped);
 

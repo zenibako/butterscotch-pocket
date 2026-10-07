@@ -1,13 +1,15 @@
 /*
- * openfpgaOS audio backend for Butterscotch: streamed music.
+ * openfpgaOS audio backend for Butterscotch.
  *
- * Undertale's music lives in external .ogg files, which mkmusic converts
- * offline into music.bin (mono IMA ADPCM, see ut_music_pack.h). This backend
- * streams those tracks from the pack, decodes and resamples them to the
- * 48 kHz output, mixes up to UT_MAX_VOICES of them in software and feeds the
+ * Every sound the game plays is converted offline by mkmusic into music.bin
+ * (mono IMA ADPCM, see ut_music_pack.h): the external .ogg files it streams
+ * and the short effects embedded in data.win. This backend decodes and
+ * resamples them to the 48 kHz output, mixes them in software and feeds the
  * result to of_audio_write().
  *
- * Sounds embedded in data.win (short effects) are not played yet.
+ * Long tracks are streamed from the pack through a read-ahead buffer. Short
+ * ones are loaded whole the first time they play and kept in a small cache,
+ * so an effect that fires every few frames costs no file access.
  */
 
 #include "of.h"
@@ -32,16 +34,23 @@
 #define UT_STREAM_INDEX_BASE 300000
 
 #define UT_MAX_STREAMS 32
-#define UT_MAX_VOICES 4
+#define UT_MAX_VOICES 16
+/* Voices that can stream at once; each has a read-ahead buffer. */
+#define UT_MAX_STREAMED 4
+
+/* Tracks up to this many compressed bytes (6 s) are played from memory. */
+#define UT_MEMORY_SOUND_BYTES (96u * 1024u)
+/* Memory kept for cached short sounds before the least recently played go. */
+#define UT_SOUND_CACHE_BYTES (3u * 1024u * 1024u)
 
 /* Compressed bytes buffered per voice: 4 s at 32 kHz. Blocking file reads
  * elsewhere (room and texture loads) are bridged from this buffer. */
 #define UT_READAHEAD 65536
 #define UT_REFILL_BELOW (UT_READAHEAD / 2)
 
-/* Output queued ahead of the DAC. Gain, pitch and stop take this long to be
- * heard, so it is a trade against dropouts when a frame runs long. */
-#define UT_QUEUE_TARGET_PAIRS (OF_AUDIO_RATE / 4)
+/* Output queued ahead of the DAC. A sound is heard this long after it is
+ * started, so it is a trade against dropouts when a frame runs long. */
+#define UT_QUEUE_TARGET_PAIRS (OF_AUDIO_RATE / 10)
 #define UT_MIX_CHUNK_PAIRS 256
 #define UT_GAIN_ONE 4096
 
@@ -61,11 +70,13 @@ typedef struct {
     int32_t sourceIndex; /* SOND index or stream index this voice was started from */
     int32_t track;
 
-    /* Compressed read-ahead. */
-    uint8_t buffer[UT_READAHEAD];
+    /* Compressed data being decoded: a stream slot's read-ahead buffer, or a
+     * whole cached sound. */
+    int32_t streamSlot; /* index into streamBuffers, or -1 when played from memory */
+    uint8_t *data;
     uint32_t bufferLen;
     uint32_t bufferPos;
-    uint32_t fileBytePos; /* next byte of the track to read into the buffer */
+    uint32_t fileBytePos; /* streamed: next byte of the track to read into the buffer */
 
     /* ADPCM decode. */
     UtAdpcmState adpcm;
@@ -92,6 +103,12 @@ typedef struct {
     uint32_t trackCount;
     UtStream streams[UT_MAX_STREAMS];
     UtVoice voices[UT_MAX_VOICES];
+    uint8_t streamBuffers[UT_MAX_STREAMED][UT_READAHEAD];
+    /* Short sounds held in memory, indexed by track; NULL when not loaded. */
+    uint8_t **cachedSounds;
+    uint32_t *cachedLastUse;
+    uint32_t cachedBytes;
+    uint32_t useCounter;
     int32_t nextInstanceId;
     int32_t queueCapacity;
     float masterGain;
@@ -107,7 +124,7 @@ static UtAudioSystem *g_audio = NULL;
 static void openPack(UtAudioSystem *ut) {
     FILE *file = fopen(UT_MUSIC_PATH, "rb");
     if (file == NULL) {
-        logInfo("Audio: no %s, music is disabled.\n", UT_MUSIC_PATH);
+        logInfo("Audio: no %s, sound is disabled.\n", UT_MUSIC_PATH);
         return;
     }
 
@@ -115,14 +132,14 @@ static void openPack(UtAudioSystem *ut) {
     uint32_t count = 0;
     if (fread(magic, 1, 4, file) != 4 || memcmp(magic, UT_MUSIC_MAGIC, 4) != 0 ||
         fread(&count, sizeof(count), 1, file) != 1 || count == 0 || count > 4096) {
-        logWarn("Audio: %s is not a music pack, music is disabled.\n", UT_MUSIC_PATH);
+        logWarn("Audio: %s is not an audio pack, sound is disabled.\n", UT_MUSIC_PATH);
         fclose(file);
         return;
     }
 
     UtMusicTrack *tracks = malloc(count * sizeof(UtMusicTrack));
     if (tracks == NULL || fread(tracks, sizeof(UtMusicTrack), count, file) != count) {
-        logWarn("Audio: %s index is truncated, music is disabled.\n", UT_MUSIC_PATH);
+        logWarn("Audio: %s index is truncated, sound is disabled.\n", UT_MUSIC_PATH);
         free(tracks);
         fclose(file);
         return;
@@ -133,7 +150,9 @@ static void openPack(UtAudioSystem *ut) {
     ut->file = file;
     ut->tracks = tracks;
     ut->trackCount = count;
-    logInfo("Audio: music pack with %u tracks.\n", (unsigned) count);
+    ut->cachedSounds = safeCalloc(count, sizeof(uint8_t *));
+    ut->cachedLastUse = safeCalloc(count, sizeof(uint32_t));
+    logInfo("Audio: pack with %u tracks.\n", (unsigned) count);
 }
 
 /* Maps "music/mus_story.ogg" or "mus_story.ogg" to a track index, or -1. */
@@ -178,6 +197,7 @@ static void updateStep(const UtAudioSystem *ut, UtVoice *voice) {
 
 /* Tops up a voice's read-ahead from the pack. Main loop only: this blocks. */
 static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
+    if (voice->streamSlot < 0) return;
     if (voice->bufferLen - voice->bufferPos >= UT_REFILL_BELOW) return;
 
     const UtMusicTrack *track = &ut->tracks[voice->track];
@@ -185,7 +205,7 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
     if (total == 0) return;
 
     uint32_t remaining = voice->bufferLen - voice->bufferPos;
-    memmove(voice->buffer, voice->buffer + voice->bufferPos, remaining);
+    memmove(voice->data, voice->data + voice->bufferPos, remaining);
     voice->bufferPos = 0;
     voice->bufferLen = remaining;
 
@@ -205,7 +225,7 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
         static uint8_t scratch[UT_READAHEAD] __attribute__((aligned(512)));
         size_t got = fread(scratch, 1, want, ut->file);
         if (got == 0) break;
-        memcpy(voice->buffer + voice->bufferLen, scratch, got);
+        memcpy(voice->data + voice->bufferLen, scratch, got);
         voice->bufferLen += (uint32_t) got;
         voice->fileBytePos += (uint32_t) got;
     }
@@ -225,6 +245,8 @@ static bool nextSample(const UtAudioSystem *ut, UtVoice *voice, int32_t *out) {
         voice->adpcm.predictor = 0;
         voice->adpcm.stepIndex = 0;
         voice->havePendingCode = false;
+        /* A stream's refill wraps the data for us; a cached sound starts over. */
+        if (voice->streamSlot < 0) voice->bufferPos = 0;
     }
 
     uint32_t code;
@@ -233,7 +255,7 @@ static bool nextSample(const UtAudioSystem *ut, UtVoice *voice, int32_t *out) {
         voice->havePendingCode = false;
     } else {
         if (voice->bufferPos >= voice->bufferLen) return false;
-        uint8_t byte = voice->buffer[voice->bufferPos++];
+        uint8_t byte = voice->data[voice->bufferPos++];
         code = byte & 0x0F;
         voice->pendingCode = byte >> 4;
         voice->havePendingCode = true;
@@ -327,6 +349,49 @@ static void idleHook(void) {
 }
 #endif
 
+/* ===[ Short-sound cache ]=== */
+
+static bool soundInUse(const UtAudioSystem *ut, int32_t track) {
+    for (int v = 0; v < UT_MAX_VOICES; v++) {
+        if (ut->voices[v].active && ut->voices[v].streamSlot < 0 && ut->voices[v].track == track) return true;
+    }
+    return false;
+}
+
+static void evictSounds(UtAudioSystem *ut, uint32_t needed) {
+    while (ut->cachedBytes + needed > UT_SOUND_CACHE_BYTES) {
+        int32_t victim = -1;
+        for (uint32_t t = 0; t < ut->trackCount; t++) {
+            if (ut->cachedSounds[t] == NULL || soundInUse(ut, (int32_t) t)) continue;
+            if (victim < 0 || ut->cachedLastUse[t] < ut->cachedLastUse[victim]) victim = (int32_t) t;
+        }
+        if (victim < 0) return;
+        free(ut->cachedSounds[victim]);
+        ut->cachedSounds[victim] = NULL;
+        ut->cachedBytes -= trackBytes(&ut->tracks[victim]);
+    }
+}
+
+/* Returns the whole compressed sound, loading it on first use. */
+static uint8_t *cachedSound(UtAudioSystem *ut, int32_t track) {
+    ut->cachedLastUse[track] = ++ut->useCounter;
+    if (ut->cachedSounds[track] != NULL) return ut->cachedSounds[track];
+
+    uint32_t bytes = trackBytes(&ut->tracks[track]);
+    if (bytes == 0) return NULL;
+    evictSounds(ut, bytes);
+
+    uint8_t *data = malloc(bytes);
+    if (data == NULL) return NULL;
+    if (fseek(ut->file, (long) ut->tracks[track].offset, SEEK_SET) != 0 || fread(data, 1, bytes, ut->file) != bytes) {
+        free(data);
+        return NULL;
+    }
+    ut->cachedSounds[track] = data;
+    ut->cachedBytes += bytes;
+    return data;
+}
+
 /* ===[ Voice lookup helpers ]=== */
 
 static bool voiceMatches(const UtVoice *voice, int32_t soundOrInstance) {
@@ -377,6 +442,11 @@ static void utDestroy(AudioSystem *audio) {
     g_audio = NULL;
     if (ut->file != NULL) fclose(ut->file);
     if (ut->dump != NULL) fclose(ut->dump);
+    if (ut->cachedSounds != NULL) {
+        for (uint32_t t = 0; t < ut->trackCount; t++) free(ut->cachedSounds[t]);
+    }
+    free(ut->cachedSounds);
+    free(ut->cachedLastUse);
     free(ut->tracks);
     free(ut);
 }
@@ -416,29 +486,64 @@ static int32_t utPlaySound(AudioSystem *audio, int32_t soundIndex, int32_t prior
         DataWin *dw = audio->audioGroups[0];
         if (soundIndex < 0 || (uint32_t) soundIndex >= dw->sond.count) return -1;
         const Sound *sound = &dw->sond.sounds[soundIndex];
-        /* Only sounds stored as external files are in the music pack. */
-        if (sound->flags & (AUDIO_ENTRY_FLAG_IS_EMBEDDED | AUDIO_ENTRY_FLAG_IS_COMPRESSED)) return -1;
-        track = findTrack(ut, sound->file);
+        /* Streamed sounds are packed under their file name, embedded ones
+         * under the sound's own name. */
+        bool embedded = (sound->flags & (AUDIO_ENTRY_FLAG_IS_EMBEDDED | AUDIO_ENTRY_FLAG_IS_COMPRESSED)) != 0;
+        track = findTrack(ut, embedded ? sound->name : sound->file);
+        if (track < 0) track = findTrack(ut, embedded ? sound->file : sound->name);
         gain = sound->volume;
         pitch = sound->pitch > 0.0f ? sound->pitch : 1.0f;
     }
     if (track < 0) return -1;
 
-    /* Take a free voice, or the one that has been playing longest. */
-    UtVoice *voice = NULL;
-    for (int v = 0; v < UT_MAX_VOICES; v++) {
-        if (!ut->voices[v].active) { voice = &ut->voices[v]; break; }
-    }
-    if (voice == NULL) {
-        voice = &ut->voices[0];
-        for (int v = 1; v < UT_MAX_VOICES; v++) {
-            if (ut->voices[v].instanceId < voice->instanceId) voice = &ut->voices[v];
-        }
+    bool streamed = trackBytes(&ut->tracks[track]) > UT_MEMORY_SOUND_BYTES;
+    uint8_t *soundData = NULL;
+    if (!streamed) {
+        soundData = cachedSound(ut, track);
+        if (soundData == NULL) return -1;
     }
 
-    /* Reset everything except the (large) read-ahead buffer contents. */
-    memset(voice, 0, offsetof(UtVoice, buffer));
-    memset((uint8_t *) voice + offsetof(UtVoice, bufferLen), 0, sizeof(UtVoice) - offsetof(UtVoice, bufferLen));
+    /* Take a free voice. Failing that, take over the oldest one of the same
+     * kind, so effects never cut off the music and the reverse. */
+    UtVoice *voice = NULL;
+    int streamedCount = 0;
+    for (int v = 0; v < UT_MAX_VOICES; v++) {
+        if (!ut->voices[v].active) {
+            if (voice == NULL) voice = &ut->voices[v];
+        } else if (ut->voices[v].streamSlot >= 0) {
+            streamedCount++;
+        }
+    }
+    if (voice == NULL || (streamed && streamedCount >= UT_MAX_STREAMED)) {
+        voice = NULL;
+        for (int v = 0; v < UT_MAX_VOICES; v++) {
+            UtVoice *candidate = &ut->voices[v];
+            if (!candidate->active || (candidate->streamSlot >= 0) != streamed) continue;
+            if (voice == NULL || candidate->instanceId < voice->instanceId) voice = candidate;
+        }
+        if (voice == NULL) return -1;
+        voice->active = false;
+    }
+
+    int32_t streamSlot = -1;
+    if (streamed) {
+        for (int32_t slot = 0; slot < UT_MAX_STREAMED && streamSlot < 0; slot++) {
+            bool taken = false;
+            for (int v = 0; v < UT_MAX_VOICES; v++)
+                taken = taken || (ut->voices[v].active && ut->voices[v].streamSlot == slot);
+            if (!taken) streamSlot = slot;
+        }
+        if (streamSlot < 0) return -1;
+    }
+
+    memset(voice, 0, sizeof(*voice));
+    voice->streamSlot = streamSlot;
+    if (streamed) {
+        voice->data = ut->streamBuffers[streamSlot];
+    } else {
+        voice->data = soundData;
+        voice->bufferLen = trackBytes(&ut->tracks[track]);
+    }
     voice->frac = 65536;
     voice->loop = loop;
     voice->track = track;
@@ -451,8 +556,16 @@ static int32_t utPlaySound(AudioSystem *audio, int32_t soundIndex, int32_t prior
     voice->active = true;
 
     refillVoice(ut, voice);
-    logInfo("Audio: playing %s%s gain %.2f pitch %.2f\n", ut->tracks[track].name, loop ? " (loop)" : "",
-            (double) gain, (double) pitch);
+    /* Effects fire constantly; only log the long tracks (UT_AUDIO_LOG=1 on
+     * desktop logs everything). */
+#ifdef OF_PC
+    static int logAll = -1;
+    if (logAll < 0) logAll = getenv("UT_AUDIO_LOG") != NULL;
+    if (logAll && !streamed) logInfo("Audio: sfx %s gain %.2f pitch %.2f\n", ut->tracks[track].name, (double) gain, (double) pitch);
+#endif
+    if (streamed)
+        logInfo("Audio: playing %s%s gain %.2f pitch %.2f\n", ut->tracks[track].name, loop ? " (loop)" : "",
+                (double) gain, (double) pitch);
     return voice->instanceId;
 }
 
@@ -577,8 +690,12 @@ static void utSetTrackPosition(AudioSystem *audio, int32_t soundOrInstance, floa
         uint32_t sample = (uint32_t) (positionSeconds * (float) track->sampleRate) & ~1u;
         if (sample >= track->sampleCount) sample = 0;
 
-        voice->bufferLen = voice->bufferPos = 0;
-        voice->fileBytePos = sample / 2;
+        if (voice->streamSlot >= 0) {
+            voice->bufferLen = voice->bufferPos = 0;
+            voice->fileBytePos = sample / 2;
+        } else {
+            voice->bufferPos = sample / 2;
+        }
         voice->samplesDecoded = sample;
         voice->adpcm.predictor = voice->adpcm.stepIndex = 0;
         voice->havePendingCode = false;
@@ -600,8 +717,10 @@ static float utGetSoundLength(AudioSystem *audio, int32_t soundOrInstance) {
             track = stream->track;
         } else if (soundOrInstance >= 0 && soundOrInstance < UT_INSTANCE_ID_BASE) {
             DataWin *dw = audio->audioGroups[0];
-            if ((uint32_t) soundOrInstance < dw->sond.count)
+            if ((uint32_t) soundOrInstance < dw->sond.count) {
                 track = findTrack(ut, dw->sond.sounds[soundOrInstance].file);
+                if (track < 0) track = findTrack(ut, dw->sond.sounds[soundOrInstance].name);
+            }
         }
     }
     if (track < 0) return 0.0f;

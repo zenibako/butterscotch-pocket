@@ -44,6 +44,7 @@ void utBenchStart(void) {
     g_startNanos = nowNanos();
     utPlatformSetInputScript(g_script);
     utPlatformSetUncapped(true);
+    utSaveFsSetVolatile(true);
 }
 
 /* SD read throughput, cold and warm.

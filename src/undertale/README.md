@@ -80,31 +80,28 @@ renderer falls back to the PNGs inside `data.win`. Decoded pages are kept
 in a least-recently-used cache that shrinks whenever less than
 `TEXTURE_RESERVE_MB` (default 4) of heap would be left for the game.
 
-## Music
+## Sound
 
-Undertale streams its music from external `.ogg` files. Decoding Vorbis live
-is too heavy for the 100 MHz CPU, so `make` runs `tools/mkmusic` over
-`music/` (a directory or symlink holding the game's `.ogg` files) to produce
-`music.bin` (data slot 6): every track as 32 kHz mono IMA ADPCM, about
-130 MB. `platform/of_audio_system.c` streams tracks from the pack, applies
-pitch and gain, mixes up to four at once and writes 48 kHz output.
+Decoding Vorbis live is too heavy for the 100 MHz CPU, so `make` runs
+`tools/mkmusic` to produce `music.bin` (data slot 6): every sound as 32 kHz
+mono IMA ADPCM, about 134 MB. It combines the external `.ogg` files the game
+streams (from `music/`, a directory or symlink) with the effects embedded in
+`data.win`.
 
-Sounds embedded in `data.win` (short effects) are not played yet.
+`platform/of_audio_system.c` plays them: long tracks stream through a
+read-ahead buffer, short ones are loaded whole on first use and cached. It
+applies pitch and gain, mixes up to 16 voices and writes 48 kHz output.
 
 Desktop: `UT_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
-s16le) for checking without speakers.
+s16le) and `UT_AUDIO_LOG=1` logs every effect, for checking without speakers.
 
-## Benchmark and OS comparison
+## Saves
 
-`--bench` in the app arguments (the `ARGS=` line of the OS config) runs a
-fixed, scripted play-through of the opening with a fixed seed and no frame
-pacing, then prints milliseconds per frame for four sections and halts.
-
-`make compare` adds a Benchmark instance to this core and two more cores
-built against the v0.9 SDK and runtime (`SDK09`, by default the Diablo
-port's checkout next to this repo): `Undertale09os25` and
-`Undertale09os20`. All three share the game data. `make compare-copy`
-puts the lot on the SD card.
+Undertale keeps its progress in a few small files (`file0`, `file9`,
+`undertale.ini`, ...). `platform/ut_save_fs.c` stores them all as one small
+archive in the first save slot (`undertale_0.sav`). The Pocket writes save
+slots back to the SD card when the core is closed from its menu. The
+benchmark neither reads nor writes saves.
 
 ## Button prompts
 
@@ -125,7 +122,6 @@ rebooting.
   the intro, name entry works, and the first room and menu are playable.
 - Use the os25 bitstream. The SDK's runtime `os.bin` paired with os20
   reboot-looped before the OS banner appeared.
-- Music plays on desktop (verified against a reference decode); not yet
-  heard on hardware. Sound effects are not implemented.
-- Saves are not mapped to save slots yet.
+- Music plays on hardware. Sound effects and saves work on desktop; not yet
+  tried on hardware.
 - Loading `data.win` takes about 28 s on the Pocket before the first frame.
