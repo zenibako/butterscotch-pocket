@@ -26,6 +26,8 @@ static unsigned g_shownWork = 0, g_shownPeriod = 0, g_shownAverage = 0;
 static int g_count = 0;
 static uint64_t g_loadNanos[UT_LOAD_KINDS];
 static uint64_t g_phaseNanos[UT_PHASES];
+static uint64_t g_drawNanos[UT_DRAW_KINDS];
+static unsigned g_drawCalls[UT_DRAW_KINDS];
 static UtPhase g_phase = UT_PHASE_OTHER;
 static uint64_t g_phaseStart = 0;
 
@@ -37,6 +39,11 @@ static const uint16_t g_digits[10] = {
 
 void utPerfAddLoad(UtLoadKind kind, uint64_t nanos) {
     g_loadNanos[kind] += nanos;
+}
+
+void platformDrawProfile(int kind, uint64_t nanos) {
+    g_drawNanos[kind] += nanos;
+    g_drawCalls[kind]++;
 }
 
 void utPerfPhase(UtPhase phase) {
@@ -55,9 +62,17 @@ static void reportSlowFrame(unsigned workMs) {
                 phase[UT_PHASE_OUT], phase[UT_PHASE_AUDIO]);
         logInfo("  load: room %u tex %u sfx %u mix %u music %u\n", load[UT_LOAD_ROOM], load[UT_LOAD_TEXTURE],
                 load[UT_LOAD_SOUND], load[UT_LOAD_MIX], load[UT_LOAD_MUSIC]);
+        unsigned draw[UT_DRAW_KINDS];
+        for (int i = 0; i < UT_DRAW_KINDS; i++) draw[i] = (unsigned) (g_drawNanos[i] / 1000000u);
+        logInfo("  draw: s%u/%u p%u/%u t%u/%u b%u/%u r%u/%u\n", g_drawCalls[0], draw[0], g_drawCalls[1], draw[1],
+                g_drawCalls[2], draw[2], g_drawCalls[3], draw[3], g_drawCalls[4], draw[4]);
     }
     for (int i = 0; i < UT_LOAD_KINDS; i++) g_loadNanos[i] = 0;
     for (int i = 0; i < UT_PHASES; i++) g_phaseNanos[i] = 0;
+    for (int i = 0; i < UT_DRAW_KINDS; i++) {
+        g_drawNanos[i] = 0;
+        g_drawCalls[i] = 0;
+    }
 }
 
 void utPerfToggle(void) {

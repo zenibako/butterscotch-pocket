@@ -18,6 +18,15 @@ static char g_lines[UT_LOG_LINES][UT_LOG_LINE_LEN];
 static int g_lineHead = 0; /* line currently being written */
 static int g_linePos = 0;
 
+/* Writing a line to the OS console costs about 20 ms on the Pocket, and the
+ * console is not visible once the game has its own video mode, so the
+ * platform turns it off after the first frame. The overlay buffer is kept. */
+static bool g_console = true;
+
+void utLogSetConsole(bool enabled) {
+    g_console = enabled;
+}
+
 static void keepText(const char *text) {
     for (; *text != '\0'; text++) {
         if (*text == '\n') {
@@ -118,7 +127,7 @@ void utLogPrint(const char *format, ...) {
     va_start(va, format);
     vsnprintf(text, sizeof(text), format, va);
     va_end(va);
-    fputs(text, stdout);
+    if (g_console) fputs(text, stdout);
     keepText(text);
 }
 
@@ -133,7 +142,7 @@ void platformLog(const logType type, const char *format, va_list va) {
     if (atLineStart) {
         unsigned ms = (unsigned) ((now - start) / 1000000u);
         snprintf(text, sizeof(text), "[%3u.%02u] ", ms / 1000, (ms % 1000) / 10);
-        fputs(text, stdout);
+        if (g_console) fputs(text, stdout);
         keepText(text);
     }
 
@@ -144,11 +153,11 @@ void platformLog(const logType type, const char *format, va_list va) {
         case LOG_TYPE_DEBUG:   prefix = "Debug: ";   break;
         case LOG_TYPE_NORMAL:  break;
     }
-    fputs(prefix, stdout);
+    if (g_console) fputs(prefix, stdout);
     keepText(prefix);
 
     vsnprintf(text, sizeof(text), format, va);
-    fputs(text, stdout);
+    if (g_console) fputs(text, stdout);
     keepText(text);
     trackLoad(format, text, now);
 

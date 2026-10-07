@@ -125,20 +125,26 @@ is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
 rebooting.
 
-Any frame that takes longer than 150 ms logs two lines, kept short enough
-to fit the log overlay:
+Any frame that takes longer than 150 ms logs three lines, kept short
+enough to fit the log overlay:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
   load: room 0 tex 0 sfx 0 mix 12 music 0
+  draw: s5/380 p437/20 t12/40 b1/3 r0/0
 ```
 
 The first splits the frame's work time (ms) into game code, drawing,
 presenting (overlays, copy, flip) and the audio update. The second gives
 time spent within those on particular jobs: loading the room, texture pages
-and sound effects, mixing audio, and reading streamed music. Press R after
+and sound effects, mixing audio, and reading streamed music. The third
+gives calls/ms for each kind of draw call: sprites, sprite parts (tiles),
+text, tiled backgrounds and rectangles. Press R after
 a hitch to read it. Taking a Pocket screenshot freezes the core for a few
 seconds, which shows up here as one very slow frame.
+
+Log lines stop going to the OS console after the first frame: the console
+is hidden by then and each line written to it cost about 20 ms.
 
 ## Status
 

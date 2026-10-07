@@ -70,17 +70,21 @@ when a dialogue box or new room first appears.
 
 ## Instruments
 
-**Slow-frame log lines.** Any frame over 150 ms of work logs two lines that
-fit the overlay's 53 columns:
+**Slow-frame log lines.** Any frame over 150 ms of work logs three lines
+that fit the overlay's 53 columns:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
   load: room 0 tex 0 sfx 0 mix 12 music 0
+  draw: s5/380 p437/20 t12/40 b1/3 r0/0
 ```
 
 Phases first (game code, drawing, presenting, audio update), then jobs
 inside them (room, texture and sound-effect loads, audio mixing, streamed
-music reads). For a hitch, ask the user to press R straight afterwards and
+music reads), then calls/ms per kind of draw call (sprites, sprite parts,
+text, tiled backgrounds, rectangles; `-DSW_DRAW_PROFILE`). Writing a log
+line to stdout costs about 20 ms on the Pocket, so the console is switched
+off after the first frame; keep logging out of per-frame paths regardless. For a hitch, ask the user to press R straight afterwards and
 screenshot the log. Two traps when reading these: a Pocket screenshot
 freezes the core for 2-4 s and appears as one huge frame with nothing
 attributed, and the log overlay only shows the first 53 characters of a

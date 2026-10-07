@@ -272,6 +272,9 @@ void platformSwapBuffers(void) {
     uint64_t flipStart = nowNanos();
     of_video_flip();
     utBenchAddFlipTime(nowNanos() - flipStart);
+#ifndef OF_PC
+    utLogSetConsole(false);
+#endif
     utPerfPhase(UT_PHASE_OTHER);
 }
 
