@@ -356,6 +356,15 @@ static void pumpOutput(UtAudioSystem *ut) {
     if (want > 0) mixAndWrite(ut, want);
 }
 
+/* The OS's file idle hook does not exist on every OS version, and nothing
+ * covers long stretches of drawing, so the loaders and the draw profiler
+ * also call this between pieces of work. Without it a frame longer than the
+ * queue is deep (100 ms) leaves a gap in the sound. */
+void platformBusyTick(void) {
+    /* A dump follows game time instead of the queue; see updateAudio. */
+    if (g_audio != NULL && g_audio->file != NULL && g_audio->dump == NULL) pumpOutput(g_audio);
+}
+
 #ifndef OF_PC
 static void idleHook(void) {
     if (g_audio != NULL && g_audio->file != NULL) pumpOutput(g_audio);

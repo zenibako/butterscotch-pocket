@@ -44,6 +44,14 @@ void utPerfAddLoad(UtLoadKind kind, uint64_t nanos) {
 void platformDrawProfile(int kind, uint64_t nanos) {
     g_drawNanos[kind] += nanos;
     g_drawCalls[kind]++;
+
+    /* Top the audio queue up every few milliseconds of drawing. */
+    static uint64_t sinceTick = 0;
+    sinceTick += nanos;
+    if (sinceTick >= UT_DRAW_TICK_NANOS) {
+        sinceTick = 0;
+        platformBusyTick();
+    }
 }
 
 void utPerfPhase(UtPhase phase) {

@@ -44,6 +44,8 @@ void utPerfAddSleep(uint64_t nanos);
  * text, tiled backgrounds and rectangles. All times in ms. */
 #define UT_DRAW_KINDS 5
 void platformDrawProfile(int kind, uint64_t nanos);
+#define UT_DRAW_TICK_NANOS 5000000u
+void platformBusyTick(void);
 typedef enum { UT_LOAD_ROOM, UT_LOAD_TEXTURE, UT_LOAD_SOUND, UT_LOAD_MIX, UT_LOAD_MUSIC, UT_LOAD_SEEK, UT_LOAD_KINDS } UtLoadKind;
 typedef enum { UT_PHASE_OTHER, UT_PHASE_STEP, UT_PHASE_AUDIO, UT_PHASE_DRAW, UT_PHASE_OUT, UT_PHASES } UtPhase;
 #define UT_PERF_SLOW_FRAME_MS 150
