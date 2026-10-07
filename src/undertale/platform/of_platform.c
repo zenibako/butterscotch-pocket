@@ -176,15 +176,7 @@ void platformSetNextFramebuffer(uint16_t *framebuffer, int width, int height, in
 #ifdef OF_PC
 /* Desktop-only verification aid: UT_DUMP_FRAME=<n> writes frame n of the
  * RGB555 output to UT_DUMP_PATH (default frame.ppm) and exits. */
-static void dumpFrameIfRequested(void) {
-    static int frame = 0;
-    static int target = -2;
-    if (target == -2) {
-        const char *env = getenv("UT_DUMP_FRAME");
-        target = env != NULL ? atoi(env) : -1;
-    }
-    if (target < 0 || frame++ != target) return;
-
+static void writeFrameDump(void) {
     const char *path = getenv("UT_DUMP_PATH");
     FILE *f = fopen(path != NULL ? path : "frame.ppm", "wb");
     if (f == NULL) exit(1);
@@ -200,6 +192,17 @@ static void dumpFrameIfRequested(void) {
     }
     fclose(f);
     exit(0);
+}
+
+static void dumpFrameIfRequested(void) {
+    static int frame = 0;
+    static int target = -2;
+    if (target == -2) {
+        const char *env = getenv("UT_DUMP_FRAME");
+        target = env != NULL ? atoi(env) : -1;
+    }
+    if (target < 0 || frame++ != target) return;
+    writeFrameDump();
 }
 #endif
 
@@ -241,6 +244,36 @@ void platformSwapBuffers(void) {
     uint64_t flipStart = nowNanos();
     of_video_flip();
     utBenchAddFlipTime(nowNanos() - flipStart);
+}
+
+/* Shows the recent log full-screen and never returns. Used for the benchmark
+ * report and for fatal errors: the OS text terminal does not display once the
+ * app has switched to its own 16-bit video modes, so the text is drawn into
+ * the framebuffer instead. Returns false if no frame has been drawn yet, in
+ * which case the OS terminal is still on screen and the caller can use it. */
+bool utPlatformShowLogAndHalt(void) {
+    if (g_nextFb == NULL || !g_showingFramebuffer) return false;
+
+    /* Reuse the renderer's buffer as a 320x240 page; it is at least that big. */
+    g_nextW = UT_SCREEN_W;
+    g_nextH = UT_SCREEN_H;
+    matchVideoMode(g_nextW, g_nextH);
+    if (g_modeW != g_nextW || g_modeH != g_nextH) return false;
+
+    for (;;) {
+        utPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
+        uint8_t *dst = of_video_surface();
+        size_t rowBytes = (size_t) g_nextW * sizeof(uint16_t);
+        for (int y = 0; y < g_nextH; y++)
+            memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
+        of_video_flip();
+#ifdef OF_PC
+        if (getenv("UT_DUMP_PATH") != NULL) writeFrameDump();
+        exit(0);
+#endif
+        of_input_poll();
+        usleep(100000);
+    }
 }
 
 void *platformGetProcAddress(const char *name) {

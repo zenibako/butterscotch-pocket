@@ -12,14 +12,19 @@
 #include "of.h"
 
 #include "of_diag.h"
+#include "of_perf.h"
+#include "ut_bench.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 void utDiagHalt(const char *why) {
+    utLogPrint("[undertale] %s -- halted.\n", why);
+    utPlatformShowLogAndHalt();
+
+    /* Still on the OS terminal (nothing drawn yet): park there. */
     of_video_set_display_mode(OF_DISPLAY_TERMINAL);
-    printf("\n[undertale] %s -- halted.\n", why);
     for (;;) {
         of_input_poll();
         usleep(100000);

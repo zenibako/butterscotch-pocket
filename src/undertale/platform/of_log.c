@@ -7,6 +7,7 @@
 #include "gettime.h"
 #include "of_perf.h"
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,16 @@ const char *utLogLine(int age) {
     if (age < 0 || age >= UT_LOG_LINES - 1) return "";
     /* The head line is still being written; age 0 is the last complete one. */
     return g_lines[(g_lineHead - 1 - age + 2 * UT_LOG_LINES) % UT_LOG_LINES];
+}
+
+void utLogPrint(const char *format, ...) {
+    char text[256];
+    va_list va;
+    va_start(va, format);
+    vsnprintf(text, sizeof(text), format, va);
+    va_end(va);
+    fputs(text, stdout);
+    keepText(text);
 }
 
 void platformLog(const logType type, const char *format, va_list va) {

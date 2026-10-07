@@ -63,8 +63,24 @@ static void drawLogChar(uint16_t *fb, int width, int x, int y, char c) {
     }
 }
 
+void utPerfDrawLogScreen(uint16_t *fb, int width, int height) {
+    int rows = height / UT_LOG_CELL_H;
+    if (rows > UT_LOG_LINES - 1) rows = UT_LOG_LINES - 1;
+    int columns = width / UT_LOG_CELL_W;
+
+    for (int i = 0; i < width * height; i++) fb[i] = 0;
+    for (int row = 0; row < rows; row++) {
+        const char *line = utLogLine(rows - 1 - row);
+        for (int col = 0; col < columns && line[col] != '\0'; col++)
+            drawLogChar(fb, width, col * UT_LOG_CELL_W, row * UT_LOG_CELL_H, line[col]);
+    }
+}
+
+/* The in-game overlay shows fewer lines so most of the scene stays visible. */
+#define UT_LOG_OVERLAY_ROWS 11
+
 static void drawLog(uint16_t *fb, int width, int height) {
-    int rows = UT_LOG_LINES - 1;
+    int rows = UT_LOG_OVERLAY_ROWS;
     int columns = width / UT_LOG_CELL_W;
     int top = height - rows * UT_LOG_CELL_H;
     if (top < 16) return;

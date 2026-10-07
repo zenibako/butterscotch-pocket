@@ -4,6 +4,7 @@
 
 #include "gettime.h"
 #include "of_diag.h"
+#include "of_perf.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -69,11 +70,11 @@ static void ioTest(const char *label, uint32_t chunk, uint32_t misalign) {
     fclose(file);
 
     unsigned kbPerSecond = micros > 0 ? (unsigned) ((uint64_t) done * 1000000u / 1024u / micros) : 0;
-    printf("%-21s %6u KB/s\n", label, kbPerSecond);
+    utLogPrint("%-21s %6u KB/s\n", label, kbPerSecond);
 }
 
 static void ioReport(void) {
-    printf("SD read speed (2 MB of data.win):\n");
+    utLogPrint("SD read speed (2 MB of data.win):\n");
     ioTest("4 KB reads", 4096, 0);
     ioTest("64 KB reads", 65536, 0);
     ioTest("1 MB reads", UT_IO_MAX_CHUNK, 0);
@@ -102,24 +103,21 @@ void utBenchFrame(void) {
     if (++g_section < UT_BENCH_SECTIONS) return;
 
     g_running = false;
-#ifndef OF_PC
-    of_video_set_display_mode(OF_DISPLAY_TERMINAL);
-#endif
-    printf("\n\n=== Undertale benchmark ===\n");
-    printf("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
-    printf("ms per frame:          work   total\n");
+    utLogPrint("=== Undertale benchmark ===\n");
+    utLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
+    utLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
     unsigned totalMs = 0;
     for (int i = 0; i < UT_BENCH_SECTIONS; i++) {
         unsigned frames = (unsigned) (g_sections[i].lastFrame - firstFrame);
         unsigned total = g_sectionMs[i] * 10u / frames;
         unsigned work = (g_sectionMs[i] - g_sectionFlipMs[i]) * 10u / frames;
-        printf("%-21s %3u.%u  %3u.%u\n", g_sections[i].name, work / 10, work % 10, total / 10, total % 10);
+        utLogPrint("%-21s %3u.%u  %3u.%u\n", g_sections[i].name, work / 10, work % 10, total / 10, total % 10);
         firstFrame = g_sections[i].lastFrame;
         totalMs += g_sectionMs[i];
     }
-    printf("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
-    printf("work = total minus display flip\n");
+    utLogPrint("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
+    utLogPrint("work = total minus display flip\n");
     ioReport();
     utDiagHalt("benchmark finished");
 }
