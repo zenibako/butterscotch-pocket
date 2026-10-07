@@ -1,3 +1,69 @@
+# Undertale for the Analogue Pocket
+
+An unofficial port of Undertale to the [Analogue Pocket](https://www.analogue.co/pocket),
+built from [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch)
+(an open-source GameMaker: Studio runner) running on
+[openfpgaOS](https://github.com/openfpgaOS/openfpgaSDK). This repository is a
+fork of the openfpgaOS SDK; the port lives in [`src/undertale/`](src/undertale/)
+and its core definition in [`dist/undertale/`](dist/undertale/).
+
+**No game data is included.** You need your own copy of Undertale v1.08; the
+build reads its `data.win` and music files and nothing from the game is
+redistributed here.
+
+## Status
+
+Playable on a Pocket (firmware 2.7): intro, naming, the Ruins, battles,
+music, sound effects and saves all work, and a save from the desktop game
+can be imported.
+
+| | Measured on a Pocket |
+|---|---|
+| Start-up to first frame | about 19 s |
+| Overworld | about 32 ms per frame (the game targets 33) |
+| Battles, native 640x480 | about 47 ms per frame |
+| Battles, smoothed 320x240 (L) | about 28 ms per frame |
+
+Known rough edges: battles run below full speed, some room changes pause
+for a second or more, and only the opening hours have been played on
+hardware. MiSTer is untested.
+
+## Building
+
+Only built on macOS so far, with Homebrew's `riscv64-elf-gcc` and `gnu-sed`.
+
+```bash
+git clone https://github.com/zenibako/undertale-pocket.git
+cd undertale-pocket/src/undertale
+git clone -b openfpga https://github.com/zenibako/Butterscotch.git butterscotch
+
+# Your own game data: data.win (named game.ios inside the macOS app) and
+# the folder holding the game's .ogg files.
+cp /path/to/data.win data.win
+ln -s /path/to/folder-with-ogg-files music
+
+export PATH="$(brew --prefix gnu-sed)/libexec/gnubin:$PATH"
+export USE_SDK_CONTAINER=0
+make            # builds the core and its data packs into ../../build/pocket/undertale/
+make copy       # copies it to a mounted Pocket SD card
+```
+
+Controls, the texture and sound packs, saves, the benchmark and the
+on-device diagnostics are described in
+[`src/undertale/README.md`](src/undertale/README.md).
+
+## Licences and credits
+
+- Undertale is by Toby Fox. This project is not affiliated with or endorsed
+  by him, and requires a legitimately owned copy of the game.
+- Butterscotch is AGPL-3.0, so a core built from this repository is covered
+  by the AGPL. The changes this port makes to it are on the
+  [`openfpga` branch](https://github.com/zenibako/Butterscotch/tree/openfpga)
+  of a fork, on top of its software renderer (draft PR #429).
+- The openfpgaOS SDK is Apache-2.0; its own README follows unchanged.
+
+---
+
 # openfpgaOS SDK
 
 Build games for the [Analogue Pocket](https://www.analogue.co/pocket) and [MiSTer](https://mister-devel.github.io/MkDocs_MiSTer/) (DE10-Nano / SuperStation One) in C or C++. The same app `.elf` runs unchanged on both platforms — see [Multiplatform](#multiplatform).

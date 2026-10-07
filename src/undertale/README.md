@@ -2,8 +2,8 @@
 
 [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch), an
 open-source GameMaker: Studio runner, built as an openfpgaOS app. It uses
-Butterscotch's software renderer (draft PR #429) drawing 320x240 RGB555
-straight into the openfpgaOS framebuffer.
+Butterscotch's software renderer (draft PR #429) drawing RGB555 straight
+into the openfpgaOS framebuffer, at 320x240 or 640x480 depending on the room.
 
 You must supply your own `data.win` from Undertale v1.08.
 
@@ -138,4 +138,4 @@ and drawing. Press R after a hitch to read it.
   reboot-looped before the OS banner appeared.
 - Music, sound effects and saves work on hardware, including a save
   imported from the desktop game.
-- Loading `data.win` takes about 28 s on the Pocket before the first frame.
+- Loading `data.win` takes about 19 s on the Pocket before the first frame.
