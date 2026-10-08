@@ -54,6 +54,7 @@
  * of the pack so that the next one starts on a whole sector. */
 #define UT_READ_PIECE 16384
 #define UT_READ_ALIGN 512
+#define UT_START_PIECES 2
 
 /* Output queued ahead of the DAC. A sound is heard this long after it is
  * started, so it is a trade against dropouts when a frame runs long. */
@@ -216,7 +217,13 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
     voice->bufferPos = 0;
     voice->bufferLen = remaining;
 
-    while (voice->bufferLen < UT_READAHEAD) {
+    /* One piece per call (a piece is a second of sound, a frame uses a
+     * thirtieth of that), so starting a track does not read the whole
+     * read-ahead in the frame that also loads a room. A voice that is
+     * nearly empty gets two, to ride out a slow frame straight after. */
+    int pieces = remaining < UT_READ_PIECE ? UT_START_PIECES : 1;
+
+    while (voice->bufferLen < UT_READAHEAD && pieces-- > 0) {
         if (voice->fileBytePos >= total) {
             if (!voice->loop) break;
             voice->fileBytePos = 0;
