@@ -68,8 +68,8 @@ static void reportSlowFrame(unsigned workMs) {
         for (int i = 0; i < UT_PHASES; i++) phase[i] = (unsigned) (g_phaseNanos[i] / 1000000u);
         logInfo("slow %u: step %u draw %u out %u snd %u\n", workMs, phase[UT_PHASE_STEP], phase[UT_PHASE_DRAW],
                 phase[UT_PHASE_OUT], phase[UT_PHASE_AUDIO]);
-        logInfo("  load: rm %u tx %u fx %u mix %u mus %u sk %u\n", load[UT_LOAD_ROOM], load[UT_LOAD_TEXTURE],
-                load[UT_LOAD_SOUND], load[UT_LOAD_MIX], load[UT_LOAD_MUSIC], load[UT_LOAD_SEEK]);
+        logInfo("  load: rm %u tx %u fx %u mix %u mus %u\n", load[UT_LOAD_ROOM], load[UT_LOAD_TEXTURE],
+                load[UT_LOAD_SOUND], load[UT_LOAD_MIX], load[UT_LOAD_MUSIC]);
         unsigned draw[UT_DRAW_KINDS];
         for (int i = 0; i < UT_DRAW_KINDS; i++) draw[i] = (unsigned) (g_drawNanos[i] / 1000000u);
         logInfo("  draw: s%u/%u p%u/%u t%u/%u b%u/%u r%u/%u\n", g_drawCalls[0], draw[0], g_drawCalls[1], draw[1],

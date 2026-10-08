@@ -47,9 +47,13 @@
 
 /* Compressed bytes buffered per voice: 4 s at 32 kHz. Blocking file reads
  * elsewhere (room and texture loads) are bridged from this buffer. */
-#define UT_SEEK_PROBE_BYTES 4096
 #define UT_READAHEAD 65536
-#define UT_REFILL_BELOW (UT_READAHEAD / 2)
+/* The read-ahead is topped up in pieces this size as soon as one fits, so
+ * no single read holds a frame up for long (about 15 ms at 1.1 MB/s), and
+ * the output queue is fed between pieces. Reads end on a 512-byte boundary
+ * of the pack so that the next one starts on a whole sector. */
+#define UT_READ_PIECE 16384
+#define UT_READ_ALIGN 512
 
 /* Output queued ahead of the DAC. A sound is heard this long after it is
  * started, so it is a trade against dropouts when a frame runs long. */
@@ -201,7 +205,7 @@ static void updateStep(const UtAudioSystem *ut, UtVoice *voice) {
 /* Tops up a voice's read-ahead from the pack. Main loop only: this blocks. */
 static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
     if (voice->streamSlot < 0) return;
-    if (voice->bufferLen - voice->bufferPos >= UT_REFILL_BELOW) return;
+    if (voice->bufferLen - voice->bufferPos > UT_READAHEAD - UT_READ_PIECE) return;
 
     const UtMusicTrack *track = &ut->tracks[voice->track];
     uint32_t total = trackBytes(track);
@@ -218,27 +222,30 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
             voice->fileBytePos = 0;
         }
         uint32_t want = UT_READAHEAD - voice->bufferLen;
-        if (want > total - voice->fileBytePos) want = total - voice->fileBytePos;
+        if (want > UT_READ_PIECE) want = UT_READ_PIECE;
+        uint32_t filePos = track->offset + voice->fileBytePos;
+        if (want >= total - voice->fileBytePos) {
+            want = total - voice->fileBytePos;
+        } else {
+            uint32_t past = (filePos + want) % UT_READ_ALIGN;
+            if (past >= want) break; /* less than a sector of room left */
+            want -= past;
+        }
 
-        /* Getting to the right place in the pack is timed apart from the
-         * bulk of the read: the seek plus the first block. */
-        uint64_t seekStart = nowNanos();
-        if (fseek(ut->file, (long) (track->offset + voice->fileBytePos), SEEK_SET) != 0) break;
+        uint64_t readStart = nowNanos();
+        if (fseek(ut->file, (long) filePos, SEEK_SET) != 0) break;
         /* Read into static memory and copy: on openfpgaOS a read straight
          * into the heap (where the voices live) is about ten times slower.
          * The idle hook may mix from this voice while fread blocks; it only
          * touches bytes below bufferLen, which is not advanced until after. */
         static uint8_t scratch[UT_READAHEAD] __attribute__((aligned(512)));
-        size_t first = want < UT_SEEK_PROBE_BYTES ? want : UT_SEEK_PROBE_BYTES;
-        size_t got = fread(scratch, 1, first, ut->file);
-        uint64_t readStart = nowNanos();
-        utPerfAddLoad(UT_LOAD_SEEK, readStart - seekStart);
-        if (got == first && want > first) got += fread(scratch + first, 1, want - first, ut->file);
+        size_t got = fread(scratch, 1, want, ut->file);
         utPerfAddLoad(UT_LOAD_MUSIC, nowNanos() - readStart);
         if (got == 0) break;
         memcpy(voice->data + voice->bufferLen, scratch, got);
         voice->bufferLen += (uint32_t) got;
         voice->fileBytePos += (uint32_t) got;
+        platformBusyTick();
     }
 }
 
