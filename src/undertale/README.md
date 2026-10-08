@@ -91,6 +91,13 @@ streams (from `music/`, a directory or symlink) with the effects embedded in
 read-ahead buffer, short ones are loaded whole on first use and cached. It
 applies pitch and gain, mixes up to 16 voices and writes 48 kHz output.
 
+About 100 ms of output is kept queued. It is topped up once per frame and
+also from `platformBusyTick`, which the loaders call between 64 KB read
+pieces and the draw profiler calls every 5 ms of drawing; without that a
+frame longer than the queue leaves a gap in the music. The OS's file idle
+hook is registered too, but the v0.7 runtime does not appear to call it.
+The read-ahead is refilled in 16 KB pieces that end on a sector boundary.
+
 Desktop: `UT_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
 s16le) and `UT_AUDIO_LOG=1` logs every effect, for checking without speakers.
 
@@ -130,8 +137,8 @@ enough to fit the log overlay:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
-  load: room 0 tex 0 sfx 0 mix 12 music 0
-  draw: s5/380 p437/20 t12/40 b1/3 r0/0
+  load: rm 0 tx 0 fx 0 mix 12 mus 0
+  draw: s5/380 p1/9 t12/40 b1/3 r0/0
 ```
 
 The first splits the frame's work time (ms) into game code, drawing,
@@ -139,7 +146,9 @@ presenting (overlays, copy, flip) and the audio update. The second gives
 time spent within those on particular jobs: loading the room, texture pages
 and sound effects, mixing audio, and reading streamed music. The third
 gives calls/ms for each kind of draw call: sprites, sprite parts (tiles),
-text, tiled backgrounds and rectangles. Press R after
+text, tiled backgrounds and rectangles. A room's tiles normally show as a
+single part (`p1`): Butterscotch composes each run of tiles into one picture
+and reuses it. Press R after
 a hitch to read it. Taking a Pocket screenshot freezes the core for a few
 seconds, which shows up here as one very slow frame.
 
@@ -155,3 +164,5 @@ is hidden by then and each line written to it cost about 20 ms.
 - Music, sound effects and saves work on hardware, including a save
   imported from the desktop game.
 - Loading `data.win` takes about 19 s on the Pocket before the first frame.
+- The ruins room outside Toriel's house runs at about 25 ms of work per frame
+  (33 ms is full speed). Each room change still has one frame of 150-250 ms.

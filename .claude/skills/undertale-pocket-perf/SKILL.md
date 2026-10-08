@@ -68,6 +68,34 @@ Texture page loads take about 1.3 s for a 1024x2048 page: a cold read of
 the run-length-encoded page plus the decode. That is the "brief freeze"
 when a dialogue box or new room first appears.
 
+## Findings from play sessions (2026-10-07)
+
+- **Stacked fade overlays.** Undertale's door script creates a full-screen
+  fade object on every frame the player overlaps the door: once if the
+  player is at the doorway's edge (a wall pushes them back out), 13 times
+  through the middle. This is the game's behaviour, not a port bug, and it
+  reproduces on desktop (`650:R*26` against `650:R*30` in the door replay).
+  Each full-screen blend is about 37 ms. Butterscotch now folds consecutive
+  identical solid overlays into one blend (`swrOverlayFlush`).
+- **Sound gaps.** Slow frames showed a few ms of mixing across multi-second
+  loads, so the OS file idle hook was not feeding audio on the v0.7
+  runtime (*inferred from those timings*). `platformBusyTick` now feeds the
+  queue between read pieces and during drawing; the user confirmed the
+  cutouts stopped.
+- **Tile-heavy rooms.** The ruins room outside Toriel's house drew 437
+  tiles for 26 ms and ran at 44-48 ms of work per frame. With the tile-run
+  cache (`drawTileRun`) the user measured about 25 ms.
+- **What a slow frame's draw time contains.** The held overlay and the
+  tile picture are drawn outside or under different counters than before:
+  an overlay's blend lands in whichever call flushes it, often none of the
+  five kinds, so the kinds can add up to less than the draw phase.
+- **Still open.** One frame of 150-250 ms on each room change (room load
+  19-75 ms plus the first draw), and one unexplained 699 ms music read
+  seen before reads were cut to 16 KB pieces.
+- **The log overlay costs about 60 ms a frame** (average work 107 ms with
+  it on against 44 ms off in the same room). Read the Select counters with
+  the log off.
+
 ## Instruments
 
 **Slow-frame log lines.** Any frame over 150 ms of work logs three lines
@@ -75,8 +103,8 @@ that fit the overlay's 53 columns:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
-  load: room 0 tex 0 sfx 0 mix 12 music 0
-  draw: s5/380 p437/20 t12/40 b1/3 r0/0
+  load: rm 0 tx 0 fx 0 mix 12 mus 0
+  draw: s5/380 p1/9 t12/40 b1/3 r0/0
 ```
 
 Phases first (game code, drawing, presenting, audio update), then jobs
@@ -86,8 +114,9 @@ text, tiled backgrounds, rectangles; `-DSW_DRAW_PROFILE`). Writing a log
 line to stdout costs about 20 ms on the Pocket, so the console is switched
 off after the first frame; keep logging out of per-frame paths regardless. For a hitch, ask the user to press R straight afterwards and
 screenshot the log. Two traps when reading these: a Pocket screenshot
-freezes the core for 2-4 s and appears as one huge frame with nothing
-attributed, and the log overlay only shows the first 53 characters of a
+freezes the core for 2-4 s and appears as one huge frame, attributed to
+whatever was running (a 3 s "music read" or "texture load" right after a
+screenshot is the screenshot), and the log overlay only shows the first 53 characters of a
 line, so anything longer is invisible on the device.
 
 **Benchmark** (`--bench` in the OS config's `ARGS=`; `make compare` adds a
