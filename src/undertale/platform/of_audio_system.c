@@ -49,12 +49,10 @@
  * elsewhere (room and texture loads) are bridged from this buffer. */
 #define UT_READAHEAD 65536
 /* The read-ahead is topped up in pieces this size as soon as one fits, so
- * no single read holds a frame up for long (about 15 ms at 1.1 MB/s), and
- * the output queue is fed between pieces. Reads end on a 512-byte boundary
+ * no single read holds a frame up for long. Reads end on a 512-byte boundary
  * of the pack so that the next one starts on a whole sector. */
 #define UT_READ_PIECE 16384
 #define UT_READ_ALIGN 512
-#define UT_START_PIECES 2
 
 /* Output queued ahead of the DAC. A sound is heard this long after it is
  * started, so it is a trade against dropouts when a frame runs long. */
@@ -89,6 +87,7 @@ typedef struct {
     /* ADPCM decode. */
     UtAdpcmState adpcm;
     uint32_t samplesDecoded;
+    bool startedThisFrame; /* no read-ahead yet; see refillStreams */
     uint32_t pendingCode;
     bool havePendingCode;
 
@@ -217,11 +216,8 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
     voice->bufferPos = 0;
     voice->bufferLen = remaining;
 
-    /* One piece per call (a piece is a second of sound, a frame uses a
-     * thirtieth of that), so starting a track does not read the whole
-     * read-ahead in the frame that also loads a room. A voice that is
-     * nearly empty gets two, to ride out a slow frame straight after. */
-    int pieces = remaining < UT_READ_PIECE ? UT_START_PIECES : 1;
+    /* One piece per call; see refillStreams for how calls are rationed. */
+    int pieces = 1;
 
     while (voice->bufferLen < UT_READAHEAD && pieces-- > 0) {
         if (voice->fileBytePos >= total) {
@@ -252,7 +248,6 @@ static void refillVoice(UtAudioSystem *ut, UtVoice *voice) {
         memcpy(voice->data + voice->bufferLen, scratch, got);
         voice->bufferLen += (uint32_t) got;
         voice->fileBytePos += (uint32_t) got;
-        platformBusyTick();
     }
 }
 
@@ -497,12 +492,43 @@ static void utUpdate(AudioSystem *audio, float deltaTime) {
     utPerfPhase(UT_PHASE_DRAW);
 }
 
+/* Reads music ahead, a little per frame. A piece is a second of sound and a
+ * frame plays a thirtieth of that, so one piece per frame, given to the
+ * stream with the least buffered, keeps every stream full. A track that
+ * starts is not read at all until the next frame: tracks start on room
+ * changes, and filling two read-aheads there cost 160 ms of an already slow
+ * frame. Its sound begins a frame late instead. A stream that is empty or
+ * about to run dry is read regardless: that is every track on the frame
+ * after it starts, and otherwise only happens after a very long frame.
+ * Nothing is mixed between these reads, so tracks started together (the
+ * layered house music) stay in step. */
+static void refillStreams(UtAudioSystem *ut) {
+    UtVoice *neediest = NULL;
+    uint32_t least = UT_READAHEAD;
+    for (int v = 0; v < UT_MAX_VOICES; v++) {
+        UtVoice *voice = &ut->voices[v];
+        if (!voice->active || voice->streamSlot < 0) continue;
+        if (voice->startedThisFrame) {
+            voice->startedThisFrame = false;
+            continue;
+        }
+        uint32_t buffered = voice->bufferLen - voice->bufferPos;
+        if (buffered < UT_READ_PIECE / 2) {
+            refillVoice(ut, voice);
+            continue;
+        }
+        if (buffered < least) {
+            least = buffered;
+            neediest = voice;
+        }
+    }
+    if (neediest != NULL) refillVoice(ut, neediest);
+}
+
 static void updateAudio(UtAudioSystem *ut, float deltaTime) {
     if (ut->file == NULL) return;
 
-    for (int v = 0; v < UT_MAX_VOICES; v++) {
-        if (ut->voices[v].active) refillVoice(ut, &ut->voices[v]);
-    }
+    refillStreams(ut);
 
     if (ut->dump != NULL) {
         /* Dump mode follows game time rather than the output queue, so the
@@ -599,8 +625,7 @@ static int32_t utPlaySound(AudioSystem *audio, int32_t soundIndex, int32_t prior
     voice->gainStepPerPair = 0;
     updateStep(ut, voice);
     voice->active = true;
-
-    refillVoice(ut, voice);
+    voice->startedThisFrame = true;
     /* Effects fire constantly; only log the long tracks (UT_AUDIO_LOG=1 on
      * desktop logs everything). */
 #ifdef OF_PC
@@ -745,7 +770,6 @@ static void utSetTrackPosition(AudioSystem *audio, int32_t soundOrInstance, floa
         voice->adpcm.predictor = voice->adpcm.stepIndex = 0;
         voice->havePendingCode = false;
         voice->finished = false;
-        refillVoice(ut, voice);
     }
 }
 

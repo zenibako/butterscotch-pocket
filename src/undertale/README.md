@@ -96,7 +96,9 @@ also from `platformBusyTick`, which the loaders call between 64 KB read
 pieces and the draw profiler calls every 5 ms of drawing; without that a
 frame longer than the queue leaves a gap in the music. The OS's file idle
 hook is registered too, but the v0.7 runtime does not appear to call it.
-The read-ahead is refilled in 16 KB pieces that end on a sector boundary.
+The read-ahead is refilled in 16 KB pieces that end on a sector boundary,
+one piece per frame; a track that starts is first read on the following
+frame, so room changes do not also pay for music start-up.
 
 Desktop: `UT_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
 s16le) and `UT_AUDIO_LOG=1` logs every effect, for checking without speakers.
