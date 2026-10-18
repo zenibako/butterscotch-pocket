@@ -64,3 +64,17 @@ path = "src/sdk/platforms/mister/fatfs/**"
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 2025, ChaN"
 SPDX-License-Identifier = "BSD-1-Clause"
+
+# Go conversion tools migrated from zenibako/Butterscotch; preserve AGPL scope.
+[[annotations]]
+path = ["cmd/**", "prep/**", "plugin/**", "plugin.json", "internal/**", "integration/**", "go.mod", "go.sum", "release/pipeline.py", "release/test_pipeline.py"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Chandler Anderson and Butterscotch contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# Patched decoders retain their original MIT notices.
+[[annotations]]
+path = ["third_party/vorbis/**", "third_party/oggvorbis/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2016 Johannes Freymuth"
+SPDX-License-Identifier = "MIT"

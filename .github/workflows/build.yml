@@ -1,0 +1,199 @@
+name: Build and verify distribution
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (vMAJOR.MINOR.PATCH)
+        required: true
+        default: v0.1.0
+        type: string
+      create_draft:
+        description: Create a draft release after all checks pass
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version || '0.0.0-dev' }}
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go test -C third_party/vorbis ./...
+
+  tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Read immutable core source pin
+        id: pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('release/core.lock.json'))
+          print('repository=' + lock['core']['repository'])
+          print('commit=' + lock['core']['commit'])
+          PY
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: out/core
+      - name: Install pinned WASM compilers
+        run: |
+          curl -fL -o "$RUNNER_TEMP/tinygo.tar.gz" https://github.com/tinygo-org/tinygo/releases/download/v0.43.0/tinygo0.43.0.linux-amd64.tar.gz
+          echo "ca9fc6d055e3889462dea4450a2e42a92242d88b5c362a7ec39bdb563413d78a  $RUNNER_TEMP/tinygo.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/tinygo.tar.gz" -C "$RUNNER_TEMP"
+          curl -fL -o "$RUNNER_TEMP/binaryen.tar.gz" https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz
+          echo "2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  $RUNNER_TEMP/binaryen.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/binaryen.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - name: Build six native bundles and both WASM targets
+        run: python3 release/pipeline.py build-tools
+      - name: Verify actual release plugin, WASI and independent C reference
+        env:
+          REQUIRE_PLUGIN_TESTS: '1'
+          REQUIRE_REFERENCE_TESTS: '1'
+          BUTTERSCOTCH_SOURCE: ${{ github.workspace }}/out/core
+          POCKET_PLUGIN_WASM: ${{ github.workspace }}/out/artifacts/plugin.wasm
+        run: |
+          go test ./... -count=1
+          go test -C third_party/vorbis ./...
+          go vet -C third_party/oggvorbis ./...
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-tools
+          path: out/artifacts/*
+          if-no-files-found: error
+
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate locked runtime and packaging regressions
+        run: |
+          python3 release/pipeline.py validate
+          python3 -m unittest discover -s release -p 'test_*.py'
+      - name: Read immutable core source pin
+        id: pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('release/core.lock.json'))
+          print('repository=' + lock['core']['repository'])
+          print('commit=' + lock['core']['commit'])
+          print('compiler=' + lock['compiler']['package'] + '=' + lock['compiler']['version'])
+          PY
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: out/core
+      - name: Install locked RISC-V compiler
+        env:
+          COMPILER_PACKAGE: ${{ steps.pin.outputs.compiler }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "$COMPILER_PACKAGE" binutils-riscv64-unknown-elf make
+      - name: Rebuild both programs without game data
+        run: python3 release/pipeline.py build-core --out out/build
+      - name: Assemble public SD-card package
+        run: python3 release/pipeline.py package-core --programs out/build/programs --version "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-core
+          path: out/artifacts/*
+          if-no-files-found: error
+
+  distribution:
+    needs: [native, tools, core]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read immutable core source pin
+        id: pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('release/core.lock.json'))
+          print('repository=' + lock['core']['repository'])
+          print('commit=' + lock['core']['commit'])
+          PY
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: out/core
+      - name: Read immutable runtime source pin
+        id: runtime-pin
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('release/core.lock.json'))
+          print('repository=' + lock['runtime']['repository'])
+          print('commit=' + lock['runtime']['commit'])
+          PYTHON
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.runtime-pin.outputs.repository }}
+          ref: ${{ steps.runtime-pin.outputs.commit }}
+          path: out/runtime-source
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: out/artifacts
+          merge-multiple: true
+      - name: Require complete release assets and write checksums
+        run: |
+          python3 release/pipeline.py assemble-release
+          cd out/artifacts
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: butterscotch-pocket-distribution
+          path: out/artifacts/*
+          if-no-files-found: error
+
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_draft)
+    needs: distribution
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: butterscotch-pocket-distribution
+          path: release-assets
+      - name: Create complete draft for manual publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd release-assets
+          sha256sum -c SHA256SUMS
+          gh release create "$RELEASE_VERSION" --draft --target "$GITHUB_SHA" --title "$RELEASE_VERSION" --notes '' ./*

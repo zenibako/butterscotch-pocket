@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "core": {
+    "repository": "zenibako/Butterscotch",
+    "commit": "f6261c51af5d2ed41719e7288fcb318a2918a433"
+  },
+  "sdk": {
+    "base_repository": "openfpgaOS/openfpgaSDK",
+    "base_commit": "a408ddc12aed0dfaa4aa22c06af82f829db77126",
+    "api_source": "src/firmware/api",
+    "archive": "release/sdk.tar.gz"
+  },
+  "runtime": {
+    "repository": "zenibako/openfpgaCore",
+    "commit": "902a8adc11309c50c8954af2864ddf893c8b1b0c",
+    "variant": "os25",
+    "savestates": true,
+    "clock_mhz": 100,
+    "worst_setup_slack_ns": -0.777
+  },
+  "compiler": {
+    "ubuntu": "24.04",
+    "package": "gcc-riscv64-unknown-elf",
+    "version": "13.2.0-11ubuntu1+12"
+  },
+  "sha256": {
+    "release/sdk.tar.gz": "b0e7ef588548ade68242b8e303eb7872d489c933a1d1f668b1d79b8bffbeee6b",
+    "release/runtime/SAVESTATES_RUNTIME.json": "f9cae03e97ecfcdabb427633c090c20d0e0f60a98f4bea6b155626b447d4b94d",
+    "release/runtime/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
+    "release/runtime/os.bin": "cc299efffc0f8fcafaaa265e329439806e061bd4cceb0ab6a96f16f8b2b7fe27",
+    "release/runtime/os25.rbf_r": "33a56e60af0ead8c94441f38a5b4d7b4aa37594302969e09969e46f108dd6985"
+  }
+}
