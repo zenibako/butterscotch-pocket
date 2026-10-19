@@ -160,7 +160,8 @@ plugin if you installed v0.7.0, which used separate input/output folders.
 2. Run **Butterscotch Game Data**, select the game, then choose
    **Install and keep originals** (first/default) or
    **Install and discard originals**. Review the source folder shown in the
-   confirmation.
+   confirmation. **Find my game files** offers three short steps for macOS,
+   Windows or Linux, with the game's resource location and SD-card destination.
 3. Keep Pocket Sync open until installation finishes. All three game files
    are installed directly into `/Assets/butterscotch/common/` with the names
    in the table above. No manual copy or merge is needed.

@@ -21,6 +21,8 @@ type Session struct {
 	root        string
 	log         func(string)
 	state, game string
+	guideOS     string
+	guideStep   int
 	sequence    uint64
 	pending     choice
 }
@@ -48,7 +50,7 @@ func (s *Session) Start() ([]byte, error) {
 	return s.games()
 }
 func (s *Session) confirm() ([]byte, error) {
-	return s.menu("confirm", fmt.Sprintf("Copy full game resources to:\nAssets/butterscotch/common/%s\n\nDiscard deletes this entire source folder after a successful install.", s.game), "Install and keep originals", "Install and discard originals", "Back", "Exit")
+	return s.menu("confirm", fmt.Sprintf("Copy full game resources to:\nAssets/butterscotch/common/%s\n\nDiscard deletes this entire source folder after a successful install.", s.game), "Install and keep originals", "Install and discard originals", "Find my game files", "Back", "Exit")
 }
 func (s *Session) exit() ([]byte, error) {
 	s.state = "exit"
@@ -162,6 +164,13 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		}
 		return s.confirm()
 	case "confirm":
+		if value == "Find my game files" {
+			s.guideStep = 0
+			if s.guideOS == "" {
+				return s.guidePlatforms()
+			}
+			return s.guidePage()
+		}
 		if value == "Back" {
 			return s.games()
 		}
@@ -178,6 +187,26 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 			originals = result.Warning
 		}
 		return s.menu("done", "Installed in Assets/butterscotch/common.\n"+originals+" Ready to play.", "Back", "Exit")
+	case "guide-os":
+		if value == "Back" {
+			return s.confirm()
+		}
+		s.guideOS = value
+		s.guideStep = 0
+		return s.guidePage()
+	case "guide":
+		if value == "Ready to install" {
+			return s.confirm()
+		}
+		if value == "Back" {
+			if s.guideStep == 0 {
+				return s.guidePlatforms()
+			}
+			s.guideStep--
+		} else {
+			s.guideStep++
+		}
+		return s.guidePage()
 	case "failed":
 		if value == "Retry" {
 			return s.confirm()

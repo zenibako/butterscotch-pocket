@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,6 +123,25 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 			t.Fatal(err)
 		}
 		confirm := get(answer(menu, tc.label))
+		guide := get(answer(confirm, "Find my game files"))
+		if strings.Contains(guide.Query, "1/3") {
+			guide = get(answer(guide, "Back"))
+		}
+		for _, platform := range []string{"macOS", "Windows", "Linux"} {
+			page := get(answer(guide, platform))
+			for step := 1; step <= 3; step++ {
+				if !strings.HasPrefix(page.Query, fmt.Sprintf("%d/3:", step)) || len(page.Query) > 210 {
+					t.Fatalf("invalid %s guide step: %s", platform, page.Query)
+				}
+				if step < 3 {
+					page = get(answer(page, "Next"))
+				}
+			}
+			confirm = get(answer(page, "Ready to install"))
+			page = get(answer(confirm, "Find my game files"))
+			guide = get(answer(page, "Back"))
+		}
+		confirm = get(answer(guide, "Back"))
 		done := get(answer(confirm, "Install and keep originals"))
 		if !strings.Contains(done.Query, "Installed in Assets/butterscotch/common") {
 			t.Fatalf("not completed: %s", done.Query)
