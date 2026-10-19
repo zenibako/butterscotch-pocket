@@ -145,11 +145,8 @@ containing both `plugin.wasm` and `plugin.json`; a source checkout or a draft
 release is not installable through this dialog. The core and plugin use the
 same repository URL, but installing one does not install the other.
 
-**Release availability:** The direct-install workflow below is for the next
-plugin release. The currently published v0.7.0 plugin still uses the earlier
-separate-input/output workflow. Adding the repository URL installs the latest
-published stable plugin; this source change is not available there until a new
-version is published. The desktop CLI steps above remain available.
+The direct-install workflow below requires **v0.7.1 or newer**. Update the
+plugin if you installed v0.7.0, which used separate input/output folders.
 
 1. Install the core, then copy original resources into the connected card:
    - **Undertale:** `/Assets/butterscotch/common/undertale/`, with its native

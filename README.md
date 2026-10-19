@@ -32,7 +32,7 @@ Choose either method; both use the same Go conversion library:
 | Method | What to use |
 |---|---|
 | Desktop CLI | Download `prepare-data-<os>-<arch>.tar.gz` from the same release. Supports macOS (`darwin`), Windows and Linux, each on `amd64` or `arm64`. Use `darwin-arm64` on Apple silicon Macs. |
-| Pocket Sync plugin | In **Plugins → Add plugin via URL**, enter `https://github.com/zenibako/butterscotch-pocket`, then choose **Verify & install plugin**. Stage originals under `Assets/butterscotch/common/undertale/` or `deltarune/` on the connected card, then install directly from the plugin (next release). |
+| Pocket Sync plugin | In **Plugins → Add plugin via URL**, enter `https://github.com/zenibako/butterscotch-pocket`, then choose **Verify & install plugin**. Stage originals under `Assets/butterscotch/common/undertale/` or `deltarune/` on the connected card, then install directly from the plugin. |
 
 The plugin's installer reads `plugin.wasm` and `plugin.json` from the latest
 stable release. Installing the plugin and installing the core are separate
@@ -41,12 +41,12 @@ releases. See the [game-data guide](GAME-DATA.md) for exact source layouts,
 macOS `.app` resource copying, output paths and updating prepared data.
 
 The desktop CLI writes a new output folder and refuses an existing one; copy
-all three generated game files together. The next plugin release installs the
+all three generated game files together. The plugin installs the
 three files directly into `Assets/butterscotch/common/`, with a choice to keep
 (default) or discard the selected original source folder after a successful
 install. Preserve native filenames within the separate source folders.
-The published v0.7.0 plugin still uses its earlier separate-output workflow;
-these plugin instructions require the next published version. Neither method
+These plugin instructions require v0.7.1 or newer; v0.7.0 uses the earlier
+separate-output workflow. Neither method
 changes your computer installation or writes saves. Ordinary game progress lives under
 `/Saves/butterscotch/common/`; back up your SD card before updates.
 
