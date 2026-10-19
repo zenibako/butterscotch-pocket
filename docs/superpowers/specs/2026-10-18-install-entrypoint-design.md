@@ -6,6 +6,19 @@ Approved in chat on 2026-10-18: use zenibako/butterscotch-pocket as the installa
 
 The fork README preserves upstream Butterscotch documentation and delegates Pocket documentation to src/openfpga/README.md. Its src/openfpga/GAME-DATA.md and docs/superpowers/specs/2026-10-18-go-game-data-design.md define conversion formats, source preservation, staging and independent native/WASI/Extism checks. Those contracts remain in force. The catalog Add Core form supports a repository plus an asset filter; Pocket Sync plugins consume plugin.wasm and plugin.json from the latest release.
 
+## Plugin staging contract update
+
+The later user-approved direct-install change supersedes the plugin's original
+staging/output contract referenced above: complete originals live under
+`Assets/butterscotch/common/undertale/` or `deltarune/`; the plugin installs the
+selected game's three files directly into `common/`, with keep (default) or
+explicit discard of only the selected source folder after success. Installation
+failure restores previous files and keeps originals; deletion failure is a
+warning after success. Work/recovery paths and the plugin manifest are hidden.
+CLI preparation continues to preserve sources and refuse existing output
+folders. See [GAME-DATA.md](../../../GAME-DATA.md) for current layouts and release
+availability.
+
 ## Architecture
 
 Preserve this repository history and legacy SDK/port directories. The root becomes the shared Go module, installation documentation, release pins and orchestration. The runner and platform source remain in the fork. The complete Go module moves together, including patched dependencies and tests, with imports updated wholesale. C reference tests use an explicit checkout of the pinned fork.

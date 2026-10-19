@@ -1,5 +1,5 @@
 {
   "name": "Butterscotch Game Data",
-  "description": "Prepare your staged Undertale 1.08 or Deltarune Chapter 1 installation into a new SD-card output folder.",
+  "description": "Install Undertale 1.08 or Deltarune Chapter 1 from staged Assets originals, with a choice to keep or discard originals after success.",
   "allowed_hosts": []
 }

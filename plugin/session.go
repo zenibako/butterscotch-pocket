@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/zenibako/butterscotch-pocket/prep"
@@ -50,7 +48,7 @@ func (s *Session) Start() ([]byte, error) {
 	return s.games()
 }
 func (s *Session) confirm() ([]byte, error) {
-	return s.menu("confirm", fmt.Sprintf("Copy the full contents of your legally owned game installation into Butterscotch-input/%s on the SD card, including all music and supporting files. Then choose Prepare. Output will be a new Butterscotch-prepared/%s folder; existing output is refused. Existing installation and saves are preserved.", s.game, s.game), "Prepare", "Back", "Exit")
+	return s.menu("confirm", fmt.Sprintf("Copy the full original game resources into Assets/butterscotch/common/%s on the SD card. Installation writes the converted files directly into Assets/butterscotch/common, replacing this game's previous converted files. Keep originals is the default. Discard removes the entire %s source folder only after installation succeeds. The other game and saves are untouched.", s.game, s.game), "Install and keep originals", "Install and discard originals", "Back", "Exit")
 }
 func (s *Session) exit() ([]byte, error) {
 	s.state = "exit"
@@ -168,11 +166,18 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 			return s.games()
 		}
 		s.state = "preparing"
-		e := s.prepare()
+		result, e := s.install(value == "Install and discard originals")
 		if e != nil {
-			return s.menu("failed", fmt.Sprintf("Preparation failed: %s. Correct the staged installation, or move an existing prepared output aside before retrying.", e), "Retry", "Back", "Exit")
+			return s.menu("failed", fmt.Sprintf("Installation failed: %s. Correct the original game resources in Assets/butterscotch/common/%s before retrying.", e, s.game), "Retry", "Back", "Exit")
 		}
-		return s.menu("done", fmt.Sprintf("Prepared Butterscotch-prepared/%s. Merge its Assets folder into the SD-card root to install the prepared data. Existing installation and saves were untouched by preparation.", s.game), "Back", "Exit")
+		originals := "Originals kept."
+		if result.OriginalsDiscarded {
+			originals = "Originals discarded."
+		}
+		if result.Warning != "" {
+			originals = result.Warning
+		}
+		return s.menu("done", "Installed in Assets/butterscotch/common. Ready to play. "+originals+" Saves and the other game were untouched.", "Back", "Exit")
 	case "failed":
 		if value == "Retry" {
 			return s.confirm()
@@ -184,23 +189,6 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 	return nil, fmt.Errorf("invalid session state")
 }
 
-// Reject redirection of the fixed SD-card locations, including their game child.
-// The supplied root itself may use the host's normal mount alias.
-func (s *Session) prepare() error {
-	for _, base := range []string{"Butterscotch-input", "Butterscotch-prepared"} {
-		for _, path := range []string{filepath.Join(s.root, base), filepath.Join(s.root, base, s.game)} {
-			info, err := os.Lstat(path)
-			if os.IsNotExist(err) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("staging and prepared paths must not be symbolic links")
-			}
-		}
-	}
-	_, err := prep.Prepare(prep.Options{Game: s.game, Source: filepath.Join(s.root, "Butterscotch-input", s.game), Output: filepath.Join(s.root, "Butterscotch-prepared", s.game), Progress: s.log})
-	return err
+func (s *Session) install(discard bool) (prep.InstallResult, error) {
+	return prep.Install(prep.InstallOptions{Root: s.root, Game: s.game, DiscardOriginals: discard, Progress: s.log})
 }

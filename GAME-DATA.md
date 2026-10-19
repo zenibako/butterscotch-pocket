@@ -1,9 +1,11 @@
 # Add your own game files
 
 Butterscotch Pocket includes the core and game programs. You supply the game
-data from your own computer installation. The preparation tool converts its
-textures and audio and writes a new folder ready to copy to your SD card.
-It does not download games, change your original installation or write saves.
+data from your own computer installation. The desktop preparation tool converts
+its textures and audio into a new folder ready to copy to your SD card. The
+Pocket Sync plugin can install converted files directly on the card, as
+described below. Neither downloads games, changes your computer installation
+or writes saves.
 
 The supported targets are **Undertale v1.08** and **Deltarune Chapter 1**.
 Checking a data file's bytecode version does not establish compatibility with
@@ -143,21 +145,29 @@ containing both `plugin.wasm` and `plugin.json`; a source checkout or a draft
 release is not installable through this dialog. The core and plugin use the
 same repository URL, but installing one does not install the other.
 
+**Release availability:** The direct-install workflow below is for the next
+plugin release. The currently published v0.7.0 plugin still uses the earlier
+separate-input/output workflow. Adding the repository URL installs the latest
+published stable plugin; this source change is not available there until a new
+version is published. The desktop CLI steps above remain available.
+
 The plugin reads only files under the connected SD-card root. It cannot open
-an arbitrary path on your computer. Its staged-file search is not recursive:
-copy the game resources into the following layout instead of placing an
-unexpanded `.app` bundle in the input folder.
+an arbitrary path on your computer. Copy complete original resources into the
+following layout; do not place an unexpanded `.app` bundle in these folders.
 
 1. Install the core. Stage Undertale's resources under
-   `/Butterscotch-input/undertale/`, with `game.ios`, `data.win` or `game.unx`
-   directly inside that folder and its original music beside it or in `music/`.
-   For Deltarune, stage `chapter1_mac`, `chapter1_windows` or `chapter1_linux`
-   alongside `mus` under `/Butterscotch-input/deltarune/`.
-2. Run **Butterscotch Game Data** in Pocket Sync, select the game, and confirm
-   preparation. Keep Pocket Sync open until it reports success.
-3. Merge **Assets** from `/Butterscotch-prepared/<game>/` into the card root.
-   The plugin creates a separate output folder; it does not install its output
-   over the active game files or saves.
+   `/Assets/butterscotch/common/undertale/`, with `game.ios`, `data.win` or
+   `game.unx` directly inside that folder and its original music beside it or
+   in `music/`. For Deltarune, stage `chapter1_mac`, `chapter1_windows` or
+   `chapter1_linux` alongside `mus` under
+   `/Assets/butterscotch/common/deltarune/`.
+2. Run **Butterscotch Game Data** in Pocket Sync and select the game. Choose
+   **Install and keep originals** (the first, default option) or
+   **Install and discard originals**. The confirmation identifies the selected
+   staged source folder; review it before proceeding.
+3. Keep Pocket Sync open until installation finishes. The plugin installs all
+   three converted files directly into `/Assets/butterscotch/common/` using
+   the filenames in the table above. No extra copy or merge is needed.
 
 For a default Steam installation on macOS, replace `/Volumes/POCKET` below
 with your connected card's path. Run only the commands for the game you own.
@@ -165,24 +175,41 @@ with your connected card's path. Run only the commands for the game you own.
 
 ```sh
 # Undertale: copy Resources contents, not the enclosing UNDERTALE.app.
-mkdir -p "/Volumes/POCKET/Butterscotch-input/undertale"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Butterscotch-input/undertale"
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Assets/butterscotch/common/undertale"
 
 # Deltarune Chapter 1: keep the chapter and shared music directories together.
-mkdir -p "/Volumes/POCKET/Butterscotch-input/deltarune"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Butterscotch-input/deltarune/chapter1_mac"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Butterscotch-input/deltarune/mus"
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/deltarune"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/chapter1_mac"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/mus"
 ```
 
 On Windows or Linux, copy the installed files into the equivalent layout with
 your file manager. Keep Deltarune's `audiogroup1.dat`, `lang/lang_en.json` and
 music inside the chapter directory, with shared music in its sibling `mus`.
 
-The output folder must not already exist. Move a previous prepared folder
-elsewhere before another conversion. Keep enough free space for staged
-originals and the new output together. After installing the prepared Assets,
-you can remove your private staging and preparation folders from the card.
-Do not upload them to a release.
+**Keep originals** leaves the selected staged source folder on the card, so
+you can install again without moving or removing a previous output folder.
+**Discard originals** removes the entire selected staged source folder only
+after converted installation succeeds: `undertale/` or `deltarune/` beneath
+`Assets/butterscotch/common/`. This does not remove the other game's source
+folder, your computer's Steam installation, the installed converted files or
+saves. Keep enough free space for staged originals, conversion work and any
+previous installed files during replacement.
+
+If conversion or installation fails, the plugin preserves the staged
+originals and restores the previously installed files. If installation succeeds
+but discarding originals fails, the plugin reports a cleanup warning; the
+converted game remains installed. Review any reported remnants before removing
+them manually.
+
+Temporary work and recovery remnants are hidden; there are no separate
+user-facing input or prepared-output folders. The plugin keeps its installation
+report at `/Assets/butterscotch/common/.butterscotch-<game>.json` (for example,
+`.butterscotch-undertale.json`). The desktop CLI continues to write
+`PREPARED-DATA.json` in its separate output folder and refuses existing output
+folders. Keep all original and converted game data private; never upload it
+to a release.
 
 ## Building from source
 

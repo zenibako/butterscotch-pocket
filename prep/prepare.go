@@ -238,7 +238,7 @@ func Prepare(o Options) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	defer os.RemoveAll(stage)
+	defer removeTree(stage)
 	ready := filepath.Join(stage, "ready")
 	common := filepath.Join(ready, "Assets/butterscotch/common")
 	if e = os.MkdirAll(common, 0755); e != nil {

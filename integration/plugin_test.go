@@ -112,7 +112,7 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 	}
 	menu := get(call("start", nil))
 	for _, tc := range []struct{ game, label string }{{"undertale", "Undertale 1.08"}, {"deltarune", "Deltarune Chapter 1"}} {
-		source := filepath.Join(pocket, "Butterscotch-input", tc.game)
+		source := filepath.Join(pocket, "Assets/butterscotch/common", tc.game)
 		if err := testgame.Write(source, tc.game); err != nil {
 			t.Fatal(err)
 		}
@@ -122,20 +122,25 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 			t.Fatal(err)
 		}
 		confirm := get(answer(menu, tc.label))
-		done := get(answer(confirm, "Prepare"))
-		if !strings.Contains(done.Query, "Merge its Assets") {
+		done := get(answer(confirm, "Install and keep originals"))
+		if !strings.Contains(done.Query, "Installed in Assets/butterscotch/common") {
 			t.Fatalf("not completed: %s", done.Query)
 		}
-		output := filepath.Join(pocket, "Butterscotch-prepared", tc.game)
+		output := pocket
 		compareAssets(t, native, output)
+		assertNoInstallWork(t, pocket)
 		menu = get(answer(done, "Back"))
 		confirm = get(answer(menu, tc.label))
-		failure := get(answer(confirm, "Prepare"))
-		if !strings.Contains(strings.ToLower(failure.Query), "already exists") {
-			t.Fatalf("did not refuse overwrite: %s", failure.Query)
+		done = get(answer(confirm, "Install and discard originals"))
+		if !strings.Contains(done.Query, "Originals discarded") {
+			t.Fatalf("discard installation did not complete: %s", done.Query)
 		}
 		compareAssets(t, native, output)
-		menu = get(answer(failure, "Back"))
+		if _, err := os.Stat(source); !os.IsNotExist(err) {
+			t.Fatal("original source folder remains after discard", err)
+		}
+		assertNoInstallWork(t, pocket)
+		menu = get(answer(done, "Back"))
 	}
 	if !strings.Contains(log.String(), "Converting textures\n") || !strings.Contains(log.String(), "Audio: processing track 1\n") {
 		t.Fatalf("missing host progress: %s", log.String())
@@ -147,5 +152,19 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 	if err != nil || !bytes.Equal(kept, []byte("keep progress")) {
 		t.Fatal("save changed")
 	}
-	t.Log("Actual Extism exports converted both games, matched native bytes, refused overwrite, preserved saves, logged progress, and handled Kill.")
+	t.Log("Actual Extism exports converted both games, matched native bytes, installed into Assets, tested keep/discard, preserved saves, logged progress, and handled Kill.")
+}
+
+func assertNoInstallWork(t *testing.T, pocket string) {
+	t.Helper()
+	common := filepath.Join(pocket, "Assets/butterscotch/common")
+	entries, err := os.ReadDir(common)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".butterscotch-install-") || strings.HasPrefix(entry.Name(), ".butterscotch-data-") {
+			t.Fatalf("left temporary installation data: %s", entry.Name())
+		}
+	}
 }

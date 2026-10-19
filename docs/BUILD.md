@@ -4,7 +4,13 @@ The approved [repository split design](superpowers/specs/2026-10-18-install-entr
 and [implementation plan](superpowers/plans/2026-10-18-install-entrypoint.md)
 keep the runner in the fork while this repository owns installation, tools
 and release packaging. The [game-data guide](../GAME-DATA.md) defines the
-supported inputs and preparation contract.
+supported inputs and preparation contract. The next plugin release reads
+complete originals staged under `Assets/butterscotch/common/undertale/` or
+`deltarune/`, installs the selected game's three converted files directly into
+`common/`, and offers keep (default) or discard of that source folder after
+success. CLI preparation retains its separate-output/refuse-existing contract.
+The stable v0.7.0 plugin predates direct installation; publish a new complete
+release before presenting this workflow as available through Pocket Sync.
 
 ## Dependency lock
 
