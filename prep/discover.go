@@ -180,16 +180,6 @@ func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 		d.expected["lang_en.json"] = true
 	}
 	dirs := []string{folder, filepath.Join(folder, "music"), filepath.Join(folder, "mus"), filepath.Join(root, "mus"), filepath.Join(filepath.Dir(folder), "mus")}
-	// The flat card layout may hold different games' same-named music. Install
-	// uses a game-specific preferred directory and root fallback; the general
-	// CLI continues rejecting conflicting duplicate tracks across its directories.
-	if limitRoot != "" {
-		preferred := "music"
-		if game == "deltarune" {
-			preferred = "mus"
-		}
-		dirs = []string{filepath.Join(folder, preferred), folder}
-	}
 	seen := map[string]bool{}
 	var lowerData []byte
 	if game == "deltarune" {
@@ -226,9 +216,6 @@ func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 				continue
 			}
 			if old, ok := d.external[name]; ok {
-				if limitRoot != "" {
-					continue
-				}
 				a, e := readInput(old)
 				if e != nil {
 					return nil, e

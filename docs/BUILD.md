@@ -5,16 +5,13 @@ and [implementation plan](superpowers/plans/2026-10-18-install-entrypoint.md)
 keep the runner in the fork while this repository owns installation, tools
 and release packaging. The [game-data guide](../GAME-DATA.md) defines the
 supported inputs and preparation contract. The next plugin release reads
-originals directly in `Assets/butterscotch/common/` (`data.win` for Undertale,
-`deltarune.win` for Deltarune), installs the selected game's three files there,
-and offers keep (default) or discard of identified redundant source audio and
-Deltarune bank/language files after success. Required game data, other-game
-shared audio and unrecognized files remain. Cleanup never deletes `common/`
-or entire music directories; changed source files are kept with a warning.
-Work/recovery paths are hidden under `Assets/butterscotch/.butterscotch-install-*`.
-Undertale source audio lives at the common root or in `common/music/`; all
-Deltarune chapter and shared audio goes in `common/mus/` to prevent collisions.
-CLI preparation retains its separate-output/refuse-existing contract.
+originals under `Assets/butterscotch/common/undertale/` or `deltarune/`,
+preserving native filenames and source layouts. It installs the selected game's
+three converted files directly into `common/` and offers keep (default) or
+discard of the entire selected source folder only after success. The other
+game, installed game files and saves remain untouched. Work/recovery paths are
+hidden under `Assets/butterscotch/common/.butterscotch-install-*`. CLI preparation
+retains its separate-output/refuse-existing contract.
 The stable v0.7.0 plugin predates direct installation; publish a new complete
 release before presenting this workflow as available through Pocket Sync.
 

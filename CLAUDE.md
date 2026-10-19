@@ -30,21 +30,16 @@ No commercial game data, user saves, debug logs, SD-card/device metadata or
 private staging folders may enter source control or release assets. Supported
 input versions are Undertale v1.08 and Deltarune Chapter 1. CLI preparation
 preserves source files, refuses existing output folders and keeps failed
-partial conversions unpublished. The plugin reads originals directly from
-`Assets/butterscotch/common/`: Undertale as `data.win`, Deltarune as
-`deltarune.win`, with Deltarune bank/language files alongside. Undertale audio
-lives at the common root or in `music/`; all Deltarune chapter and shared audio
-lives in `common/mus/` to avoid cross-game filename collisions.
-Rename Deltarune data before copying to avoid overwriting Undertale. Install
-only the selected game's three files into `common/`. Keep originals is the
-first/default choice; explicit discard removes only identified redundant
-selected-game audio and Deltarune bank/language files after success. Retain
-core-required data files, other-game shared audio and unrecognized files;
-never delete `common/` or entire music directories. Hash-check before deletion,
-keep changed files and warn. Failed installation restores previous files and
-preserves originals; failed deletion reports a warning after successful install.
-Other game data and saves are untouched. Use hidden work/recovery paths under
-`Assets/butterscotch/.butterscotch-install-*` and
+partial conversions unpublished. The plugin reads originals from
+`Assets/butterscotch/common/undertale/` or `deltarune/`, preserving native
+filenames and directory layouts. Deltarune chapter and shared `mus/` folders
+remain siblings within its source folder. Install only the selected game's
+three converted files directly into `common/`. Keep originals is first/default;
+explicit discard removes the entire selected source folder only after success.
+Never remove `common/`, the other game's source folder, installed game files
+or saves. Failed installation restores previous files and preserves originals;
+failed deletion reports a warning after successful install. Use hidden work
+and recovery paths under `Assets/butterscotch/common/.butterscotch-install-*` and
 `common/.butterscotch-<game>.json` for the plugin report. The plugin sees only
 the connected card; do not add arbitrary host-path access or network hosts.
 

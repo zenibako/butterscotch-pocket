@@ -169,11 +169,11 @@ func sourceAncestor(out, source string) (bool, error) {
 
 // Prepare publishes a complete converted folder; failures leave no staged output.
 func Prepare(o Options) (string, error) {
-	return prepare(o, nil, "")
+	return prepare(o, "")
 }
 
-// prepare permits the card installer to inspect consumed inputs and bound discovery.
-func prepare(o Options, inspect func(*discovered) error, limitRoot string) (string, error) {
+// prepare lets the card installer bound discovery to its selected source folder.
+func prepare(o Options, limitRoot string) (string, error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return "", fmt.Errorf("choose undertale or deltarune")
 	}
@@ -208,11 +208,6 @@ func prepare(o Options, inspect func(*discovered) error, limitRoot string) (stri
 	d, e := discoverBounded(o.Game, src, limitRoot)
 	if e != nil {
 		return "", e
-	}
-	if inspect != nil {
-		if e = inspect(d); e != nil {
-			return "", e
-		}
 	}
 	report := func(s string) {
 		if o.Progress != nil {

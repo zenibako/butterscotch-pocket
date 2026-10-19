@@ -151,102 +151,60 @@ separate-input/output workflow. Adding the repository URL installs the latest
 published stable plugin; this source change is not available there until a new
 version is published. The desktop CLI steps above remain available.
 
-The plugin reads only files under the connected SD-card root. It cannot open
-an arbitrary path on your computer. Put original files directly into
-`/Assets/butterscotch/common/`; do not create a per-game source folder or copy
-an unexpanded `.app` bundle.
+1. Install the core, then copy original resources into the connected card:
+   - **Undertale:** `/Assets/butterscotch/common/undertale/`, with its native
+     `data.win`, `game.ios` or `game.unx` and original music beside it or in
+     `music/`.
+   - **Deltarune:** `/Assets/butterscotch/common/deltarune/`, with
+     `chapter1_mac`, `chapter1_windows` or `chapter1_linux` alongside shared
+     `mus/`. Keep the chapter's data, `audiogroup1.dat`, `lang/lang_en.json`
+     and music together. Preserve native filenames; no data-file renaming is
+     needed. Separate source folders prevent music filename collisions.
+2. Run **Butterscotch Game Data**, select the game, then choose
+   **Install and keep originals** (first/default) or
+   **Install and discard originals**. Review the source folder shown in the
+   confirmation.
+3. Keep Pocket Sync open until installation finishes. All three game files
+   are installed directly into `/Assets/butterscotch/common/` with the names
+   in the table above. No manual copy or merge is needed.
 
-1. Install the core. Copy Undertale's original data file into `common/` as
-   **`data.win`**, including when its original name is `game.ios` or `game.unx`.
-   Copy original `.ogg` music beside it or into `common/music/`.
-   For Deltarune Chapter 1, copy its original data file as **`deltarune.win`**,
-   its `audiogroup1.dat` into `common/`, its `lang/lang_en.json` into
-   `common/lang/`. Copy shared `mus/` into `common/mus/` and put **all**
-   chapter `.ogg` files into that same `common/mus/` folder. Keep Deltarune
-   audio out of the common root: filenames such as `audio_intronoise.ogg`
-   also occur in Undertale and would overwrite its originals. Rename
-   Deltarune's data file **before copying** so it
-   cannot overwrite Undertale's `data.win`.
-2. Run **Butterscotch Game Data** in Pocket Sync and select the game. Choose
-   **Install and keep originals** (the first, default option) or
-   **Install and discard originals**. Review the selected game and the
-   confirmation's explanation of which redundant source files may be removed.
-3. Keep Pocket Sync open until installation finishes. The plugin installs all
-   three game files directly into `/Assets/butterscotch/common/` using the
-   filenames in the table above. No extra copy or merge is needed. The game's
-   original data file is used unchanged by the core; the converter creates
-   the texture and audio packs alongside it.
-
-For a default Steam installation on macOS, replace `/Volumes/POCKET` below
-with your connected card's path. Run only the block for the game you own.
-These commands copy individual data files under distinct names rather than
-merging an entire app's Resources folder over the other game's files.
+The plugin reads only the connected card, so copy resources out of any `.app`
+bundle first. For default Steam installations on macOS, replace
+`/Volumes/POCKET` with your card's path and run only the commands you need:
 
 ```sh
-# Undertale: copy data and music directly into common.
-card_common="/Volumes/POCKET/Assets/butterscotch/common"
-ut_resources="$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources"
-mkdir -p "$card_common"
-cp "$ut_resources/game.ios" "$card_common/data.win"
-find "$ut_resources" -maxdepth 1 -type f -name '*.ogg' -print | while IFS= read -r file; do
-    if [ -f "$file" ]; then cp "$file" "$card_common/"; fi
-done
-if [ -d "$ut_resources/music" ]; then
-    ditto "$ut_resources/music" "$card_common/music"
-fi
+# Undertale: copy Resources contents into the dedicated source folder.
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+
+# Deltarune: preserve the chapter and shared music directory arrangement.
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/deltarune"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/chapter1_mac"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/mus"
 ```
 
-```sh
-# Deltarune Chapter 1: distinct data name; all audio goes into mus.
-card_common="/Volumes/POCKET/Assets/butterscotch/common"
-dr_resources="$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources"
-dr_chapter="$dr_resources/chapter1_mac"
-mkdir -p "$card_common/mus"
-cp "$dr_chapter/game.ios" "$card_common/deltarune.win"
-cp "$dr_chapter/audiogroup1.dat" "$card_common/audiogroup1.dat"
-ditto "$dr_chapter/lang" "$card_common/lang"
-ditto "$dr_resources/mus" "$card_common/mus"
-find "$dr_chapter" -maxdepth 1 -type f -name '*.ogg' -print | while IFS= read -r file; do
-    if [ -f "$file" ]; then cp "$file" "$card_common/mus/"; fi
-done
-```
+On Windows or Linux, copy the equivalent installed resources into those
+source folders with your file manager. Do not copy an installer or ZIP.
 
-On Windows or Linux, copy the installed files into the same flat layout with
-your file manager. Use `data.win` for Undertale and `deltarune.win` for
-Deltarune, regardless of the original platform's data-file name. Deltarune's
-chapter folder itself does not belong on the card: its data, bank, language
-and music files go into the locations above. Put both chapter and shared
-Deltarune audio in `common/mus/`; Undertale audio stays in `common/` or
-`common/music/`.
+**Keep originals** preserves the source folder for another install.
+**Discard originals** removes the entire selected `undertale/` or `deltarune/`
+source folder only after successful installation. It leaves the other game's
+source folder, installed game files, your computer's Steam installation and
+saves untouched. Keep enough free space for originals, conversion work and
+previous installed files during replacement.
 
-**Keep originals** preserves the source files, so you can install again
-without moving or removing a previous output folder. **Discard originals**
-means removing redundant source files only after successful installation:
-identified audio for the selected game, plus its Deltarune bank and language
-file when applicable. The plugin retains `data.win` and `deltarune.win` because
-the core requires them. It also retains audio needed by the other game and
-unrecognized files. It never deletes `common/` or an entire music directory.
-Your computer's Steam installation and saves are untouched. Keep enough free
-space for originals, conversion work and any previous installed files during
-replacement.
+If conversion or installation fails, originals are kept and previous installed
+files are restored. If restoration fails, preserve the recovery backups at
+the reported location. A failure to discard originals or remove temporary
+files produces a cleanup warning after a successful install; the game remains
+installed.
 
-Before deleting a source file, the plugin checks its hash again. A changed
-file is kept and reported as a cleanup warning. If conversion or installation
-fails, the plugin preserves originals and restores the previously installed
-files. If restoration also fails, it keeps recovery backups and reports their
-location; preserve those files for recovery. If installation succeeds but
-removing redundant originals or temporary files fails, the plugin reports a
-cleanup warning; the converted game remains installed. Review any reported
-remnants before removing them manually.
-
-Temporary work and recovery remnants are hidden under
-`/Assets/butterscotch/.butterscotch-install-*`, beside `common/`; there are no
-separate user-facing input or prepared-output folders. The plugin keeps its
-installation report at `/Assets/butterscotch/common/.butterscotch-<game>.json`
-(for example, `.butterscotch-undertale.json`). The desktop CLI continues to
-write `PREPARED-DATA.json` in its separate output folder and refuses existing
-output folders. Keep all original and converted game data private; never
-upload it to a release.
+Work and recovery remnants are hidden under
+`/Assets/butterscotch/common/.butterscotch-install-*`; the plugin report is
+`/Assets/butterscotch/common/.butterscotch-<game>.json`. There are no separate
+top-level input or prepared-output folders. The desktop CLI still writes
+`PREPARED-DATA.json` in a separate output folder and refuses existing output
+folders. Keep original and converted game data private.
 
 ## Building from source
 

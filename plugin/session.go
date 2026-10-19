@@ -48,11 +48,7 @@ func (s *Session) Start() ([]byte, error) {
 	return s.games()
 }
 func (s *Session) confirm() ([]byte, error) {
-	data := "data.win"
-	if s.game == "deltarune" {
-		data = "deltarune.win"
-	}
-	return s.menu("confirm", fmt.Sprintf("Put the original %s and its audio/support files directly in Assets/butterscotch/common. Installation writes the converted packs there too. Keep preserves source files. Discard removes identified source files only after success; it never deletes common, required game data, shared music or unrelated files.", data), "Install and keep originals", "Install and discard originals", "Back", "Exit")
+	return s.menu("confirm", fmt.Sprintf("Copy full game resources to:\nAssets/butterscotch/common/%s\n\nDiscard deletes this entire source folder after a successful install.", s.game), "Install and keep originals", "Install and discard originals", "Back", "Exit")
 }
 func (s *Session) exit() ([]byte, error) {
 	s.state = "exit"
@@ -172,16 +168,16 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		s.state = "preparing"
 		result, e := s.install(value == "Install and discard originals")
 		if e != nil {
-			return s.menu("failed", fmt.Sprintf("Installation failed: %s. Correct the original game resources in Assets/butterscotch/common before retrying.", e), "Retry", "Back", "Exit")
+			return s.menu("failed", fmt.Sprintf("Installation failed:\n%s\n\nCheck Assets/butterscotch/common/%s, then retry.", e, s.game), "Retry", "Back", "Exit")
 		}
 		originals := "Originals kept."
 		if result.OriginalsDiscarded {
-			originals = "Unneeded source files discarded. Required game data retained."
+			originals = "Originals discarded."
 		}
 		if result.Warning != "" {
 			originals = result.Warning
 		}
-		return s.menu("done", "Installed in Assets/butterscotch/common. Ready to play. "+originals+" Saves and the other game were untouched.", "Back", "Exit")
+		return s.menu("done", "Installed in Assets/butterscotch/common.\n"+originals+" Ready to play.", "Back", "Exit")
 	case "failed":
 		if value == "Retry" {
 			return s.confirm()
