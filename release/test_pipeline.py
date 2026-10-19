@@ -51,6 +51,39 @@ class PackageTests(unittest.TestCase):
             pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
         self.assertFalse((self.output/"butterscotch-pocket.zip").exists())
 
+    def test_packaged_hardware_matches_supported_game_core(self):
+        path = self.dist / pipeline.CORE_JSON
+        definition = json.loads(path.read_text())
+        definition["core"]["framework"] = {
+            "target_product": "Analogue Pocket", "version_required": "2.2",
+            "sleep_supported": False,
+            "dock": {"supported": True, "analog_output": False},
+            "hardware": {"link_port": True, "cartridge_adapter": 0},
+        }
+        path.write_text(json.dumps(definition))
+        archive = pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
+        with zipfile.ZipFile(archive) as z:
+            core = json.loads(z.read(pipeline.CORE_JSON))["core"]
+            framework = core["framework"]
+        self.assertIn("v1.08", core["metadata"]["description"])
+        self.assertIn("experimental", core["metadata"]["description"])
+        self.assertLessEqual(len(core["metadata"]["description"]), 63)
+        self.assertEqual(framework["hardware"]["cartridge_adapter"], -1)
+        self.assertFalse(framework["hardware"]["link_port"])
+        self.assertTrue(framework["sleep_supported"])
+        self.assertEqual(framework["dock"], {"supported": True, "analog_output": False})
+        self.assertEqual(framework["version_required"], "2.2")
+
+    def test_info_fits_pocket_display_and_explains_sleep_limits(self):
+        archive = pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
+        with zipfile.ZipFile(archive) as z:
+            text = z.read(f"Cores/{pipeline.CORE_ID}/info.txt").decode("ascii")
+        self.assertLessEqual(len(text.splitlines()), 32)
+        self.assertIn("Save-state status", text)
+        self.assertIn("experimental", text)
+        self.assertIn("No cartridge or link-cable support", text)
+        self.assertIn("v1.08", text)
+
     def test_wrong_elf_architecture_is_rejected(self):
         (self.programs/"undertale.elf").write_bytes(b"not an ELF")
         with self.assertRaises(ValueError):

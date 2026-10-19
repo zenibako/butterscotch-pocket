@@ -137,8 +137,14 @@ def package_core(source, programs, output, version):
     epoch = int(git(ROOT, "log", "-1", "--format=%ct"))
     core["core"]["metadata"]["date_release"] = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d")
     core["core"]["metadata"]["url"] = "https://github.com/zenibako/butterscotch-pocket"
+    core["core"]["metadata"]["description"] = "Undertale v1.08; Deltarune ch.1 (experimental, own data)"
     core["core"]["framework"]["sleep_supported"] = True
+    # The pinned os25 variant has no link peripheral; this runner does not
+    # support cartridges. Do not inherit the SDK's generic hardware defaults.
+    core["core"]["framework"].setdefault("hardware", {}).update(
+        link_port=False, cartridge_adapter=-1)
     files[CORE_JSON] = (json.dumps(core, indent=4) + "\n").encode()
+    files[f"Cores/{CORE_ID}/info.txt"] = (ROOT / "release/core-info.txt").read_bytes()
     # A fixed timestamp and sorted allowlist make accidental assets impossible
     # and repeated assembly from the same inputs byte-identical.
     output.mkdir(parents=True, exist_ok=True)
