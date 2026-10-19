@@ -23,6 +23,8 @@ legacy trees as part of routine tools/release work.
 - `third_party`: patched pure-Go decoders, original licenses and patch notes.
 - `release`: immutable dependency lock, verified runtime inputs and pipeline.
 - `.github/workflows`: checks and explicit complete release publication.
+- `.agents/skills/pocket-release`: core-pin refresh and release coordination;
+  also available from `.claude/skills/pocket-release`.
 
 ## Contracts
 

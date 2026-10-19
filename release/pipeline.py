@@ -218,7 +218,7 @@ def build_tools(output):
     shutil.copyfile(ROOT / "plugin.json", output / "plugin.json")
     shutil.copyfile(ROOT / "plugin_icon.png", output / "plugin_icon.png")
     source_archive(ROOT, output, "pocket-tools-source.tar.gz", (
-        ".github", ".gitignore", ".gitattributes", "AGENTS.md", "CLAUDE.md", "README.md", "GAME-DATA.md",
+        ".github", ".agents", ".claude/skills/pocket-release", ".gitignore", ".gitattributes", "AGENTS.md", "CLAUDE.md", "README.md", "GAME-DATA.md",
         "LICENSE", "LICENSE-GO-TOOLS", "NOTICE", "LICENSES", "REUSE.toml", "cmd", "prep",
         "plugin", "plugin.json", "plugin_icon.png", "internal", "integration", "third_party", "go.mod", "go.sum",
         "release", "docs"))
