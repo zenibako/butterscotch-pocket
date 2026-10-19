@@ -159,12 +159,12 @@ func TestRejectForgedMalformedAndOutOfOrderAnswers(t *testing.T) {
 
 // TestExitAndKill checks that both exit paths terminate the session and reject subsequent answers.
 func TestExitAndKill(t *testing.T) {
-	for _, kill := range []bool{false, true} {
+	for _, cancel := range []string{"", `"Kill"`, `{"Kill":{}}`} {
 		s := New(t.TempDir(), nil)
 		m := startMenu(t, s)
 		input := answer(m.Choice.Name, "Exit")
-		if kill {
-			input = []byte(`"Kill"`)
+		if cancel != "" {
+			input = []byte(cancel)
 		}
 		b, e := s.Handle(input)
 		if e != nil || string(b) != `"Exit"` {
@@ -347,6 +347,23 @@ func TestAssetsPathsRejectSymlinkRedirection(t *testing.T) {
 			entries, err := os.ReadDir(outside)
 			if err != nil || len(entries) != 0 {
 				t.Fatal("modified outside card", err)
+			}
+		})
+	}
+}
+
+// TestMalformedKillLeavesMenuUsable rejects invalid cancels without consuming the menu.
+func TestMalformedKillLeavesMenuUsable(t *testing.T) {
+	for _, input := range []string{`{"Kill":null}`, `{"Kill":[]}`, `{"Kill":{"extra":true}}`, `{"Kill":{},"extra":0}`, `{"Kill":{},"Kill":{}}`, `{"Kill":{}} null`, `"Kill" null`} {
+		t.Run(input, func(t *testing.T) {
+			s := New(t.TempDir(), nil)
+			m := startMenu(t, s)
+			if _, err := s.Handle([]byte(input)); err == nil {
+				t.Fatalf("accepted %s", input)
+			}
+			b, err := s.Handle(answer(m.Choice.Name, "Exit"))
+			if err != nil || string(b) != `"Exit"` {
+				t.Fatalf("menu consumed by malformed cancel: %s %v", b, err)
 			}
 		})
 	}

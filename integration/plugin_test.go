@@ -168,7 +168,7 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 	if !strings.Contains(log.String(), "Converting textures\n") || !strings.Contains(log.String(), "Audio: processing track 1\n") {
 		t.Fatalf("missing host progress: %s", log.String())
 	}
-	if out := call("handle_response", []byte(`"Kill"`)); string(out) != `"Exit"` {
+	if out := call("handle_response", []byte(`{"Kill":{}}`)); string(out) != `"Exit"` {
 		t.Fatalf("kill: %s", out)
 	}
 	kept, err := os.ReadFile(sentinel)

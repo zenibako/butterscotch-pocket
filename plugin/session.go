@@ -68,7 +68,7 @@ func (s *Session) exit() ([]byte, error) {
 	return []byte(`"Exit"`), nil
 }
 
-// parseAnswer accepts exactly the host's externally tagged Answer or unit Kill.
+// parseAnswer accepts Answer and both the object and unit-string Kill forms.
 // Reading tokens explicitly also rejects duplicate JSON keys that Unmarshal accepts.
 func parseAnswer(input []byte) (name, value string, kill bool, err error) {
 	d := json.NewDecoder(strings.NewReader(string(input)))
@@ -86,6 +86,22 @@ func parseAnswer(input []byte) (name, value string, kill bool, err error) {
 			return
 		}
 		token, e = d.Token()
+		if e == nil && token == "Kill" {
+			// Match only {"Kill":{}}; reject payload fields and extra keys.
+			for _, want := range []json.Delim{'{', '}', '}'} {
+				token, e = d.Token()
+				if e != nil || token != want {
+					fail()
+					return
+				}
+			}
+			if _, e = d.Token(); e != io.EOF {
+				fail()
+				return
+			}
+			kill = true
+			return
+		}
 		if e != nil || token != "Answer" {
 			fail()
 			return
