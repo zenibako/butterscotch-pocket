@@ -51,6 +51,13 @@ class PackageTests(unittest.TestCase):
             self.assertIn("Assets/butterscotch/common/deltarune.elf", z.namelist())
             self.assertEqual(z.read("Cores/zenibako.Butterscotch/os25.rbf_r"), (pipeline.ROOT/"release/runtime/os25.rbf_r").read_bytes())
 
+    def test_packaged_ai_declaration_matches_release_metadata(self):
+        """Keep explicit AI disclosure in the installed core rather than only the README."""
+        archive = pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
+        with zipfile.ZipFile(archive) as z:
+            declaration = json.loads(z.read(f"Cores/{pipeline.CORE_ID}/updaters.json"))
+        self.assertEqual(declaration["declare_ai"], ["OpenAI Codex", "Claude Code"])
+
     def test_missing_program_fails_without_publishing(self):
         """Ensure a missing game ELF leaves no published core archive."""
         (self.programs/"deltarune.elf").unlink()

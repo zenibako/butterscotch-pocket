@@ -65,6 +65,20 @@ remain experimental. Private Memories from earlier test ELFs may not load with
 public release ELFs because their binary identities differ. Ordinary progress
 saves are separate and the installation package excludes saves.
 
+## AI development disclosure
+
+OpenAI Codex and Claude Code have provided substantial assistance with the
+Pocket integration, game-data tools, Pocket Sync plugin, tests, documentation
+and release packaging. The maintainer directs changes and tests on hardware.
+This describes our development work; it does not attribute the inherited
+Butterscotch runner, SDK or runtime wholesale to AI.
+
+Releases include an explicit `declare_ai` list in the core's `updaters.json`.
+Pocket Sync's numeric AI-ness score comes from the separate
+[openFPGA AI report](https://github.com/openfpga-library/openfpga-ai-check),
+not a measured percentage of AI-written source. A missing report is not a
+claim that AI was unused.
+
 ## Source and releases
 
 The complete Go module lives at this repository root. Each release pins the

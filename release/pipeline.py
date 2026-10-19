@@ -167,6 +167,7 @@ def package_core(source, programs, output, version):
         link_port=False, cartridge_adapter=-1)
     files[CORE_JSON] = (json.dumps(core, indent=4) + "\n").encode()
     files[f"Cores/{CORE_ID}/info.txt"] = (ROOT / "release/core-info.txt").read_bytes()
+    files[f"Cores/{CORE_ID}/updaters.json"] = (ROOT / "release/updaters.json").read_bytes()
     # A fixed timestamp and sorted allowlist make accidental assets impossible
     # and repeated assembly from the same inputs byte-identical.
     output.mkdir(parents=True, exist_ok=True)
