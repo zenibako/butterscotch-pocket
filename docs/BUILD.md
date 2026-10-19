@@ -22,7 +22,7 @@ latest downloads are not build inputs.
 
 | Input | Pinned source |
 |---|---|
-| Runner / Pocket platform | `zenibako/Butterscotch` at `f6261c51af5d2ed41719e7288fcb318a2918a433` |
+| Runner / Pocket platform | `zenibako/Butterscotch` at `6459b8de264b2ff6b9d2a831339762cec583d0d2` |
 | SDK base | `openfpgaOS/openfpgaSDK` at `a408ddc12aed0dfaa4aa22c06af82f829db77126` |
 | Matched runtime and API source | `zenibako/openfpgaCore` at `902a8adc11309c50c8954af2864ddf893c8b1b0c` |
 | Core compiler | GCC 13.2.0, Ubuntu 24.04 package `gcc-riscv64-unknown-elf=13.2.0-11ubuntu1+12` |
@@ -47,6 +47,43 @@ hardware compatibility checks before publishing. Keep the matching API,
 firmware, loader and bitstream together. The provenance report records the
 inputs and every packaged file hash.
 
+## Refresh the core pin
+
+The Pocket release repository owns pin updates and release coordination.
+Run **Prepare core pin update** (`.github/workflows/update-core.yml`) here,
+with a core ref (default `main`). It resolves that ref once to a full SHA,
+compares the candidate and previous trees directly, and uploads
+`core-pin-candidate` containing `REVIEW.md` and `core-pin.patch`. A rewritten
+core history can have identical source content despite divergent ancestry;
+review the exact tree changes rather than a merge-base comparison.
+
+The preparation job has read-only repository access. It does not commit,
+push, open a PR or publish. Its success proves patch preparation only. Apply
+the downloaded patch in a clean checkout at the release commit recorded in
+the report, using `git apply --check core-pin.patch` before `git apply`.
+Review both the lock and build-guide changes. SDK/runtime revisions and hashes
+are intentionally preserved; a runtime/API change needs a separate matched
+dependency review. An empty patch means the pin is already current.
+
+The same helper runs locally with a clean, dedicated core checkout at the
+candidate. Fetch both the candidate and previous pin into it, then run:
+
+```sh
+python3 release/update_core.py --source /absolute/path/to/clean-core
+# After reviewing out/core-update/REVIEW.md and core-pin.patch:
+python3 release/update_core.py --source /absolute/path/to/clean-core --apply
+python3 release/pipeline.py validate
+python3 -m unittest discover -s release -p 'test_*.py'
+```
+
+Commit the update with signing on a topic branch and run **Build and verify
+distribution** on that commit. Its native checks, both core builds, mandatory
+plugin/C-reference checks and complete distribution/checksums gate the update.
+Hardware compatibility checks above still gate publication. The repository's
+[`pocket-release` skill](../.agents/skills/pocket-release/SKILL.md), shared with
+Claude through a symlink, coordinates pin refreshes and explicit versioned
+draft releases. Stable publication remains a separate maintainer action.
+
 ## Tools and tests
 
 Use Go 1.25 or newer, TinyGo 0.43.0 and Binaryen 133 (`wasm-opt` on PATH).
@@ -56,7 +93,7 @@ compiler and Python. Use a clean dedicated checkout of the pinned fork:
 
 ```sh
 git clone https://github.com/zenibako/Butterscotch.git out/core
-git -C out/core checkout --detach f6261c51af5d2ed41719e7288fcb318a2918a433
+git -C out/core checkout --detach 6459b8de264b2ff6b9d2a831339762cec583d0d2
 git clone https://github.com/zenibako/openfpgaCore.git out/runtime-source
 git -C out/runtime-source checkout --detach 902a8adc11309c50c8954af2864ddf893c8b1b0c
 python3 release/pipeline.py validate

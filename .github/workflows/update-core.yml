@@ -1,0 +1,51 @@
+name: Prepare core pin update
+
+on:
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: Core branch, tag or commit to resolve once to an immutable SHA
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test release automation and validate locked inputs
+        run: |
+          python3 -m unittest discover -s release -p 'test_*.py'
+          python3 release/pipeline.py validate
+      - name: Read core repository and previous immutable pin
+        id: pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          lock = json.load(open('release/core.lock.json'))
+          print('repository=' + lock['core']['repository'])
+          print('previous=' + lock['core']['commit'])
+          PY
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ inputs.core_ref }}
+          path: out/core
+      - name: Fetch previous pin for an exact tree comparison
+        env:
+          PREVIOUS: ${{ steps.pin.outputs.previous }}
+        run: git -C out/core fetch --no-tags --depth=1 origin "$PREVIOUS"
+      - name: Prepare patch and review report without changing a branch
+        run: |
+          python3 release/update_core.py --source out/core
+          printf '\nRelease repository commit: `%s`\n' "$GITHUB_SHA" >> out/core-update/REVIEW.md
+          cat out/core-update/REVIEW.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: core-pin-candidate
+          path: out/core-update/
+          if-no-files-found: error
