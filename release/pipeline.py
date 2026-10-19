@@ -137,8 +137,14 @@ def package_core(source, programs, output, version):
     epoch = int(git(ROOT, "log", "-1", "--format=%ct"))
     core["core"]["metadata"]["date_release"] = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d")
     core["core"]["metadata"]["url"] = "https://github.com/zenibako/butterscotch-pocket"
+    core["core"]["metadata"]["description"] = "Undertale v1.08; Deltarune ch.1 (experimental, own data)"
     core["core"]["framework"]["sleep_supported"] = True
+    # The pinned os25 variant has no link peripheral; this runner does not
+    # support cartridges. Do not inherit the SDK's generic hardware defaults.
+    core["core"]["framework"].setdefault("hardware", {}).update(
+        link_port=False, cartridge_adapter=-1)
     files[CORE_JSON] = (json.dumps(core, indent=4) + "\n").encode()
+    files[f"Cores/{CORE_ID}/info.txt"] = (ROOT / "release/core-info.txt").read_bytes()
     # A fixed timestamp and sorted allowlist make accidental assets impossible
     # and repeated assembly from the same inputs byte-identical.
     output.mkdir(parents=True, exist_ok=True)
@@ -185,10 +191,11 @@ def build_tools(output):
     run(os.environ.get("TINYGO", "tinygo"), "build", "-p", "2", "-trimpath", "-target", "wasip1",
         "-buildmode=c-shared", "-o", str(output / "plugin.wasm"), "./cmd/pocket-plugin", cwd=ROOT)
     shutil.copyfile(ROOT / "plugin.json", output / "plugin.json")
+    shutil.copyfile(ROOT / "plugin_icon.png", output / "plugin_icon.png")
     source_archive(ROOT, output, "pocket-tools-source.tar.gz", (
         ".github", ".gitignore", ".gitattributes", "AGENTS.md", "CLAUDE.md", "README.md", "GAME-DATA.md",
         "LICENSE", "LICENSE-GO-TOOLS", "NOTICE", "LICENSES", "REUSE.toml", "cmd", "prep",
-        "plugin", "plugin.json", "internal", "integration", "third_party", "go.mod", "go.sum",
+        "plugin", "plugin.json", "plugin_icon.png", "internal", "integration", "third_party", "go.mod", "go.sum",
         "release", "docs"))
 
 
@@ -216,7 +223,7 @@ def seal_release(source, runtime_source, output):
     with tarfile.open(output / "licenses.tar.gz", "w:gz") as archive:
         for path in (ROOT / "LICENSE", ROOT / "LICENSE-GO-TOOLS", ROOT / "NOTICE", ROOT / "LICENSES", ROOT / "release/licenses", ROOT / "third_party"):
             archive.add(path, arcname=str(path.relative_to(ROOT)))
-    expected = {"butterscotch-pocket.zip", "CORE-PROVENANCE.json", "plugin.wasm", "plugin.json",
+    expected = {"butterscotch-pocket.zip", "CORE-PROVENANCE.json", "plugin.wasm", "plugin.json", "plugin_icon.png",
                 "prepare-data.wasm", "butterscotch-core-source.tar.gz", "pocket-tools-source.tar.gz",
                 "core.lock.json", "GAME-DATA.md", "licenses.tar.gz", "openfpga-runtime-source.tar.gz", "RUNTIME-SUBMODULES.json"}
     expected.update(f"prepare-data-{system}-{arch}.tar.gz" for system, arch in TARGETS)

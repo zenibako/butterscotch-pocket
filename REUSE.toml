@@ -32,6 +32,16 @@ SPDX-License-Identifier = "Apache-2.0"
 
 # ===== Repository dotfiles ==================================================
 [[annotations]]
+path = "plugin_icon.png"
+SPDX-FileCopyrightText = "2026 Chandler Anderson"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = "release/core-info.txt"
+SPDX-FileCopyrightText = "2026 Chandler Anderson"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
 path = ["**/.gitignore", ".gitmodules"]
 precedence = "override"
 SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"

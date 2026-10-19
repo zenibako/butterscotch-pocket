@@ -169,6 +169,11 @@ func sourceAncestor(out, source string) (bool, error) {
 
 // Prepare publishes a complete converted folder; failures leave no staged output.
 func Prepare(o Options) (string, error) {
+	return prepare(o, "")
+}
+
+// prepare lets the card installer bound discovery to its selected source folder.
+func prepare(o Options, limitRoot string) (string, error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return "", fmt.Errorf("choose undertale or deltarune")
 	}
@@ -200,7 +205,7 @@ func Prepare(o Options) (string, error) {
 		}
 		return "", fmt.Errorf("output already exists; choose a new folder")
 	}
-	d, e := discover(o.Game, src)
+	d, e := discoverBounded(o.Game, src, limitRoot)
 	if e != nil {
 		return "", e
 	}
@@ -238,7 +243,7 @@ func Prepare(o Options) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	defer os.RemoveAll(stage)
+	defer removeTree(stage)
 	ready := filepath.Join(stage, "ready")
 	common := filepath.Join(ready, "Assets/butterscotch/common")
 	if e = os.MkdirAll(common, 0755); e != nil {

@@ -28,10 +28,20 @@ legacy trees as part of routine tools/release work.
 
 No commercial game data, user saves, debug logs, SD-card/device metadata or
 private staging folders may enter source control or release assets. Supported
-input versions are Undertale v1.08 and Deltarune Chapter 1. Preserve source
-files, refuse existing output folders and keep failed partial conversions
-unpublished. The plugin sees only the connected card; do not add arbitrary
-host-path access or network hosts.
+input versions are Undertale v1.08 and Deltarune Chapter 1. CLI preparation
+preserves source files, refuses existing output folders and keeps failed
+partial conversions unpublished. The plugin reads originals from
+`Assets/butterscotch/common/undertale/` or `deltarune/`, preserving native
+filenames and directory layouts. Deltarune chapter and shared `mus/` folders
+remain siblings within its source folder. Install only the selected game's
+three converted files directly into `common/`. Keep originals is first/default;
+explicit discard removes the entire selected source folder only after success.
+Never remove `common/`, the other game's source folder, installed game files
+or saves. Failed installation restores previous files and preserves originals;
+failed deletion reports a warning after successful install. Use hidden work
+and recovery paths under `Assets/butterscotch/common/.butterscotch-install-*` and
+`common/.butterscotch-<game>.json` for the plugin report. The plugin sees only
+the connected card; do not add arbitrary host-path access or network hosts.
 
 Keep CLI, WASI and plugin conversion semantics together in `prep`. Update all
 imports/usages for module changes. Preserve third-party attribution and explain

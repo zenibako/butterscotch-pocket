@@ -4,7 +4,15 @@ The approved [repository split design](superpowers/specs/2026-10-18-install-entr
 and [implementation plan](superpowers/plans/2026-10-18-install-entrypoint.md)
 keep the runner in the fork while this repository owns installation, tools
 and release packaging. The [game-data guide](../GAME-DATA.md) defines the
-supported inputs and preparation contract.
+supported inputs and preparation contract. The plugin (v0.7.1 or newer) reads
+originals under `Assets/butterscotch/common/undertale/` or `deltarune/`,
+preserving native filenames and source layouts. It installs the selected game's
+three converted files directly into `common/` and offers keep (default) or
+discard of the entire selected source folder only after success. The other
+game, installed game files and saves remain untouched. Work/recovery paths are
+hidden under `Assets/butterscotch/common/.butterscotch-install-*`. CLI preparation
+retains its separate-output/refuse-existing contract.
+The v0.7.0 plugin predates direct installation.
 
 ## Dependency lock
 
@@ -91,7 +99,9 @@ regular pushes should validate artifacts without publishing a stable release.
 Every release, including tool-only updates, must carry:
 
 - `butterscotch-pocket.zip`: the installable core tree with both game programs.
-- `plugin.wasm` and `plugin.json`: the Pocket Sync plugin pair.
+- `plugin.wasm`, `plugin.json` and `plugin_icon.png`: the Pocket Sync plugin
+  and its paper/heart icon. The manifest's `logo_url` uses the latest release's
+  icon asset.
 - `prepare-data-{darwin,linux,windows}-{amd64,arm64}.tar.gz`: six native bundles.
 - `prepare-data.wasm`: standard-Go WASI CLI, separate from the Extism plugin.
 - `CORE-PROVENANCE.json`, `core.lock.json`, `RUNTIME-SUBMODULES.json` and `SHA256SUMS`.
@@ -105,6 +115,34 @@ The ZIP installs both game entries, but game data remains a separate user
 step. Never add a local staging folder to release assets.
 
 ## Distribution contract
+
+### Advertised core capabilities
+
+Release assembly owns the published description, hardware flags and
+[`info.txt`](../release/core-info.txt), rather than inheriting generic SDK
+defaults. The information page fits Analogue's 32-line limit.
+
+| Metadata | Audited value and evidence |
+|---|---|
+| Cartridges | `cartridge_adapter: -1`: no cartridge-game support; leaves cartridge power off. |
+| Link port | `link_port: false`: pinned runtime `variants/os25.mk` omits `INCLUDE_LINK`; `core_top.v` disables the link peripheral. Debug UART is separate. |
+| Dock | Digital Dock support remains enabled; runtime handles Dock notifications and controllers. This audit did not physically test a Dock. |
+| Analog Dock | Disabled. Runtime Analogizer support is a separate external interface and does not establish analog Dock support. |
+| Save states / sleep | Enabled by the matched os25 runtime and both game builds; experimental and subject to scene eligibility. Check **Select > Debug > Save-state status** before sleeping. |
+| Firmware minimum | Retains `2.2`; the exact minimum has not been independently established by a firmware compatibility matrix. |
+| Games | Undertale **v1.08**, experimental Deltarune **Chapter 1**; user-owned game data required. |
+
+Core/platform IDs, author attribution, slot IDs and save addresses remain
+unchanged. Input labels match the pinned runner's controls; extra generic
+loader slot extensions are runtime file filters, not claims of support for
+additional games. Release assembly supplies its version, repository URL and
+source-commit date in UTC. It retains the pinned scaler modes, loader and
+runtime filenames.
+
+See Analogue's [core metadata contract](https://www.analogue.co/developer/docs/openfpga/core-definition-files/core-json)
+and [information-page limit](https://www.analogue.co/developer/docs/openfpga/core-definition-files).
+
+### Catalog and plugin installation
 
 The openFPGA catalog should point at `zenibako/butterscotch-pocket` and filter
 assets with `^butterscotch-pocket\.zip$`. The catalog listing requires a

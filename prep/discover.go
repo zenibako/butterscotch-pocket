@@ -84,6 +84,10 @@ func requirements(c *Container) (map[string]bool, map[string]bool, error) {
 	return embedded, external, nil
 }
 func discover(game, source string) (*discovered, error) {
+	return discoverBounded(game, source, "")
+}
+
+func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 	st, e := os.Stat(source)
 	if e != nil {
 		return nil, fmt.Errorf("game source does not exist: %w", e)
@@ -182,6 +186,9 @@ func discover(game, source string) (*discovered, error) {
 		lowerData = bytes.ToLower(data)
 	}
 	for _, dir := range dirs {
+		if limitRoot != "" && !inside(dir, limitRoot) {
+			continue
+		}
 		if seen[dir] {
 			continue
 		}

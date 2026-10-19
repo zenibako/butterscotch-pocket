@@ -6,6 +6,23 @@ Approved in chat on 2026-10-18: use zenibako/butterscotch-pocket as the installa
 
 The fork README preserves upstream Butterscotch documentation and delegates Pocket documentation to src/openfpga/README.md. Its src/openfpga/GAME-DATA.md and docs/superpowers/specs/2026-10-18-go-game-data-design.md define conversion formats, source preservation, staging and independent native/WASI/Extism checks. Those contracts remain in force. The catalog Add Core form supports a repository plus an asset filter; Pocket Sync plugins consume plugin.wasm and plugin.json from the latest release.
 
+## Plugin staging contract update
+
+The latest user-approved layout supersedes the original plugin staging/output
+contract and the interim flat-source layout. Originals live in separate
+`Assets/butterscotch/common/undertale/` and `deltarune/` source folders to
+prevent music filename collisions. Preserve native filenames and layouts,
+including Deltarune's chapter folder beside shared `mus/`. The plugin installs
+the selected game's three converted files directly into `common/`. Keep is
+the default; explicit discard removes the entire selected source folder only
+after successful installation, leaving the other game, installed game files
+and saves intact. Installation failure restores previous files and keeps
+originals; deletion failure is a warning after success. Work/recovery paths
+are hidden under `Assets/butterscotch/common/.butterscotch-install-*`; the report is
+`common/.butterscotch-<game>.json`. CLI preparation continues to preserve sources
+and refuse existing output folders. See [GAME-DATA.md](../../../GAME-DATA.md)
+for current layouts and release availability.
+
 ## Architecture
 
 Preserve this repository history and legacy SDK/port directories. The root becomes the shared Go module, installation documentation, release pins and orchestration. The runner and platform source remain in the fork. The complete Go module moves together, including patched dependencies and tests, with imports updated wholesale. C reference tests use an explicit checkout of the pinned fork.
