@@ -2,7 +2,7 @@
   "schema": 1,
   "core": {
     "repository": "zenibako/Butterscotch",
-    "commit": "6459b8de264b2ff6b9d2a831339762cec583d0d2"
+    "commit": "b385b300592b03f919b9e46b4b098bbed90a8be6"
   },
   "sdk": {
     "base_repository": "openfpgaOS/openfpgaSDK",

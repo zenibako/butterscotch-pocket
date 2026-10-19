@@ -52,7 +52,8 @@ changes your computer installation or writes saves. Ordinary game progress lives
 
 ## Controls and current limits
 
-D-pad moves; A confirms; B cancels; X/Y opens the game menu; Start maps to Enter.
+D-pad moves; the right face button confirms, the bottom cancels, and either
+the top or left opens the game menu. Start also confirms.
 Select opens the Butterscotch menu, and L toggles speed/accuracy. See the
 [fork's platform guide](https://github.com/zenibako/Butterscotch/blob/main/src/openfpga/README.md)
 for detailed controls, debugging and scene-specific save-state support.
