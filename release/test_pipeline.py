@@ -10,9 +10,12 @@ pipeline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline)
 
 class PackageTests(unittest.TestCase):
-    """Exercise release packaging with synthetic public assets and game ELFs."""
+    """Exercise release packaging with synthetic public assets and ELF-header fixtures."""
     def setUp(self):
-        """Create an isolated allowlisted dist tree and minimal valid game ELF fixtures."""
+        """Create an allowlisted dist tree and synthetic ELF-header fixtures.
+
+        The fixtures satisfy check_elf's limited checks, not full ELF validation.
+        """
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -91,7 +94,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn("v1.08", text)
 
     def test_wrong_elf_architecture_is_rejected(self):
-        """Reject invalid game program headers before packaging."""
+        """Reject a short non-ELF file before packaging."""
         (self.programs/"undertale.elf").write_bytes(b"not an ELF")
         with self.assertRaises(ValueError):
             pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")

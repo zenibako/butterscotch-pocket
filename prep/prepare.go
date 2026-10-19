@@ -183,7 +183,8 @@ func Prepare(o Options) (string, error) {
 }
 
 // prepare stages and validates conversion before publishing the output tree.
-// limitRoot optionally bounds the card installer's music discovery to its source folder.
+// limitRoot optionally filters candidate music-directory paths lexically for the
+// card installer. File access follows symlinks; this is not an access boundary.
 func prepare(o Options, limitRoot string) (string, error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return "", fmt.Errorf("choose undertale or deltarune")

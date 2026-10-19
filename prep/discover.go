@@ -96,7 +96,8 @@ func discover(game, source string) (*discovered, error) {
 }
 
 // discoverBounded gathers game data, audio and language inputs. A nonempty
-// limitRoot confines music-directory searches to the selected installation tree.
+// limitRoot lexically filters candidate music-directory paths. File access follows
+// symlinks, so this filter does not confine access to the installation tree.
 func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 	st, e := os.Stat(source)
 	if e != nil {
