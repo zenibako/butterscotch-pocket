@@ -1,5 +1,5 @@
 {
   "name": "Butterscotch Game Data",
-  "description": "Install Undertale 1.08 or Deltarune Chapter 1 from staged Assets originals, with a choice to keep or discard originals after success.",
+  "description": "Install Undertale 1.08 or Deltarune Chapter 1 from originals in Assets/butterscotch/common, with optional cleanup of redundant source files after success.",
   "allowed_hosts": []
 }

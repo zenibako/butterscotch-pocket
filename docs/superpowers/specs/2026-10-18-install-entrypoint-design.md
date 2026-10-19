@@ -8,16 +8,23 @@ The fork README preserves upstream Butterscotch documentation and delegates Pock
 
 ## Plugin staging contract update
 
-The later user-approved direct-install change supersedes the plugin's original
-staging/output contract referenced above: complete originals live under
-`Assets/butterscotch/common/undertale/` or `deltarune/`; the plugin installs the
-selected game's three files directly into `common/`, with keep (default) or
-explicit discard of only the selected source folder after success. Installation
-failure restores previous files and keeps originals; deletion failure is a
-warning after success. Work/recovery paths and the plugin manifest are hidden.
-CLI preparation continues to preserve sources and refuse existing output
-folders. See [GAME-DATA.md](../../../GAME-DATA.md) for current layouts and release
-availability.
+The final user-approved flat layout supersedes both the plugin's original
+staging/output contract and the interim per-game source folders: originals
+live directly in `Assets/butterscotch/common/`, with Undertale data named
+`data.win` and Deltarune data named `deltarune.win` before copying. Undertale
+audio lives at the common root or in `common/music/`; all Deltarune chapter
+and shared audio lives in `common/mus/` to avoid colliding filenames. The plugin
+installs the selected game's three files in place. Keep is the default;
+explicit discard removes only identified redundant selected-game audio and
+Deltarune bank/language files after success, retaining core-required data,
+other-game shared audio and unrecognized files. Never delete `common/` or
+entire music directories. Hash-check before deletion and retain changed files
+with a warning. Installation failure restores previous files and keeps
+originals; deletion failure is a warning after success. Work/recovery paths
+are hidden under `Assets/butterscotch/.butterscotch-install-*`; the report is
+`common/.butterscotch-<game>.json`. CLI preparation continues to preserve sources
+and refuse existing output folders. See [GAME-DATA.md](../../../GAME-DATA.md)
+for current layouts and release availability.
 
 ## Architecture
 

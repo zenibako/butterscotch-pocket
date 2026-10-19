@@ -1,6 +1,7 @@
 package prep
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,9 +12,9 @@ import (
 	"strings"
 )
 
-// InstallOptions selects originals staged in Assets/butterscotch/common/<game>.
-// DiscardOriginals removes that entire selected folder, including extra files,
-// only after the converted files have been installed and verified.
+// InstallOptions selects original files directly in Assets/butterscotch/common.
+// DiscardOriginals removes only consumed, unchanged support files and music
+// claimed by this game, preserving required data files and shared or unknown inputs.
 type InstallOptions struct {
 	Root, Game       string
 	DiscardOriginals bool
@@ -31,11 +32,15 @@ type InstallResult struct {
 // game's files. Checked renames roll back ordinary failures; this is not a
 // multi-file atomic transaction in the event of power loss or card removal.
 func Install(o InstallOptions) (InstallResult, error) {
-	return installWithOps(o, os.Rename, removeTree)
+	return installWithCleanup(o, os.Rename, os.Remove, removeTree)
 }
 
 // installWithOps keeps fault injection local to a call, without global hooks.
-func installWithOps(o InstallOptions, rename func(string, string) error, discard func(string) error) (result InstallResult, err error) {
+func installWithOps(o InstallOptions, rename func(string, string) error, discard func(string) error) (InstallResult, error) {
+	return installWithCleanup(o, rename, discard, removeTree)
+}
+
+func installWithCleanup(o InstallOptions, rename func(string, string) error, discard, cleanup func(string) error) (result InstallResult, err error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return result, fmt.Errorf("choose undertale or deltarune")
 	}
@@ -47,14 +52,14 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 		return result, err
 	}
 	common := filepath.Join(root, "Assets/butterscotch/common")
-	source := filepath.Join(common, o.Game)
 	names := []string{"data.win", "textures.bin", "music.bin"}
 	if o.Game == "deltarune" {
 		names = []string{"deltarune.win", "dr_textures.bin", "dr_music.bin"}
 	}
+	source := filepath.Join(common, names[0])
 	names = append(names, ".butterscotch-"+o.Game+".json")
 	check := func() error {
-		if err := installDirectories(root, o.Game); err != nil {
+		if err := installDirectories(root); err != nil {
 			return err
 		}
 		for _, name := range names {
@@ -67,10 +72,10 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 	if err := check(); err != nil {
 		return result, err
 	}
-	if err := installOriginals(source); err != nil {
+	if err := installOriginals(common); err != nil {
 		return result, err
 	}
-	stage, err := os.MkdirTemp(common, ".butterscotch-install-")
+	stage, err := os.MkdirTemp(filepath.Dir(common), ".butterscotch-install-")
 	if err != nil {
 		return result, err
 	}
@@ -79,7 +84,7 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 		if preserve {
 			return
 		}
-		if cleanupErr := discard(stage); cleanupErr != nil {
+		if cleanupErr := cleanup(stage); cleanupErr != nil {
 			message := fmt.Sprintf("cleanup could not remove temporary files at %s: %v", stage, cleanupErr)
 			if err != nil {
 				err = fmt.Errorf("%w; %s", err, message)
@@ -100,7 +105,16 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 			o.Progress(s)
 		}
 	}
-	if _, err := Prepare(Options{Game: o.Game, Source: source, Output: ready, Progress: progress}); err != nil {
+	var deletionPlan []installInput
+	inspect := func(d *discovered) error {
+		if !o.DiscardOriginals {
+			return nil
+		}
+		var err error
+		deletionPlan, err = installDeletionPlan(o.Game, common, d)
+		return err
+	}
+	if _, err := prepare(Options{Game: o.Game, Source: source, Output: ready, Progress: progress}, inspect, common); err != nil {
 		return result, err
 	}
 	prepared := filepath.Join(ready, "Assets/butterscotch/common")
@@ -136,7 +150,7 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 		for i := len(changed) - 1; i >= 0; i-- {
 			item := changed[i]
 			target := filepath.Join(common, item.name)
-			if err := installDirectories(root, o.Game); err != nil {
+			if err := installDirectories(root); err != nil {
 				failures = append(failures, err.Error())
 				break
 			}
@@ -194,18 +208,32 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 		}
 	}
 	if o.DiscardOriginals {
-		// Recheck even unreferenced staged files: the choice covers this whole folder.
-		err := check()
-		if err == nil {
-			err = installOriginals(source)
-		}
-		if err == nil {
-			err = discard(source)
-		}
-		if err != nil {
-			result.Warning = fmt.Sprintf("Game files installed, but could not discard originals at %s: %v", source, err)
-		} else {
-			result.OriginalsDiscarded = true
+		result.OriginalsDiscarded = true
+		for _, input := range deletionPlan {
+			removeErr := check()
+			if removeErr == nil {
+				removeErr = installInputPath(common, input.path)
+			}
+			if removeErr == nil {
+				removeErr = installRegular(input.path, false)
+			}
+			if removeErr == nil {
+				current, hashErr := installFileHash(input.path)
+				removeErr = hashErr
+				if removeErr == nil && current != input.digest {
+					removeErr = fmt.Errorf("original changed during conversion; retained")
+				}
+			}
+			if removeErr == nil {
+				removeErr = discard(input.path)
+			}
+			if removeErr != nil {
+				result.OriginalsDiscarded = false
+				if result.Warning != "" {
+					result.Warning += "; "
+				}
+				result.Warning += fmt.Sprintf("Game files installed, but retained original %s: %v", input.path, removeErr)
+			}
 		}
 	}
 	if o.Progress != nil {
@@ -214,9 +242,9 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 	return result, nil
 }
 
-func installDirectories(root, game string) error {
+func installDirectories(root string) error {
 	p := root
-	for _, part := range []string{"", "Assets", "butterscotch", "common", game} {
+	for _, part := range []string{"", "Assets", "butterscotch", "common"} {
 		if part != "" {
 			p = filepath.Join(p, part)
 		}
@@ -269,4 +297,88 @@ func installFileHash(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+type installInput struct{ path, digest string }
+
+// installDeletionPlan claims only referenced raw audio; discover intentionally
+// packs additional Undertale audio, which is not authorization to remove it.
+func installDeletionPlan(game, common string, d *discovered) ([]installInput, error) {
+	selected := bytes.ToLower(d.data)
+	otherName := "deltarune.win"
+	if game == "deltarune" {
+		otherName = "data.win"
+	}
+	var other []byte
+	protectAll := false
+	if _, err := os.Lstat(filepath.Join(common, otherName)); err == nil {
+		data, readErr := readInput(filepath.Join(common, otherName))
+		if readErr != nil {
+			protectAll = true
+		} else if _, parseErr := Parse(data); parseErr != nil {
+			protectAll = true
+		} else {
+			other = bytes.ToLower(data)
+		}
+	} else if !os.IsNotExist(err) {
+		protectAll = true
+	}
+	var plan []installInput
+	for name, path := range d.external {
+		if !inside(path, common) {
+			return nil, fmt.Errorf("music is outside common: %s", path)
+		}
+		lowerName := strings.ToLower(name)
+		if !installOwnsAudio(selected, lowerName) {
+			continue
+		}
+		stem := strings.TrimSuffix(lowerName, ".ogg")
+		if protectAll || bytes.Contains(other, []byte(lowerName)) || (stem != "" && bytes.Contains(other, []byte(stem))) {
+			continue
+		}
+		digest, err := installFileHash(path)
+		if err != nil {
+			return nil, err
+		}
+		plan = append(plan, installInput{path, digest})
+	}
+	if game == "deltarune" {
+		plan = append(plan, installInput{filepath.Join(common, "audiogroup1.dat"), hash(d.groups[1])}, installInput{filepath.Join(common, "lang/lang_en.json"), hash(d.raw["lang_en.json"])})
+	}
+	return plan, nil
+}
+
+func installInputPath(common, path string) error {
+	if !inside(path, common) || path == common {
+		return fmt.Errorf("unsafe original path: %s", path)
+	}
+	for parent := filepath.Dir(path); parent != common; parent = filepath.Dir(parent) {
+		info, err := os.Lstat(parent)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("original parent is not a regular directory: %s", parent)
+		}
+	}
+	return nil
+}
+
+// installOwnsAudio requires a whole NUL-terminated filename or final path
+// component. A suffix inside another track name is not an ownership claim.
+// Uncertain dynamic references are deliberately retained.
+func installOwnsAudio(lowerData []byte, lowerName string) bool {
+	needle := append([]byte(lowerName), 0)
+	for offset := 0; offset < len(lowerData); {
+		match := bytes.Index(lowerData[offset:], needle)
+		if match < 0 {
+			return false
+		}
+		start := offset + match
+		if start == 0 || lowerData[start-1] == 0 || lowerData[start-1] == '/' || lowerData[start-1] == '\\' {
+			return true
+		}
+		offset = start + len(needle)
+	}
+	return false
 }

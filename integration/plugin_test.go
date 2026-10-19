@@ -112,13 +112,48 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 	}
 	menu := get(call("start", nil))
 	for _, tc := range []struct{ game, label string }{{"undertale", "Undertale 1.08"}, {"deltarune", "Deltarune Chapter 1"}} {
-		source := filepath.Join(pocket, "Assets/butterscotch/common", tc.game)
+		source := filepath.Join(root, tc.game+"-originals")
 		if err := testgame.Write(source, tc.game); err != nil {
 			t.Fatal(err)
 		}
 		addVorbis(t, source)
 		native := filepath.Join(root, tc.game+"-native")
 		if _, err := prep.Prepare(prep.Options{Game: tc.game, Source: source, Output: native}); err != nil {
+			t.Fatal(err)
+		}
+		common := filepath.Join(pocket, "Assets/butterscotch/common")
+		if err := os.MkdirAll(common, 0755); err != nil {
+			t.Fatal(err)
+		}
+		dataName := "data.win"
+		if tc.game == "deltarune" {
+			dataName = "deltarune.win"
+		}
+		err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(source, path)
+			if err != nil {
+				return err
+			}
+			if rel == "data.win" {
+				rel = dataName
+			}
+			dest := filepath.Join(common, rel)
+			if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dest, data, 0644)
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
 		confirm := get(answer(menu, tc.label))
@@ -132,12 +167,31 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 		menu = get(answer(done, "Back"))
 		confirm = get(answer(menu, tc.label))
 		done = get(answer(confirm, "Install and discard originals"))
-		if !strings.Contains(done.Query, "Originals discarded") {
+		if !strings.Contains(done.Query, "source files discarded") {
 			t.Fatalf("discard installation did not complete: %s", done.Query)
 		}
 		compareAssets(t, native, output)
-		if _, err := os.Stat(source); !os.IsNotExist(err) {
-			t.Fatal("original source folder remains after discard", err)
+		original, err := os.ReadFile(filepath.Join(source, "data.win"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		installed, err := os.ReadFile(filepath.Join(common, dataName))
+		if err != nil || !bytes.Equal(original, installed) {
+			t.Fatal("required data not retained", err)
+		}
+		if tc.game == "undertale" {
+			if _, err := os.Stat(filepath.Join(common, "sine.ogg")); !os.IsNotExist(err) {
+				t.Fatal("unneeded source audio remains", err)
+			}
+		} else {
+			if _, err := os.Stat(filepath.Join(common, "sine.ogg")); err != nil {
+				t.Fatal("shared source audio removed", err)
+			}
+			for _, name := range []string{"audiogroup1.dat", "lang/lang_en.json"} {
+				if _, err := os.Stat(filepath.Join(common, name)); !os.IsNotExist(err) {
+					t.Fatal("packed support file remains", name, err)
+				}
+			}
 		}
 		assertNoInstallWork(t, pocket)
 		menu = get(answer(done, "Back"))
@@ -158,7 +212,7 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 func assertNoInstallWork(t *testing.T, pocket string) {
 	t.Helper()
 	common := filepath.Join(pocket, "Assets/butterscotch/common")
-	entries, err := os.ReadDir(common)
+	entries, err := os.ReadDir(filepath.Dir(common))
 	if err != nil {
 		t.Fatal(err)
 	}

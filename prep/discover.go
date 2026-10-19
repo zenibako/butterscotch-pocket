@@ -84,6 +84,10 @@ func requirements(c *Container) (map[string]bool, map[string]bool, error) {
 	return embedded, external, nil
 }
 func discover(game, source string) (*discovered, error) {
+	return discoverBounded(game, source, "")
+}
+
+func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 	st, e := os.Stat(source)
 	if e != nil {
 		return nil, fmt.Errorf("game source does not exist: %w", e)
@@ -176,12 +180,25 @@ func discover(game, source string) (*discovered, error) {
 		d.expected["lang_en.json"] = true
 	}
 	dirs := []string{folder, filepath.Join(folder, "music"), filepath.Join(folder, "mus"), filepath.Join(root, "mus"), filepath.Join(filepath.Dir(folder), "mus")}
+	// The flat card layout may hold different games' same-named music. Install
+	// uses a game-specific preferred directory and root fallback; the general
+	// CLI continues rejecting conflicting duplicate tracks across its directories.
+	if limitRoot != "" {
+		preferred := "music"
+		if game == "deltarune" {
+			preferred = "mus"
+		}
+		dirs = []string{filepath.Join(folder, preferred), folder}
+	}
 	seen := map[string]bool{}
 	var lowerData []byte
 	if game == "deltarune" {
 		lowerData = bytes.ToLower(data)
 	}
 	for _, dir := range dirs {
+		if limitRoot != "" && !inside(dir, limitRoot) {
+			continue
+		}
 		if seen[dir] {
 			continue
 		}
@@ -209,6 +226,9 @@ func discover(game, source string) (*discovered, error) {
 				continue
 			}
 			if old, ok := d.external[name]; ok {
+				if limitRoot != "" {
+					continue
+				}
 				a, e := readInput(old)
 				if e != nil {
 					return nil, e

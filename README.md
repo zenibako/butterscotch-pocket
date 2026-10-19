@@ -32,7 +32,7 @@ Choose either method; both use the same Go conversion library:
 | Method | What to use |
 |---|---|
 | Desktop CLI | Download `prepare-data-<os>-<arch>.tar.gz` from the same release. Supports macOS (`darwin`), Windows and Linux, each on `amd64` or `arm64`. Use `darwin-arm64` on Apple silicon Macs. |
-| Pocket Sync plugin | In **Plugins → Add plugin via URL**, enter `https://github.com/zenibako/butterscotch-pocket`, then choose **Verify & install plugin**. Stage your original files under `Assets/butterscotch/common/<game>/` on the connected card, then install directly from the plugin (next release). |
+| Pocket Sync plugin | In **Plugins → Add plugin via URL**, enter `https://github.com/zenibako/butterscotch-pocket`, then choose **Verify & install plugin**. Stage your original files under `Assets/butterscotch/common/` on the connected card, then install directly from the plugin (next release). |
 
 The plugin's installer reads `plugin.wasm` and `plugin.json` from the latest
 stable release. Installing the plugin and installing the core are separate
@@ -43,7 +43,10 @@ macOS `.app` resource copying, output paths and updating prepared data.
 The desktop CLI writes a new output folder and refuses an existing one; copy
 all three generated game files together. The next plugin release installs the
 three files directly into `Assets/butterscotch/common/`, with a choice to keep
-(default) or discard the selected staged originals after a successful install.
+(default) or discard redundant source audio and Deltarune support files after
+a successful install. The required `data.win` or `deltarune.win` remains. Keep Undertale audio at the
+common root or in `music/`, and all Deltarune audio in `mus/` to avoid filename
+collisions.
 The published v0.7.0 plugin still uses its earlier separate-output workflow;
 these plugin instructions require the next published version. Neither method
 changes your computer installation or writes saves. Ordinary game progress lives under

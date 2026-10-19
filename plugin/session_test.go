@@ -50,7 +50,7 @@ func TestStartSelectionAndConfirmationDoesNotWrite(t *testing.T) {
 	root := t.TempDir()
 	s := New(root, nil)
 	m := selectGame(t, s, "Undertale 1.08")
-	if !strings.Contains(m.Choice.Query, "Assets/butterscotch/common/undertale") || !strings.Contains(m.Choice.Query, "full") {
+	if !strings.Contains(m.Choice.Query, "Assets/butterscotch/common") || !strings.Contains(m.Choice.Query, "data.win") {
 		t.Fatal(m.Choice.Query)
 	}
 	entries, e := os.ReadDir(root)
@@ -78,7 +78,7 @@ func TestConfirmationFailureOffersRetryWithoutPublishedFiles(t *testing.T) {
 	}
 	b, e = s.Handle(answer(m.Choice.Name, "Retry"))
 	m = readMenu(t, b, e)
-	if !strings.Contains(m.Choice.Query, "Assets/butterscotch/common/deltarune") {
+	if !strings.Contains(m.Choice.Query, "Assets/butterscotch/common") {
 		t.Fatal(m.Choice.Query)
 	}
 }
@@ -159,7 +159,7 @@ func stagedInstallation(t *testing.T, root string) []byte {
 	put(p+4, uint32(p+8))
 	put(p+8, uint32(len(wav)))
 	put(4, uint32(len(b)-8))
-	path := filepath.Join(root, "Assets/butterscotch/common/undertale/data.win")
+	path := filepath.Join(root, "Assets/butterscotch/common/data.win")
 	if e := os.MkdirAll(filepath.Dir(path), 0755); e != nil {
 		t.Fatal(e)
 	}
@@ -176,7 +176,7 @@ func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 			installed := filepath.Join(root, "Assets/butterscotch/common/data.win")
 			other := filepath.Join(root, "Assets/butterscotch/common/deltarune.win")
 			save := filepath.Join(root, "Saves/butterscotch/save.dat")
-			for _, p := range []string{installed, other, save} {
+			for _, p := range []string{other, save} {
 				if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
 					t.Fatal(e)
 				}
@@ -189,10 +189,10 @@ func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 			m := selectGame(t, s, "Undertale 1.08")
 			// Merely choosing a game must not modify the installation.
 			before, _ := os.ReadFile(installed)
-			if string(before) != "keep" {
+			if !bytes.Equal(before, source) {
 				t.Fatal("installed before confirmation")
 			}
-			if !strings.Contains(m.Choice.Query, "entire") {
+			if !strings.Contains(m.Choice.Query, "never deletes common") {
 				t.Fatal("discard scope not explained", m.Choice.Query)
 			}
 			action := "Install and keep originals"
@@ -208,16 +208,10 @@ func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 			if e != nil || !bytes.Equal(source, actual) {
 				t.Fatal("wrong installed data", e)
 			}
-			original := filepath.Join(root, "Assets/butterscotch/common/undertale/data.win")
-			if discard {
-				if _, e := os.Stat(filepath.Dir(original)); !os.IsNotExist(e) {
-					t.Fatal("originals were not discarded", e)
-				}
-			} else {
-				actual, e := os.ReadFile(original)
-				if e != nil || !bytes.Equal(source, actual) {
-					t.Fatal("originals changed", e)
-				}
+			original := filepath.Join(root, "Assets/butterscotch/common/data.win")
+			actual, e = os.ReadFile(original)
+			if e != nil || !bytes.Equal(source, actual) {
+				t.Fatal("required game data changed", e)
 			}
 			for _, p := range []string{other, save} {
 				actual, e := os.ReadFile(p)
@@ -236,7 +230,7 @@ func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 
 func TestDiscardFailureKeepsOriginalsAndInstalledData(t *testing.T) {
 	root := t.TempDir()
-	source := filepath.Join(root, "Assets/butterscotch/common/undertale/data.win")
+	source := filepath.Join(root, "Assets/butterscotch/common/data.win")
 	installed := filepath.Join(root, "Assets/butterscotch/common/data.win")
 	if err := os.MkdirAll(filepath.Dir(source), 0755); err != nil {
 		t.Fatal(err)
@@ -262,7 +256,7 @@ func TestDiscardFailureKeepsOriginalsAndInstalledData(t *testing.T) {
 }
 
 func TestAssetsPathsRejectSymlinkRedirection(t *testing.T) {
-	for _, part := range []string{"Assets", "Assets/butterscotch", "Assets/butterscotch/common", "Assets/butterscotch/common/undertale"} {
+	for _, part := range []string{"Assets", "Assets/butterscotch", "Assets/butterscotch/common"} {
 		t.Run(part, func(t *testing.T) {
 			root := t.TempDir()
 			outside := t.TempDir()

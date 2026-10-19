@@ -48,7 +48,11 @@ func (s *Session) Start() ([]byte, error) {
 	return s.games()
 }
 func (s *Session) confirm() ([]byte, error) {
-	return s.menu("confirm", fmt.Sprintf("Copy the full original game resources into Assets/butterscotch/common/%s on the SD card. Installation writes the converted files directly into Assets/butterscotch/common, replacing this game's previous converted files. Keep originals is the default. Discard removes the entire %s source folder only after installation succeeds. The other game and saves are untouched.", s.game, s.game), "Install and keep originals", "Install and discard originals", "Back", "Exit")
+	data := "data.win"
+	if s.game == "deltarune" {
+		data = "deltarune.win"
+	}
+	return s.menu("confirm", fmt.Sprintf("Put the original %s and its audio/support files directly in Assets/butterscotch/common. Installation writes the converted packs there too. Keep preserves source files. Discard removes identified source files only after success; it never deletes common, required game data, shared music or unrelated files.", data), "Install and keep originals", "Install and discard originals", "Back", "Exit")
 }
 func (s *Session) exit() ([]byte, error) {
 	s.state = "exit"
@@ -168,11 +172,11 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		s.state = "preparing"
 		result, e := s.install(value == "Install and discard originals")
 		if e != nil {
-			return s.menu("failed", fmt.Sprintf("Installation failed: %s. Correct the original game resources in Assets/butterscotch/common/%s before retrying.", e, s.game), "Retry", "Back", "Exit")
+			return s.menu("failed", fmt.Sprintf("Installation failed: %s. Correct the original game resources in Assets/butterscotch/common before retrying.", e), "Retry", "Back", "Exit")
 		}
 		originals := "Originals kept."
 		if result.OriginalsDiscarded {
-			originals = "Originals discarded."
+			originals = "Unneeded source files discarded. Required game data retained."
 		}
 		if result.Warning != "" {
 			originals = result.Warning

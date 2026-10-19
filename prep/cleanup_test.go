@@ -51,26 +51,26 @@ func TestRemoveTreeNeverFollowsSymlinks(t *testing.T) {
 }
 
 func TestInstallCleanupFailureIsSuccessfulWarning(t *testing.T) {
-	root, source, names, _ := installFixture(t, "undertale", false)
+	root, source, names, _ := installFixture(t, "deltarune", false)
 	remover := func(path string) error {
 		if strings.HasPrefix(filepath.Base(path), ".butterscotch-install-") {
 			return errors.New("injected cleanup failure")
 		}
 		return removeTree(path)
 	}
-	result, err := installWithOps(InstallOptions{Root: root, Game: "undertale", DiscardOriginals: true}, os.Rename, remover)
+	result, err := installWithCleanup(InstallOptions{Root: root, Game: "deltarune", DiscardOriginals: true}, os.Rename, os.Remove, remover)
 	if err != nil || !result.OriginalsDiscarded || !strings.Contains(result.Warning, "cleanup") {
 		t.Fatalf("result %+v: %v", result, err)
 	}
-	if _, err := os.Lstat(source); !os.IsNotExist(err) {
-		t.Fatalf("originals remain: %v", err)
+	if _, err := os.Lstat(source); err != nil {
+		t.Fatalf("required game data lost: %v", err)
 	}
 	for _, name := range names {
 		if _, err := os.Stat(filepath.Join(filepath.Dir(source), name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(source), ".butterscotch-install-*"))
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(source)), ".butterscotch-install-*"))
 	if len(matches) != 1 {
 		t.Fatalf("cleanup location not reported: %+v %v", result, matches)
 	}
