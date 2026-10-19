@@ -179,14 +179,7 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		if e != nil {
 			return s.menu("failed", fmt.Sprintf("Installation failed:\n%s\n\nCheck Assets/butterscotch/common/%s, then retry.", e, s.game), "Retry", "Back", "Exit")
 		}
-		originals := "Originals kept."
-		if result.OriginalsDiscarded {
-			originals = "Originals discarded."
-		}
-		if result.Warning != "" {
-			originals = result.Warning
-		}
-		return s.menu("done", "Installed in Assets/butterscotch/common.\n"+originals+" Ready to play.", "Back", "Exit")
+		return s.complete(result)
 	case "guide-os":
 		if value == "Back" {
 			return s.confirm()
@@ -216,6 +209,22 @@ func (s *Session) Handle(input []byte) ([]byte, error) {
 		return s.games()
 	}
 	return nil, fmt.Errorf("invalid session state")
+}
+
+// complete reports installation and cleanup outcomes independently.
+func (s *Session) complete(result prep.InstallResult) ([]byte, error) {
+	originals := "Originals kept."
+	if result.OriginalsDiscarded {
+		originals = "Originals discarded."
+	}
+	if result.Warning != "" {
+		if result.OriginalsDiscarded {
+			originals += "\nWarning: " + result.Warning
+		} else {
+			originals = result.Warning
+		}
+	}
+	return s.menu("done", "Installed in Assets/butterscotch/common.\n"+originals+" Ready to play.", "Back", "Exit")
 }
 
 func (s *Session) install(discard bool) (prep.InstallResult, error) {

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zenibako/butterscotch-pocket/prep"
 )
 
 type menu struct {
@@ -17,6 +19,38 @@ type menu struct {
 		Query   string   `json:"query"`
 		Choices []string `json:"choices"`
 	} `json:"Choice"`
+}
+
+func TestCompletionPreservesDiscardStatusWithCleanupWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		discarded bool
+		warning   string
+		status    string
+	}{
+		{"kept", false, "", "Originals kept."},
+		{"discarded", true, "", "Originals discarded."},
+		{"discarded-stage-warning", true, "Could not remove temporary files.", "Originals discarded."},
+		{"partial-discard-warning", false, "Could not finish discarding originals.", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(t.TempDir(), nil)
+			b, err := s.complete(prep.InstallResult{OriginalsDiscarded: tc.discarded, Warning: tc.warning})
+			m := readMenu(t, b, err)
+			if !strings.Contains(m.Choice.Query, "Installed in Assets/butterscotch/common") {
+				t.Fatal("installation outcome missing", m.Choice.Query)
+			}
+			if tc.status != "" && !strings.Contains(m.Choice.Query, tc.status) {
+				t.Fatal("originals outcome missing", m.Choice.Query)
+			}
+			if tc.warning != "" && !strings.Contains(m.Choice.Query, tc.warning) {
+				t.Fatal("cleanup warning missing", m.Choice.Query)
+			}
+			if tc.warning != "" && !tc.discarded && strings.Contains(m.Choice.Query, "Originals kept.") {
+				t.Fatal("partial deletion reported as kept", m.Choice.Query)
+			}
+		})
+	}
 }
 
 func readMenu(t *testing.T, b []byte, err error) menu {
