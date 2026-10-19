@@ -100,7 +100,9 @@ regular pushes should validate artifacts without publishing a stable release.
 Every release, including tool-only updates, must carry:
 
 - `butterscotch-pocket.zip`: the installable core tree with both game programs.
-- `plugin.wasm` and `plugin.json`: the Pocket Sync plugin pair.
+- `plugin.wasm`, `plugin.json` and `plugin_icon.png`: the Pocket Sync plugin
+  and its paper/heart icon. The manifest's `logo_url` uses the latest release's
+  icon asset.
 - `prepare-data-{darwin,linux,windows}-{amd64,arm64}.tar.gz`: six native bundles.
 - `prepare-data.wasm`: standard-Go WASI CLI, separate from the Extism plugin.
 - `CORE-PROVENANCE.json`, `core.lock.json`, `RUNTIME-SUBMODULES.json` and `SHA256SUMS`.

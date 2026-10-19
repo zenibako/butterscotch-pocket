@@ -70,7 +70,7 @@ saves are separate and the installation package excludes saves.
 The complete Go module lives at this repository root. Each release pins the
 Butterscotch fork and SDK commits and verifies the matched runtime binaries;
 it builds both game programs without commercial inputs. Every release carries
-the core ZIP, plugin pair, six native tool bundles, WASI CLI, checksums and
+the core ZIP, plugin and icon, six native tool bundles, WASI CLI, checksums and
 source/provenance archives, including tool-only updates.
 
 See [Building and releasing](docs/BUILD.md) for the lock and release process.
