@@ -29,6 +29,9 @@ type Session struct {
 
 // New uses the SD-card root ("pocket" in Pocket Sync), never an answer-supplied path.
 func New(root string, logger func(string)) *Session { return &Session{root: root, log: logger} }
+
+// menu advances the conversation and issues a unique response name so earlier
+// answers cannot be replayed against a later screen.
 func (s *Session) menu(state, query string, choices ...string) ([]byte, error) {
 	s.sequence++
 	s.state = state
@@ -37,6 +40,8 @@ func (s *Session) menu(state, query string, choices ...string) ([]byte, error) {
 		Choice choice `json:"Choice"`
 	}{s.pending})
 }
+
+// games clears the selected game while retaining the session's remembered OS.
 func (s *Session) games() ([]byte, error) {
 	s.game = ""
 	return s.menu("game", "Select the game installation to prepare.", "Undertale 1.08", "Deltarune Chapter 1", "Exit")
@@ -49,9 +54,14 @@ func (s *Session) Start() ([]byte, error) {
 	}
 	return s.games()
 }
+
+// confirm shows the selected source folder and destructive-choice scope, keeping
+// preservation as the default and offering guidance without accessing the card.
 func (s *Session) confirm() ([]byte, error) {
 	return s.menu("confirm", fmt.Sprintf("Copy full game resources to:\nAssets/butterscotch/common/%s\n\nDiscard deletes this entire source folder after a successful install.", s.game), "Install and keep originals", "Install and discard originals", "Find my game files", "Back", "Exit")
 }
+
+// exit closes the conversation and invalidates its pending menu response.
 func (s *Session) exit() ([]byte, error) {
 	s.state = "exit"
 	s.pending = choice{}
@@ -227,6 +237,8 @@ func (s *Session) complete(result prep.InstallResult) ([]byte, error) {
 	return s.menu("done", "Installed in Assets/butterscotch/common.\n"+originals+" Ready to play.", "Back", "Exit")
 }
 
+// install converts only the selected game under the host-provided card root and
+// forwards progress to the logger; answers never supply filesystem paths.
 func (s *Session) install(discard bool) (prep.InstallResult, error) {
 	return prep.Install(prep.InstallOptions{Root: s.root, Game: s.game, DiscardOriginals: discard, Progress: s.log})
 }

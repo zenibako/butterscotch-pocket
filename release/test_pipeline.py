@@ -10,7 +10,12 @@ pipeline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pipeline)
 
 class PackageTests(unittest.TestCase):
+    """Exercise release packaging with synthetic public assets and ELF-header fixtures."""
     def setUp(self):
+        """Create an allowlisted dist tree and synthetic ELF-header fixtures.
+
+        The fixtures satisfy check_elf's limited checks, not full ELF validation.
+        """
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -30,6 +35,7 @@ class PackageTests(unittest.TestCase):
         self.output = self.root / "artifacts"
 
     def test_only_public_files_and_matching_runtime(self):
+        """Ensure packaging excludes game data and saves while using the pinned runtime."""
         secret = self.dist / "Assets/butterscotch/common/data.win"
         secret.write_text("PRIVATE GAME")
         (self.dist / "Saves").mkdir()
@@ -46,12 +52,14 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(z.read("Cores/zenibako.Butterscotch/os25.rbf_r"), (pipeline.ROOT/"release/runtime/os25.rbf_r").read_bytes())
 
     def test_missing_program_fails_without_publishing(self):
+        """Ensure a missing game ELF leaves no published core archive."""
         (self.programs/"deltarune.elf").unlink()
         with self.assertRaises((FileNotFoundError, ValueError)):
             pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
         self.assertFalse((self.output/"butterscotch-pocket.zip").exists())
 
     def test_packaged_hardware_matches_supported_game_core(self):
+        """Check supported hardware overrides while preserving unrelated framework fields."""
         path = self.dist / pipeline.CORE_JSON
         definition = json.loads(path.read_text())
         definition["core"]["framework"] = {
@@ -75,6 +83,7 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(framework["version_required"], "2.2")
 
     def test_info_fits_pocket_display_and_explains_sleep_limits(self):
+        """Keep packaged help within Pocket display limits and state experimental support."""
         archive = pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
         with zipfile.ZipFile(archive) as z:
             text = z.read(f"Cores/{pipeline.CORE_ID}/info.txt").decode("ascii")
@@ -85,17 +94,20 @@ class PackageTests(unittest.TestCase):
         self.assertIn("v1.08", text)
 
     def test_wrong_elf_architecture_is_rejected(self):
+        """Reject a short non-ELF file before packaging."""
         (self.programs/"undertale.elf").write_bytes(b"not an ELF")
         with self.assertRaises(ValueError):
             pipeline.package_core(self.source, self.programs, self.output, "v0.2.0")
 
     def test_corrupt_runtime_is_rejected(self):
+        """Reject a runtime file whose digest differs from the supplied lock."""
         lock = json.loads((pipeline.ROOT/"release/core.lock.json").read_text())
         lock["sha256"]["release/runtime/os.bin"] = "0"*64
         with self.assertRaises(ValueError):
             pipeline.verify_pins(lock)
 
     def test_mutable_commit_is_rejected(self):
+        """Reject branch names in place of immutable core commit pins."""
         lock = json.loads((pipeline.ROOT/"release/core.lock.json").read_text())
         lock["core"]["commit"] = "main"
         with self.assertRaises(ValueError):

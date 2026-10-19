@@ -18,6 +18,7 @@ import (
 	"github.com/zenibako/butterscotch-pocket/prep"
 )
 
+// TestExtismPlugin checks the compiled plugin against both WASI mount orders in a real Extism host.
 func TestExtismPlugin(t *testing.T) {
 	buildRoot := t.TempDir()
 	wasm := filepath.Join(buildRoot, "plugin.wasm")
@@ -44,6 +45,8 @@ func TestExtismPlugin(t *testing.T) {
 		t.Run(first, func(t *testing.T) { testExtismMountOrder(t, wasm, first) })
 	}
 }
+
+// testExtismMountOrder checks native-byte parity, guide navigation, keep/discard installation and save preservation for one mount order.
 func testExtismMountOrder(t *testing.T, wasm, first string) {
 	root := t.TempDir()
 	pocket := filepath.Join(root, "sd")
@@ -175,6 +178,7 @@ func testExtismMountOrder(t *testing.T, wasm, first string) {
 	t.Log("Actual Extism exports converted both games, matched native bytes, installed into Assets, tested keep/discard, preserved saves, logged progress, and handled Kill.")
 }
 
+// assertNoInstallWork fails if a completed installation leaves hidden work directories on the card.
 func assertNoInstallWork(t *testing.T, pocket string) {
 	t.Helper()
 	common := filepath.Join(pocket, "Assets/butterscotch/common")
