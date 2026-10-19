@@ -142,6 +142,16 @@ runtime filenames.
 See Analogue's [core metadata contract](https://www.analogue.co/developer/docs/openfpga/core-definition-files/core-json)
 and [information-page limit](https://www.analogue.co/developer/docs/openfpga/core-definition-files).
 
+### AI disclosure
+
+Release assembly installs `release/updaters.json` at
+`Cores/zenibako.Butterscotch/updaters.json`. Its `declare_ai` list names the
+AI tools used in the maintained Pocket integration and companion tooling.
+The README explains scope and inherited sources. Do not invent a numeric
+AI-authorship percentage: Pocket Sync obtains a heuristic score from the
+separate openfpga-ai-check report service, which currently does not calculate
+its score from this declaration alone.
+
 ### Catalog and plugin installation
 
 The openFPGA catalog should point at `zenibako/butterscotch-pocket` and filter
