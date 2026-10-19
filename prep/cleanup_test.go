@@ -71,7 +71,11 @@ func TestInstallCleanupFailureIsSuccessfulWarning(t *testing.T) {
 		}
 	}
 	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(source), ".butterscotch-install-*"))
-	if len(matches) != 1 || !strings.Contains(result.Warning, matches[0]) {
+	if len(matches) != 1 {
 		t.Fatalf("cleanup location not reported: %+v %v", result, matches)
+	}
+	location, resolveErr := canonicalPath(matches[0])
+	if resolveErr != nil || !strings.Contains(result.Warning, location) {
+		t.Fatalf("cleanup location not reported: %+v %v (%v)", result, matches, resolveErr)
 	}
 }

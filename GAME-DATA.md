@@ -198,8 +198,10 @@ saves. Keep enough free space for staged originals, conversion work and any
 previous installed files during replacement.
 
 If conversion or installation fails, the plugin preserves the staged
-originals and restores the previously installed files. If installation succeeds
-but discarding originals fails, the plugin reports a cleanup warning; the
+originals and restores the previously installed files. If restoration also
+fails, it keeps recovery backups and reports their location; preserve those
+files for recovery. If installation succeeds but discarding originals or
+removing temporary files fails, the plugin reports a cleanup warning; the
 converted game remains installed. Review any reported remnants before removing
 them manually.
 

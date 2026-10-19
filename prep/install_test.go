@@ -195,8 +195,12 @@ func TestInstallRollsBackReplacementFailure(t *testing.T) {
 			}
 			if rollbackFails {
 				matches, _ := filepath.Glob(filepath.Join(common, ".butterscotch-install-*", "backup", "textures.bin"))
-				if len(matches) != 1 || !strings.Contains(err.Error(), filepath.Dir(matches[0])) {
+				if len(matches) != 1 {
 					t.Fatalf("backup not reported and preserved: %v %v", matches, err)
+				}
+				location, resolveErr := canonicalPath(filepath.Dir(matches[0]))
+				if resolveErr != nil || !strings.Contains(err.Error(), location) {
+					t.Fatalf("backup not reported and preserved: %v %v (%v)", matches, err, resolveErr)
 				}
 				got, _ := os.ReadFile(matches[0])
 				if string(got) != "old textures.bin" {
