@@ -32,22 +32,30 @@ TARGETS = [(system, arch) for system in ("darwin", "linux", "windows")
 
 
 def run(*args, **kwargs):
+    """Run a checked subprocess, forwarding options and propagating failures."""
     return subprocess.run(args, check=True, **kwargs)
 
 
 def git(path, *args):
+    """Return stripped Git output from the given checkout; propagate Git failures."""
     return subprocess.check_output(["git", "-C", str(path), *args], text=True).strip()
 
 
 def sha(path):
+    """Return the SHA-256 hex digest of the complete file contents."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def load_lock():
+    """Read the checked-in release dependency lock as a JSON object."""
     return json.loads((ROOT / "release/core.lock.json").read_text())
 
 
 def verify_pins(lock=None):
+    """Return the lock after validating immutable revisions, hashes and provenance.
+
+    Raise ValueError for inconsistent pins or bundled runtime contents.
+    """
     lock = load_lock() if lock is None else lock
     for group in ("core", "runtime"):
         if not re.fullmatch(r"[0-9a-f]{40}", lock[group]["commit"]):
@@ -71,6 +79,10 @@ def verify_pins(lock=None):
 
 
 def verify_source(source):
+    """Return verified pins for a clean core checkout at the locked revision.
+
+    Raise ValueError when the checkout revision or working tree differs.
+    """
     lock = verify_pins()
     if git(source, "rev-parse", "HEAD") != lock["core"]["commit"]:
         raise ValueError("core checkout does not match release/core.lock.json")
@@ -80,12 +92,17 @@ def verify_source(source):
 
 
 def check_elf(path):
+    """Reject files lacking a little-endian 32-bit RISC-V ELF header."""
     data = path.read_bytes()
     if len(data) < 52 or data[:6] != b"\x7fELF\x01\x01" or data[18:20] != b"\xf3\x00":
         raise ValueError(f"expected little-endian 32-bit RISC-V ELF: {path}")
 
 
 def build_core(source, output):
+    """Build both public game ELFs from verified source with the pinned SDK.
+
+    Return the programs directory; reject compiler or block-RAM placement mismatches.
+    """
     lock = verify_source(source)
     compiler = subprocess.check_output(["riscv64-unknown-elf-gcc", "-dumpfullversion"], text=True).strip()
     if compiler != "13.2.0":
@@ -114,6 +131,11 @@ def build_core(source, output):
 
 
 def package_core(source, programs, output, version):
+    """Return an allowlisted core ZIP and write per-file provenance beside it.
+
+    Validate pins, version, ELFs and runtime metadata before publishing the ZIP;
+    fixed entry timestamps and ordering make identical inputs reproducible.
+    """
     lock = verify_pins()
     if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?", version):
         raise ValueError("version must be a semantic release version")
@@ -166,10 +188,12 @@ def package_core(source, programs, output, version):
 
 
 def source_archive(source, output, filename, paths=()):
+    """Archive tracked HEAD content, optionally restricted to selected paths."""
     run("git", "-C", str(source), "archive", "--format=tar.gz", "-o", str(output / filename), "HEAD", *paths)
 
 
 def build_tools(output):
+    """Build six native bundles, WASI and plugin assets with licenses and source."""
     output.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, CGO_ENABLED="0")
     for system, arch in TARGETS:
@@ -200,6 +224,10 @@ def build_tools(output):
 
 
 def seal_release(source, runtime_source, output):
+    """Archive clean pinned sources and write checksums for the complete release.
+
+    Reject missing or extra assets and a plugin without the WASM magic header.
+    """
     lock = verify_source(source)
     if git(runtime_source, "rev-parse", "HEAD") != lock["runtime"]["commit"]:
         raise ValueError("runtime source checkout does not match the lock")
@@ -236,6 +264,7 @@ def seal_release(source, runtime_source, output):
 
 
 def main():
+    """Parse release CLI arguments and dispatch the selected validation or build step."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("validate", "build-core", "package-core", "build-tools", "assemble-release"))
     parser.add_argument("--source", type=Path, default=ROOT / "out/core")

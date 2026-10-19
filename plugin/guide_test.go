@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestGameFileGuideAllPlatforms checks short platform-specific steps, navigation and read-only behavior for both games.
 func TestGameFileGuideAllPlatforms(t *testing.T) {
 	for _, game := range []struct{ label, folder string }{{"Undertale 1.08", "undertale"}, {"Deltarune Chapter 1", "deltarune"}} {
 		for _, platform := range []string{"macOS", "Windows", "Linux"} {
@@ -68,6 +69,7 @@ func TestGameFileGuideAllPlatforms(t *testing.T) {
 	}
 }
 
+// TestGuideRejectsInstallAndStaleAnswers ensures guide navigation cannot install data or reuse an earlier confirmation.
 func TestGuideRejectsInstallAndStaleAnswers(t *testing.T) {
 	s := New(t.TempDir(), nil)
 	confirm := selectGame(t, s, "Undertale 1.08")

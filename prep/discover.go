@@ -44,9 +44,15 @@ func readInput(path string) ([]byte, error) {
 	}
 	return b, nil
 }
-func isFile(p string) bool { s, e := os.Stat(p); return e == nil && s.Mode().IsRegular() }
-func isDir(p string) bool  { s, e := os.Stat(p); return e == nil && s.IsDir() }
 
+// isFile reports whether p resolves to a regular file; lookup failures return false.
+func isFile(p string) bool { s, e := os.Stat(p); return e == nil && s.Mode().IsRegular() }
+
+// isDir reports whether p resolves to a directory; lookup failures return false.
+func isDir(p string) bool { s, e := os.Stat(p); return e == nil && s.IsDir() }
+
+// requirements extracts normalized embedded-track names and external Ogg basenames
+// from SOND, rejecting truncated tables or invalid string references.
 func requirements(c *Container) (map[string]bool, map[string]bool, error) {
 	embedded, external := map[string]bool{}, map[string]bool{}
 	s, e := c.Chunk("SOND")
@@ -83,10 +89,14 @@ func requirements(c *Container) (map[string]bool, map[string]bool, error) {
 	}
 	return embedded, external, nil
 }
+
+// discover locates and validates native game resources using the CLI's directory layout.
 func discover(game, source string) (*discovered, error) {
 	return discoverBounded(game, source, "")
 }
 
+// discoverBounded gathers game data, audio and language inputs. A nonempty
+// limitRoot confines music-directory searches to the selected installation tree.
 func discoverBounded(game, source, limitRoot string) (*discovered, error) {
 	st, e := os.Stat(source)
 	if e != nil {

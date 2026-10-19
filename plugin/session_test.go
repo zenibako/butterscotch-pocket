@@ -21,6 +21,7 @@ type menu struct {
 	} `json:"Choice"`
 }
 
+// TestCompletionPreservesDiscardStatusWithCleanupWarning checks that cleanup warnings retain the actual installation and originals outcomes.
 func TestCompletionPreservesDiscardStatusWithCleanupWarning(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -53,6 +54,7 @@ func TestCompletionPreservesDiscardStatusWithCleanupWarning(t *testing.T) {
 	}
 }
 
+// readMenu requires a successful response containing a named choice with available actions.
 func readMenu(t *testing.T, b []byte, err error) menu {
 	t.Helper()
 	if err != nil {
@@ -64,15 +66,21 @@ func readMenu(t *testing.T, b []byte, err error) menu {
 	}
 	return m
 }
+
+// answer encodes a named menu response in the plugin protocol.
 func answer(name, value string) []byte {
 	b, _ := json.Marshal(map[string]any{"Answer": map[string]string{"name": name, "value": value}})
 	return b
 }
+
+// startMenu starts a session and requires a valid initial choice.
 func startMenu(t *testing.T, s *Session) menu {
 	t.Helper()
 	b, e := s.Start()
 	return readMenu(t, b, e)
 }
+
+// selectGame selects a game from a fresh session and returns its confirmation menu.
 func selectGame(t *testing.T, s *Session, game string) menu {
 	t.Helper()
 	m := startMenu(t, s)
@@ -80,6 +88,7 @@ func selectGame(t *testing.T, s *Session, game string) menu {
 	return readMenu(t, b, e)
 }
 
+// TestStartSelectionAndConfirmationDoesNotWrite checks read-only selection and invalidation of confirmations after returning to the menu.
 func TestStartSelectionAndConfirmationDoesNotWrite(t *testing.T) {
 	root := t.TempDir()
 	s := New(root, nil)
@@ -98,6 +107,7 @@ func TestStartSelectionAndConfirmationDoesNotWrite(t *testing.T) {
 	}
 }
 
+// TestInstallPromptsStayShortAndShowSourceFolder checks that each game confirmation uses short, separated instructions.
 func TestInstallPromptsStayShortAndShowSourceFolder(t *testing.T) {
 	for _, game := range []string{"Undertale 1.08", "Deltarune Chapter 1"} {
 		s := New(t.TempDir(), nil)
@@ -107,6 +117,8 @@ func TestInstallPromptsStayShortAndShowSourceFolder(t *testing.T) {
 		}
 	}
 }
+
+// TestConfirmationFailureOffersRetryWithoutPublishedFiles checks that failed preparation publishes no output and returns to confirmation on retry.
 func TestConfirmationFailureOffersRetryWithoutPublishedFiles(t *testing.T) {
 	root := t.TempDir()
 	var logs []string
@@ -126,6 +138,8 @@ func TestConfirmationFailureOffersRetryWithoutPublishedFiles(t *testing.T) {
 		t.Fatal(m.Choice.Query)
 	}
 }
+
+// TestRejectForgedMalformedAndOutOfOrderAnswers checks strict response decoding and rejection of answers outside the active session state.
 func TestRejectForgedMalformedAndOutOfOrderAnswers(t *testing.T) {
 	for _, input := range []string{`{"Answer":{"name":"game","value":"../../host"}}`, `{"Answer":{"name":"confirm","value":"Install and keep originals"}}`, `{"Answer":{"name":"game","value":"Undertale 1.08","extra":true}}`, `{"Answer":{"name":"game","value":"Undertale 1.08"},"Kill":null}`, `{"Kill":null}`, `null`, `"Answer"`, `{"Answer":{"name":"game","value":"Undertale 1.08"}} {}`, `{"Answer":{"name":"game","name":"game","value":"Undertale 1.08"}}`} {
 		t.Run(input, func(t *testing.T) {
@@ -142,6 +156,8 @@ func TestRejectForgedMalformedAndOutOfOrderAnswers(t *testing.T) {
 		t.Fatal("answer before start accepted")
 	}
 }
+
+// TestExitAndKill checks that both exit paths terminate the session and reject subsequent answers.
 func TestExitAndKill(t *testing.T) {
 	for _, kill := range []bool{false, true} {
 		s := New(t.TempDir(), nil)
@@ -212,6 +228,8 @@ func stagedInstallation(t *testing.T, root string) []byte {
 	}
 	return b
 }
+
+// TestInstallChoicesPreserveOrDiscardOriginals checks explicit installation choices, preservation of unrelated data and progress reporting.
 func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 	for _, discard := range []bool{false, true} {
 		t.Run(fmt.Sprint(discard), func(t *testing.T) {
@@ -278,6 +296,7 @@ func TestInstallChoicesPreserveOrDiscardOriginals(t *testing.T) {
 	}
 }
 
+// TestDiscardFailureKeepsOriginalsAndInstalledData checks that failed conversion after choosing discard preserves both originals and prior installed data.
 func TestDiscardFailureKeepsOriginalsAndInstalledData(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "Assets/butterscotch/common/undertale/data.win")
@@ -305,6 +324,7 @@ func TestDiscardFailureKeepsOriginalsAndInstalledData(t *testing.T) {
 	}
 }
 
+// TestAssetsPathsRejectSymlinkRedirection checks that redirected asset paths fail without writing outside the card.
 func TestAssetsPathsRejectSymlinkRedirection(t *testing.T) {
 	for _, part := range []string{"Assets", "Assets/butterscotch", "Assets/butterscotch/common", "Assets/butterscotch/common/undertale"} {
 		t.Run(part, func(t *testing.T) {

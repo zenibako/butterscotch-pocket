@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// installFixture stages synthetic game resources and returns their source bytes and expected installed filenames.
 func installFixture(t *testing.T, game string, bad bool) (string, string, []string, []byte) {
 	t.Helper()
 	root := t.TempDir()
@@ -35,6 +36,7 @@ func installFixture(t *testing.T, game string, bad bool) (string, string, []stri
 	return root, source, names, data
 }
 
+// TestInstallGamesKeepAndDiscard checks both games install complete file sets while preserving unrelated files and honoring originals choices.
 func TestInstallGamesKeepAndDiscard(t *testing.T) {
 	for _, game := range []string{"undertale", "deltarune"} {
 		for _, discard := range []bool{false, true} {
@@ -104,6 +106,7 @@ func TestInstallGamesKeepAndDiscard(t *testing.T) {
 	}
 }
 
+// TestInstallConversionFailurePreservesOriginalsAndInstalledSet checks invalid audio cannot replace installed files or discard originals.
 func TestInstallConversionFailurePreservesOriginalsAndInstalledSet(t *testing.T) {
 	root, source, names, _ := installFixture(t, "undertale", true)
 	for _, n := range names {
@@ -123,6 +126,7 @@ func TestInstallConversionFailurePreservesOriginalsAndInstalledSet(t *testing.T)
 	}
 }
 
+// TestInstallRejectsUnsafePaths checks redirected paths and non-file destinations fail without modifying external data.
 func TestInstallRejectsUnsafePaths(t *testing.T) {
 	for _, where := range []string{"Assets", "Assets/butterscotch", "Assets/butterscotch/common", "source", "nested", "target", "directory-target"} {
 		t.Run(where, func(t *testing.T) {
@@ -170,6 +174,7 @@ func TestInstallRejectsUnsafePaths(t *testing.T) {
 	}
 }
 
+// TestInstallRollsBackReplacementFailure checks replacement failure restores old files or preserves and reports backups when rollback fails.
 func TestInstallRollsBackReplacementFailure(t *testing.T) {
 	for _, rollbackFails := range []bool{false, true} {
 		t.Run(map[bool]string{false: "restored", true: "retained-backup"}[rollbackFails], func(t *testing.T) {
@@ -219,6 +224,7 @@ func TestInstallRollsBackReplacementFailure(t *testing.T) {
 	}
 }
 
+// TestInstallDiscardFailureIsWarning checks failed originals deletion leaves a successful installation with a warning.
 func TestInstallDiscardFailureIsWarning(t *testing.T) {
 	root, source, names, _ := installFixture(t, "undertale", false)
 	result, err := installWithOps(InstallOptions{Root: root, Game: "undertale", DiscardOriginals: true}, os.Rename, func(string) error { return errors.New("cannot delete originals") })
@@ -235,6 +241,7 @@ func TestInstallDiscardFailureIsWarning(t *testing.T) {
 	}
 }
 
+// TestInstallEveryRenameFailureRestoresCompletePreviousSet checks every backup and publication rename failure restores all prior files and keeps originals.
 func TestInstallEveryRenameFailureRestoresCompletePreviousSet(t *testing.T) {
 	// Each file has a backup rename and an installation rename. Fail each one
 	// independently, after any earlier successful replacements.
@@ -270,6 +277,7 @@ func TestInstallEveryRenameFailureRestoresCompletePreviousSet(t *testing.T) {
 	}
 }
 
+// TestInstallVerificationFailureRemovesNewPartialSet checks detected output corruption removes newly published files and preserves originals.
 func TestInstallVerificationFailureRemovesNewPartialSet(t *testing.T) {
 	root, source, names, _ := installFixture(t, "undertale", false)
 	common := filepath.Dir(source)
@@ -295,6 +303,7 @@ func TestInstallVerificationFailureRemovesNewPartialSet(t *testing.T) {
 	}
 }
 
+// TestInstallProgressDoesNotAnnouncePreparationAsInstallationSuccess checks progress reports success only after installation finishes.
 func TestInstallProgressDoesNotAnnouncePreparationAsInstallationSuccess(t *testing.T) {
 	root, _, _, _ := installFixture(t, "undertale", false)
 	var events []string
@@ -312,6 +321,7 @@ func TestInstallProgressDoesNotAnnouncePreparationAsInstallationSuccess(t *testi
 	}
 }
 
+// TestInstallAcceptsCardRootAlias checks a symlink to the card root still installs into the actual card.
 func TestInstallAcceptsCardRootAlias(t *testing.T) {
 	root, source, names, _ := installFixture(t, "undertale", false)
 	alias := filepath.Join(t.TempDir(), "card")
@@ -328,6 +338,7 @@ func TestInstallAcceptsCardRootAlias(t *testing.T) {
 	}
 }
 
+// TestInstallFileHashUsesBoundedMemory checks verification hashes large packs without allocating their full size.
 func TestInstallFileHashUsesBoundedMemory(t *testing.T) {
 	// A full read of a real pack would allocate its entire size. Verification
 	// must stay bounded even when the pack is much larger than a copy buffer.
@@ -348,6 +359,7 @@ func TestInstallFileHashUsesBoundedMemory(t *testing.T) {
 	}
 }
 
+// TestInstallNestedSourcesIsolateGamesWithCollidingAudio checks colliding music names remain isolated during installation and selective originals deletion.
 func TestInstallNestedSourcesIsolateGamesWithCollidingAudio(t *testing.T) {
 	root, utSource, utNames, _ := installFixture(t, "undertale", false)
 	common := filepath.Dir(utSource)
@@ -430,6 +442,7 @@ func TestInstallNestedSourcesIsolateGamesWithCollidingAudio(t *testing.T) {
 	}
 }
 
+// TestInstallNestedDiscoveryIgnoresMusicOutsideSelectedSource checks discovery and discard stay within the selected game source folder.
 func TestInstallNestedDiscoveryIgnoresMusicOutsideSelectedSource(t *testing.T) {
 	root, source, _, _ := installFixture(t, "undertale", false)
 	common := filepath.Dir(source)

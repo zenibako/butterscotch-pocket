@@ -2,10 +2,14 @@ package plugin
 
 import "fmt"
 
+// guidePlatforms asks for the computer OS explicitly because the plugin host
+// does not expose it; Back returns to installation confirmation.
 func (s *Session) guidePlatforms() ([]byte, error) {
 	return s.menu("guide-os", "Which computer has your game installed?", "macOS", "Windows", "Linux", "Back", "Exit")
 }
 
+// guidePage renders the current one of three game/OS-specific copy steps without
+// touching files. The final action returns to confirmation rather than installing.
 func (s *Session) guidePage() ([]byte, error) {
 	game := "UNDERTALE"
 	if s.game == "deltarune" {

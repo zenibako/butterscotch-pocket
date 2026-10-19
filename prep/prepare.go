@@ -63,6 +63,8 @@ func canonicalPath(p string) (string, error) {
 	}
 	return resolved, nil
 }
+
+// hasSaves detects a case-insensitive Saves component without requiring p to exist.
 func hasSaves(p string) bool {
 	for _, part := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
 		if strings.EqualFold(part, "saves") {
@@ -71,10 +73,15 @@ func hasSaves(p string) bool {
 	}
 	return false
 }
+
+// inside checks lexical containment, including equality; callers must resolve
+// symlinks separately when filesystem identity matters.
 func inside(path, folder string) bool {
 	r, e := filepath.Rel(folder, path)
 	return e == nil && (r == "." || (r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))))
 }
+
+// hash returns the lowercase SHA-256 digest used in preparation reports.
 func hash(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 
 // validatePacks checks every emitted track, then adds the production texture tail.
@@ -140,7 +147,9 @@ func validatePacks(tex, audio []byte, expected map[string]bool) ([]byte, error) 
 	return append(audio, footer...), nil
 }
 
-// sourceAncestor also handles case aliases on case-insensitive filesystems.
+// sourceAncestor checks whether source is an existing ancestor of out by file
+// identity, including case aliases. It stops at their common ancestor to avoid
+// probing inaccessible WASI parent directories.
 func sourceAncestor(out, source string) (bool, error) {
 	identity, err := os.Stat(source)
 	if err != nil {
@@ -167,12 +176,14 @@ func sourceAncestor(out, source string) (bool, error) {
 	return false, nil
 }
 
-// Prepare publishes a complete converted folder; failures leave no staged output.
+// Prepare converts supported game resources into a new output tree and returns
+// its path. It refuses existing output folders and preserves inputs.
 func Prepare(o Options) (string, error) {
 	return prepare(o, "")
 }
 
-// prepare lets the card installer bound discovery to its selected source folder.
+// prepare stages and validates conversion before publishing the output tree.
+// limitRoot optionally bounds the card installer's music discovery to its source folder.
 func prepare(o Options, limitRoot string) (string, error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return "", fmt.Errorf("choose undertale or deltarune")

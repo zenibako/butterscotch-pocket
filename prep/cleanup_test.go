@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestRemoveTreeNestedAndMissing checks recursive removal and successful repeated removal of an absent tree.
 func TestRemoveTreeNestedAndMissing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tree")
 	prepWrite(t, filepath.Join(root, "a/b/file"), []byte("remove"))
@@ -23,6 +24,7 @@ func TestRemoveTreeNestedAndMissing(t *testing.T) {
 	}
 }
 
+// TestRemoveTreeNeverFollowsSymlinks checks that cleanup unlinks redirects without deleting their external targets.
 func TestRemoveTreeNeverFollowsSymlinks(t *testing.T) {
 	outside := t.TempDir()
 	sentinel := filepath.Join(outside, "keep")
@@ -50,6 +52,7 @@ func TestRemoveTreeNeverFollowsSymlinks(t *testing.T) {
 	}
 }
 
+// TestInstallCleanupFailureIsSuccessfulWarning checks that failed work-directory cleanup reports its location after successful install and discard.
 func TestInstallCleanupFailureIsSuccessfulWarning(t *testing.T) {
 	root, source, names, _ := installFixture(t, "undertale", false)
 	remover := func(path string) error {

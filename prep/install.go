@@ -34,7 +34,9 @@ func Install(o InstallOptions) (InstallResult, error) {
 	return installWithOps(o, os.Rename, removeTree)
 }
 
-// installWithOps keeps fault injection local to a call, without global hooks.
+// installWithOps runs conversion, checked replacement and optional source removal.
+// Its filesystem callbacks allow per-call fault injection; cleanup warnings update
+// named return values without turning a completed installation into a failure.
 func installWithOps(o InstallOptions, rename func(string, string) error, discard func(string) error) (result InstallResult, err error) {
 	if o.Game != "undertale" && o.Game != "deltarune" {
 		return result, fmt.Errorf("choose undertale or deltarune")
@@ -214,6 +216,8 @@ func installWithOps(o InstallOptions, rename func(string, string) error, discard
 	return result, nil
 }
 
+// installDirectories rejects missing, redirected or non-directory components from
+// the canonical card root through the selected game's source folder.
 func installDirectories(root, game string) error {
 	p := root
 	for _, part := range []string{"", "Assets", "butterscotch", "common", game} {
@@ -231,6 +235,8 @@ func installDirectories(root, game string) error {
 	return nil
 }
 
+// installRegular rejects symlinks and non-regular targets; optional permits absence
+// when an installed output does not exist yet.
 func installRegular(p string, optional bool) error {
 	info, err := os.Lstat(p)
 	if optional && os.IsNotExist(err) {
@@ -245,6 +251,8 @@ func installRegular(p string, optional bool) error {
 	return nil
 }
 
+// installOriginals validates the entire source tree, including unused files,
+// before conversion or whole-folder discard; redirects and special files are refused.
 func installOriginals(source string) error {
 	return filepath.WalkDir(source, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
