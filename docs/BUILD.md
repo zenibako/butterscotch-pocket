@@ -133,6 +133,11 @@ archive contents and test installation before publishing a stable release.
 The GitHub workflows define the supported CI and explicit release dispatch;
 regular pushes should validate artifacts without publishing a stable release.
 
+Commit the version's release notes at `docs/release-notes/vX.Y.Z.md` before
+starting its release build. Draft creation uses that file as the GitHub release
+body and refuses missing or empty notes. Include installation/Memory compatibility,
+known issues, and the distinction between automated and physical Pocket checks.
+
 Every release, including tool-only updates, must carry:
 
 - `butterscotch-pocket.zip`: the installable core tree with both game programs.
