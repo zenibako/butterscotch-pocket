@@ -185,6 +185,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: butterscotch-pocket-distribution
@@ -194,6 +195,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          notes="$GITHUB_WORKSPACE/docs/release-notes/$RELEASE_VERSION.md"
+          test -s "$notes"
           cd release-assets
           sha256sum -c SHA256SUMS
-          gh release create "$RELEASE_VERSION" --draft --target "$GITHUB_SHA" --title "$RELEASE_VERSION" --notes '' ./*
+          gh release create "$RELEASE_VERSION" --draft --target "$GITHUB_SHA" --title "$RELEASE_VERSION" --notes-file "$notes" ./*
