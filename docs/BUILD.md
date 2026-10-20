@@ -22,7 +22,7 @@ latest downloads are not build inputs.
 
 | Input | Pinned source |
 |---|---|
-| Runner / Pocket platform | `zenibako/Butterscotch` at `6459b8de264b2ff6b9d2a831339762cec583d0d2` |
+| Runner / Pocket platform | `zenibako/Butterscotch` at `4b035bf5ed7222eab07fe64416c2c1279a0527ca` |
 | SDK base | `openfpgaOS/openfpgaSDK` at `a408ddc12aed0dfaa4aa22c06af82f829db77126` |
 | Matched runtime and API source | `zenibako/openfpgaCore` at `902a8adc11309c50c8954af2864ddf893c8b1b0c` |
 | Core compiler | GCC 13.2.0, Ubuntu 24.04 package `gcc-riscv64-unknown-elf=13.2.0-11ubuntu1+12` |
@@ -93,7 +93,7 @@ compiler and Python. Use a clean dedicated checkout of the pinned fork:
 
 ```sh
 git clone https://github.com/zenibako/Butterscotch.git out/core
-git -C out/core checkout --detach 6459b8de264b2ff6b9d2a831339762cec583d0d2
+git -C out/core checkout --detach 4b035bf5ed7222eab07fe64416c2c1279a0527ca
 git clone https://github.com/zenibako/openfpgaCore.git out/runtime-source
 git -C out/runtime-source checkout --detach 902a8adc11309c50c8954af2864ddf893c8b1b0c
 python3 release/pipeline.py validate
