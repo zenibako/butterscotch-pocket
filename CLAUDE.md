@@ -8,11 +8,12 @@ https://github.com/zenibako/Butterscotch.
 ## Orient before changing code
 
 Read `README.md`, `GAME-DATA.md`, `docs/BUILD.md` and the relevant approved
-spec/plan under `docs/superpowers/`. The repository was repurposed from an
-openfpgaOS SDK checkout with the user's authorization. Historical `src/sdk`,
-`src/apps`, `runtime`, `scripts` and SDK Makefiles remain for history; they are
-not the current release dependency source. Do not refresh or edit those
-legacy trees as part of routine tools/release work.
+spec/plan. Finished specs and plans live in closed issues titled
+`Archived spec:` or `Archived plan:`, not in the repository. The repository
+was repurposed from an openfpgaOS SDK checkout with the user's authorization.
+Historical `src/sdk`, `src/apps`, `runtime`, `scripts` and SDK Makefiles
+remain for history; they are not the current release dependency source. Do
+not refresh or edit those legacy trees as part of routine tools/release work.
 
 ## Active layout
 

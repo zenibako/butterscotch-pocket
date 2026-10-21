@@ -1,7 +1,7 @@
 # Building and releasing
 
-The approved [repository split design](superpowers/specs/2026-10-18-install-entrypoint-design.md)
-and [implementation plan](superpowers/plans/2026-10-18-install-entrypoint.md)
+The approved [repository split design](https://github.com/zenibako/butterscotch-pocket/issues/15)
+and [implementation plan](https://github.com/zenibako/butterscotch-pocket/issues/16)
 keep the runner in the fork while this repository owns installation, tools
 and release packaging. The [game-data guide](../GAME-DATA.md) defines the
 supported inputs and preparation contract. The plugin (v0.7.1 or newer) reads
