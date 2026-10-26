@@ -265,7 +265,7 @@ not establish that instruction-cache misses are absent elsewhere: the
 probe is 2000 repeated renderer calls after warming the sprite, bypassing
 the GML builtin and VM. No cache-miss counters are measured.
 
-See the [result and exact device-report excerpts](https://github.com/zenibako/butterscotch-pocket/issues/30).
+See the [result and exact device-report excerpts](https://github.com/zenibako/butterscotch-pocket-legacy/issues/30).
 
 ## Code layout is not it (2026-10-10)
 

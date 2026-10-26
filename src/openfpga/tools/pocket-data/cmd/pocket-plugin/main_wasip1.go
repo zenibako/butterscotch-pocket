@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/extism/go-pdk"
-	"github.com/zenibako/Butterscotch/pocket-data/plugin"
+	"github.com/zenibako/butterscotch-pocket/src/openfpga/tools/pocket-data/plugin"
 )
 
 //go:wasmimport extism:host/user print_msg

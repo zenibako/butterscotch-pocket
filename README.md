@@ -1,6 +1,20 @@
-> [!NOTE]
-> This is a fork of Butterscotch. The Analogue Pocket port, Butterscotch Pocket, lives in
-> [`src/openfpga`](src/openfpga/README.md), which has its own README. Butterscotch's README follows unchanged.
+# Butterscotch Pocket
+
+Run Undertale v1.08 and experimental Deltarune Chapter 1 on Analogue Pocket,
+using [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch) and
+openfpgaOS. This fork maintains the runner, Pocket port, game-data tools,
+Pocket Sync plugin and releases together.
+
+- [Install the core and plugin](src/openfpga/docs/INSTALL.md)
+- [Prepare your own game files](src/openfpga/GAME-DATA.md)
+- [Pocket controls and development](src/openfpga/README.md)
+- [Build and release](src/openfpga/docs/BUILD.md)
+
+You must supply your own supported game installation. No commercial game data
+is included. The Pocket code lives in `src/openfpga/`; shared runner sources
+keep upstream's layout. The original Butterscotch README follows.
+
+---
 
 <div align="center">
 <img width="256" height="256" alt="Butterscotch Logo" src="https://github.com/user-attachments/assets/ef8bdd5c-d407-4b3c-a4d5-07b25e8bbc70" />

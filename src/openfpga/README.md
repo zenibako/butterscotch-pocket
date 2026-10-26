@@ -37,6 +37,10 @@ exact SD-card filenames without rebuilding the core or installing Python.
 The guide covers installing both the core and your prepared data through
 Pocket Sync, as well as copying the files manually.
 
+For installation, follow [Install](docs/INSTALL.md) and [Prepare your game files](GAME-DATA.md).
+The runner, port, nested Go tools and release pipeline share this repository.
+Public builds and dependency provenance are described in [Build and release](docs/BUILD.md).
+
 ## Layout
 
 | Path | What |
@@ -70,7 +74,7 @@ The commands below match the layout as of 2026-10-08; check they still match how
 From nothing, with the SDK cloned next to this repository:
 
 ```bash
-git clone https://github.com/zenibako/Butterscotch.git butterscotch-pocket
+git clone https://github.com/zenibako/butterscotch-pocket.git butterscotch-pocket
 git clone https://github.com/openfpgaOS/openfpgaSDK.git
 cd butterscotch-pocket/src/openfpga
 
@@ -194,7 +198,7 @@ Its interpreter-work bound is fixture-only instrumentation. The Undertale
 configuration checks that the Deltarune-only script is not installed there.
 
 The translated tile-cache fixture and its recorded harness/Pocket comparisons
-are described in [the dated results](https://github.com/zenibako/butterscotch-pocket/issues/31).
+are described in [the dated results](https://github.com/zenibako/butterscotch-pocket-legacy/issues/31).
 
 ### Save states and sleep (experimental; Undertale and Deltarune Chapter 1)
 

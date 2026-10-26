@@ -1,4 +1,4 @@
-module github.com/zenibako/Butterscotch/pocket-data
+module github.com/zenibako/butterscotch-pocket/src/openfpga/tools/pocket-data
 
 go 1.25.0
 

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "capabilities": [
+    "save-slot-fsync"
+  ],
+  "required_revision": "52abf78bde0446bc4af8e23631f41ff950e5a535",
+  "source_commit": "902a8adc11309c50c8954af2864ddf893c8b1b0c",
+  "sha256": {
+    "os.bin": "cc299efffc0f8fcafaaa265e329439806e061bd4cceb0ab6a96f16f8b2b7fe27",
+    "os25.rbf_r": "33a56e60af0ead8c94441f38a5b4d7b4aa37594302969e09969e46f108dd6985",
+    "loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
+  }
+}

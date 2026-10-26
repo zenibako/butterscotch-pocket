@@ -1,7 +1,7 @@
 # Focused battle text and flashing-tile measurements
 
 Use the maintained [diagnostic instructions](../../../../src/openfpga/docs/2026-10-18-focused-pocket-benchmark.md)
-for build/launch commands and the [corrected route validation](https://github.com/zenibako/butterscotch-pocket/issues/50)
+for build/launch commands and the [corrected route validation](https://github.com/zenibako/butterscotch-pocket-legacy/issues/50)
 for semantic windows. The reported corridor is room 65 `room_field_checkers4`,
 with flashing floor tiles that return the player to the start. Outdoor room 104
 is a different workload; it cannot supply a corridor before/after baseline.
@@ -25,8 +25,8 @@ sample counts; retain report history and distinguish exact duplicates from new
 measurements. Diagnostic saves use a separate namespace and volatile progress;
 they do not validate ordinary gameplay saves, Memories or sleep/wake.
 
-Before proposing another optimization, read the [physical silent-tail results](https://github.com/zenibako/butterscotch-pocket/issues/54)
-and [background lookup results](https://github.com/zenibako/butterscotch-pocket/issues/49).
+Before proposing another optimization, read the [physical silent-tail results](https://github.com/zenibako/butterscotch-pocket-legacy/issues/54)
+and [background lookup results](https://github.com/zenibako/butterscotch-pocket-legacy/issues/49).
 The former measured observation reveal falling from 100.131 to 63.219 ms/frame
 in one physical run per mode; it did not establish a corridor speedup. The latter
 documents the guarded live lookup and borrowed string search already implemented.

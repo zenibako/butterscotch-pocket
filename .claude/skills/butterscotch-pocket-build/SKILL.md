@@ -56,6 +56,15 @@ it. Until 2026-10-08 the port lived inside a fork of the SDK
 (`openfpgaSDK/src/undertale`, branch `undertale`) with Butterscotch cloned
 inside it; that tree is superseded by this one.
 
+## Public distributions
+
+This fork also owns the shared Go tools/plugin under
+`src/openfpga/tools/pocket-data` and the complete distribution pipeline under
+`src/openfpga/release`. Use `src/openfpga/docs/BUILD.md` and the `pocket-release`
+skill for public packages: core programs and tools come from the same clean
+checkout, while SDK/runtime revisions and hashes stay separately pinned.
+The commands below remain for local device and desktop development.
+
 ## Building
 
 ```bash

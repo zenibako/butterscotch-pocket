@@ -1,9 +1,11 @@
 # Add your own game files
 
 Butterscotch Pocket includes the core and game programs. You supply the game
-data from your own computer installation. The preparation tool converts its
-textures and audio and writes a new folder ready to copy to your SD card.
-It does not download games, change your original installation or write saves.
+data from your own computer installation. The desktop preparation tool converts
+its textures and audio into a new folder ready to copy to your SD card. The
+Pocket Sync plugin can install converted files directly on the card, as
+described below. Neither downloads games, changes your computer installation
+or writes saves.
 
 The supported targets are **Undertale v1.08** and **Deltarune Chapter 1**.
 Checking a data file's bytecode version does not establish compatibility with
@@ -11,7 +13,7 @@ other game releases or chapters.
 
 ## 1. Install the core
 
-Choose either installation method:
+Download **`butterscotch-pocket.zip`** from the [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest), then choose either installation method:
 
 - **Pocket Sync:** Connect your Pocket or insert its SD card, click
   **Connect to Pocket**, and select the card's root folder (the one containing
@@ -27,8 +29,10 @@ preparation steps below for either installation method. The game-data
 preparation bundle is a separate computer-side tool; extract it on your
 computer, not on the SD card. Do not drag that tools archive into Pocket Sync.
 
-Download the preparation bundle for your computer: macOS, Windows or Linux,
-on x86_64 or arm64. It contains a standalone `prepare-data` executable
+Download the preparation bundle from the same release: `prepare-data-<os>-<arch>.tar.gz`.
+Use `darwin` for macOS, `windows` for Windows or `linux` for Linux, and
+`arm64` for an Apple silicon Mac or ARM computer, or `amd64` for an Intel/AMD
+64-bit computer. It contains a standalone `prepare-data` executable
 (`prepare-data.exe` on Windows). Python, a C compiler and the openfpgaOS SDK
 are not required. The same Go conversion library also runs in WASM.
 
@@ -117,8 +121,8 @@ Select only a game whose data you installed. Your progress is under
 `/Saves/butterscotch/common/`; the preparation output contains no `Saves`
 folder. Keep your original games and generated data private.
 
-Pocket Sync installs the core and copies prepared files; it does not run the
-converters or obtain your purchased game data. Installing an updated
+Pocket Sync installs the core and copies prepared files. Its optional plugin
+can also run the converter, as described below; neither method obtains your purchased game data. Installing an updated
 core does not convert a different game version. If a release asks you to
 prepare the data again, repeat steps 2–4 with a new output folder.
 
@@ -129,28 +133,76 @@ private game-data archives separate.
 
 ## Pocket Sync plugin
 
-The optional plugin uses the same conversion library. It reads only files
-accessible through Pocket Sync's SD-card mount; entering an arbitrary computer
-path does not grant it access to that folder.
+The optional plugin runs the same conversion library inside regular Pocket Sync.
+In **Plugins → Add plugin via URL**, enter:
 
-1. Install the core, then stage your own complete installation under
-   `/Butterscotch-input/undertale/` or `/Butterscotch-input/deltarune/` on the card.
-   Keep the installation's folder structure and music files together.
-2. Run the Butterscotch game-data plugin in Pocket Sync, select the game,
-   and follow its preparation confirmation.
-3. On success, merge the **Assets** folder from
-   `/Butterscotch-prepared/<game>/` into the card root. Use the ZIP import method
-   above if preferred. The plugin prepares a separate folder and does not replace
-   your installed game files or saves.
+```text
+https://github.com/zenibako/butterscotch-pocket
+```
 
-The prepared output folder must not already exist. Move a previous prepared
-folder elsewhere before another conversion. Keep staged originals and prepared
-data private. The plugin does not download commercial files.
+Choose **Verify & install plugin**. This requires a published stable release
+containing both `plugin.wasm` and `plugin.json`; a source checkout or a draft
+release is not installable through this dialog. The core and plugin use the
+same repository URL, but installing one does not install the other.
 
-Plugin distribution requires separate `plugin.wasm` and `plugin.json` release
-assets. Those assets are not the core ZIP; availability in Pocket Sync depends
-on publishing a release. Local builds and automated host tests do not establish
-live Pocket Sync or Pocket compatibility.
+The direct-install workflow below requires **v0.7.1 or newer**. Update the
+plugin if you installed v0.7.0, which used separate input/output folders.
+
+1. Install the core, then copy original resources into the connected card:
+   - **Undertale:** `/Assets/butterscotch/common/undertale/`, with its native
+     `data.win`, `game.ios` or `game.unx` and original music beside it or in
+     `music/`.
+   - **Deltarune:** `/Assets/butterscotch/common/deltarune/`, with
+     `chapter1_mac`, `chapter1_windows` or `chapter1_linux` alongside shared
+     `mus/`. Keep the chapter's data, `audiogroup1.dat`, `lang/lang_en.json`
+     and music together. Preserve native filenames; no data-file renaming is
+     needed. Separate source folders prevent music filename collisions.
+2. Run **Butterscotch Game Data**, select the game, then choose
+   **Install and keep originals** (first/default) or
+   **Install and discard originals**. Review the source folder shown in the
+   confirmation. **Find my game files** offers three short steps for macOS,
+   Windows or Linux, with the game's resource location and SD-card destination.
+3. Keep Pocket Sync open until installation finishes. All three game files
+   are installed directly into `/Assets/butterscotch/common/` with the names
+   in the table above. No manual copy or merge is needed.
+
+The plugin reads only the connected card, so copy resources out of any `.app`
+bundle first. For default Steam installations on macOS, replace
+`/Volumes/POCKET` with your card's path and run only the commands you need:
+
+```sh
+# Undertale: copy Resources contents into the dedicated source folder.
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+
+# Deltarune: preserve the chapter and shared music directory arrangement.
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/deltarune"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/chapter1_mac"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/mus"
+```
+
+On Windows or Linux, copy the equivalent installed resources into those
+source folders with your file manager. Do not copy an installer or ZIP.
+
+**Keep originals** preserves the source folder for another install.
+**Discard originals** removes the entire selected `undertale/` or `deltarune/`
+source folder only after successful installation. It leaves the other game's
+source folder, installed game files, your computer's Steam installation and
+saves untouched. Keep enough free space for originals, conversion work and
+previous installed files during replacement.
+
+If conversion or installation fails, originals are kept and previous installed
+files are restored. If restoration fails, preserve the recovery backups at
+the reported location. A failure to discard originals or remove temporary
+files produces a cleanup warning after a successful install; the game remains
+installed.
+
+Work and recovery remnants are hidden under
+`/Assets/butterscotch/common/.butterscotch-install-*`; the plugin report is
+`/Assets/butterscotch/common/.butterscotch-<game>.json`. There are no separate
+top-level input or prepared-output folders. The desktop CLI still writes
+`PREPARED-DATA.json` in a separate output folder and refuses existing output
+folders. Keep original and converted game data private.
 
 ## Building from source
 
@@ -183,11 +235,13 @@ WASI conversions against synthetic fixtures, compares their game files, and
 runs plugin exports in an Extism host when `tinygo` is on PATH (or set `TINYGO`
 to its executable). Set `REQUIRE_PLUGIN_TESTS=1` to fail instead of skipping when
 TinyGo is missing. Run `go test -C third_party/vorbis ./...` for the patched
-decoder's own regressions. When Python and a host C compiler are available, it also compares the existing C converters as an independent oracle.
-The old `prepare_game.py`, `mktexpack.c` and `mkmusic.c` remain developer references;
+decoder's own regressions. Run `REQUIRE_REFERENCE_TESTS=1 go test ./integration` for independent C converter comparisons against this checkout. Python and a host C compiler are required. `BUTTERSCOTCH_SOURCE` can explicitly select another runner checkout.
+The old `prepare_game.py`, `mktexpack.c` and `mkmusic.c` remain developer references in [this checkout](tools/);
 they are not dependencies of the Go executable or plugin.
 
 The Vorbis decoder is pure Go. The generated synthetic Vorbis fixture matches
 the old decoder in current checks; this does not prove byte-identical decoding
 for every commercial track. Full-game compatibility and resource use still need
 on-device tests with the user's own supported game files.
+
+See [Building and releasing](docs/BUILD.md) for the shared source commit and pinned SDK/runtime contract.

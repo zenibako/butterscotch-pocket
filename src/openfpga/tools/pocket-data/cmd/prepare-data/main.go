@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/zenibako/Butterscotch/pocket-data/prep"
+	"github.com/zenibako/butterscotch-pocket/src/openfpga/tools/pocket-data/prep"
 	"io"
 	"os"
 )

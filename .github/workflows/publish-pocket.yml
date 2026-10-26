@@ -1,0 +1,61 @@
+name: Prepare complete Pocket draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+      create_draft:
+        description: Create a draft after the complete distribution passes
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  validation:
+    uses: ./.github/workflows/release-pocket.yml
+    with:
+      version: ${{ inputs.version }}
+
+  draft-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.create_draft
+    needs: validation
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: butterscotch-pocket-distribution
+          path: release-assets
+      - name: Create complete draft for manual publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
+          notes="$GITHUB_WORKSPACE/src/openfpga/docs/release-notes/$RELEASE_VERSION.md"
+          test -s "$notes"
+          cd release-assets
+          sha256sum -c SHA256SUMS
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          core = json.loads(Path('CORE-PROVENANCE.json').read_text())
+          tools = json.loads(Path('TOOLS-PROVENANCE.json').read_text())
+          expected = {'repository': 'zenibako/butterscotch-pocket', 'commit': os.environ['GITHUB_SHA']}
+          if core['version'] != os.environ['RELEASE_VERSION']:
+              raise SystemExit('Release version does not match validated core provenance')
+          if core['source'] != expected or tools['source'] != expected:
+              raise SystemExit('Core/tools provenance does not match the workflow commit')
+          PYTHON
+          gh release create "$RELEASE_VERSION" --draft --target "$GITHUB_SHA" --title "$RELEASE_VERSION" --notes-file "$notes" ./*

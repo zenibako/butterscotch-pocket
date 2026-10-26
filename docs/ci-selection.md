@@ -21,8 +21,8 @@ dependencies. Domains combine when a change touches multiple areas.
 | --- | --- |
 | Pocket glue, configuration, assets and fixtures under `src/openfpga/` | Pocket builds for both games and existing port fixtures |
 | `src/runner_snapshot.c`, `.h`, and explicitly listed Pocket snapshot/cache fixtures | Pocket |
-| `src/openfpga/tools/pocket-data/`, bundled `GAME-DATA.md`, root `LICENSE` | Go native/WASM conversion tests and builds |
-| Python/C reference converters, `platform/of_log.c`, or Pocket platform headers | Pocket and Go tools |
+| `src/openfpga/tools/pocket-data/`, bundled `GAME-DATA.md`, root `LICENSE` | Complete Pocket distribution: native/WASI/Extism/C-reference tools, both public programs, package/source/provenance validation |
+| Pocket platform/build/release inputs, Python/C reference converters, or Pocket platform headers | Pocket and complete distribution |
 | `src/ps2/`, `src/audio/ps2/`, `src/ps3/`, `src/vita/`, `src/switch/` | Corresponding console only |
 | Web/Android paths and dedicated Web/AppKit backends | Corresponding port |
 | Dedicated Windows/macOS artifacts and mapped toolchain files | Corresponding platform |
@@ -38,7 +38,7 @@ select all domains. Changes to a known reusable workflow select the domains it
 defines; console and Web/Android workflows retain all of their leaves for such
 changes.
 
-This preserves the [existing Pocket-only snapshot codec boundary](https://github.com/zenibako/butterscotch-pocket/issues/18).
+This preserves the [existing Pocket-only snapshot codec boundary](https://github.com/zenibako/butterscotch-pocket-legacy/issues/18).
 It does not narrow ordinary `src/*.c` or `src/sw/` changes based on their original
 motivation: a Pocket renderer optimization still selects the shared builds.
 
@@ -49,6 +49,12 @@ to both Pocket and Go to cover transitive includes from `of_log.c`.
 
 The independent `Update Coverage` workflow is existing wiki-publishing automation,
 not a CI build/test gate. Its publishing policy is unchanged.
+
+The `PocketTools` domain calls the read-only `release-pocket.yml` distribution
+workflow through `build-pocket-data-tools.yml`. Both programs and the nested
+Go module are built from the same checkout. The separate `publish-pocket.yml`
+workflow requires an explicit version and draft action; routine CI cannot
+publish. SDK/runtime hashes remain pinned external inputs.
 
 ## Pocket build reuse
 

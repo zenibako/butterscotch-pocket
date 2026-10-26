@@ -13,7 +13,7 @@ import (
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	"github.com/zenibako/Butterscotch/pocket-data/internal/testgame"
+	"github.com/zenibako/butterscotch-pocket/src/openfpga/tools/pocket-data/internal/testgame"
 )
 
 func build(t *testing.T, target, path, mode string) {
