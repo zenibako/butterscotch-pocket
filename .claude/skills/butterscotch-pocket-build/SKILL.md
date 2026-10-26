@@ -58,12 +58,9 @@ inside it; that tree is superseded by this one.
 
 ## Public distributions
 
-This fork also owns the shared Go tools/plugin under
-`src/openfpga/tools/pocket-data` and the complete distribution pipeline under
-`src/openfpga/release`. Use `src/openfpga/docs/BUILD.md` and the `pocket-release`
-skill for public packages: core programs and tools come from the same clean
-checkout, while SDK/runtime revisions and hashes stay separately pinned.
-The commands below remain for local device and desktop development.
+For public packages use `src/openfpga/docs/BUILD.md` and `pocket-release`.
+Runner and nested tools build from one clean commit with matched external
+SDK/runtime pins. Commands below cover local development.
 
 ## Building
 
