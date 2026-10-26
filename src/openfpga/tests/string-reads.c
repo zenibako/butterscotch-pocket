@@ -5,13 +5,29 @@
 #include <stdlib.h>
 #include <string.h>
 static unsigned inputCopies;
+static int trackStructCopies;
+static void *structCopies[8];
+static unsigned liveStructCopies;
 static char *countedStrdup(const char *text) {
     size_t bytes = strlen(text) + 1;
     char *copy = (char *)malloc(bytes);
     assert(copy != NULL);
     memcpy(copy, text, bytes);
     ++inputCopies;
+    if (trackStructCopies) {
+        assert(liveStructCopies < sizeof(structCopies) / sizeof(structCopies[0]));
+        structCopies[liveStructCopies++] = copy;
+    }
     return copy;
+}
+static void countedFree(void *pointer) {
+    for (unsigned i = 0; i < liveStructCopies; ++i) {
+        if (structCopies[i] == pointer) {
+            structCopies[i] = structCopies[--liveStructCopies];
+            break;
+        }
+    }
+    free(pointer);
 }
 /* Count actual whole-string traversals made by the builtin translation unit.
  * Conversion/allocation checks below remain independent of this work bound. */
@@ -23,7 +39,9 @@ static size_t countedStrlen(const char *text) {
 }
 #define strlen countedStrlen
 #define strdup countedStrdup
+#define free countedFree
 #include "../../vm_builtins.c"
+#undef free
 #undef strdup
 #undef strlen
 
@@ -294,6 +312,56 @@ static void testStringPosition(VMContext *ctx) {
     }
 }
 
+static void testStructNames(VMContext *ctx) {
+    Instance instance = {0};
+    instance.objectIndex = STRUCT_OBJECT_INDEX;
+    VM_structSet(ctx, &instance, "answer", RValue_makeReal(42), -1);
+    VM_structSet(ctx, &instance, "7", RValue_makeReal(7), -1);
+    BuiltinFunc get = VM_findBuiltin(ctx, "struct_get");
+    BuiltinFunc set = VM_findBuiltin(ctx, "struct_set");
+    assert(get != NULL && set != NULL);
+    RValue args[] = {RValue_makeStructWeak(&instance), RValue_makeString("answer"), RValue_makeUndefined()};
+    trackStructCopies = 1;
+    for (int count = 0; count < 2; ++count) {
+        RValue missing = get(ctx, NULL, count);
+        assert(missing.type == RVALUE_UNDEFINED && liveStructCopies == 0);
+    }
+    for (int count = 0; count < 3; ++count) {
+        RValue missing = set(ctx, NULL, count);
+        assert(missing.type == RVALUE_UNDEFINED && liveStructCopies == 0);
+    }
+    RValue result = get(ctx, args, 2);
+    assert(result.type == RVALUE_REAL && result.real == 42);
+    assert(liveStructCopies == 0);
+    RValue_free(&result);
+    args[1] = RValue_makeReal(7);
+    result = get(ctx, args, 2);
+    assert(result.type == RVALUE_REAL && result.real == 7);
+    assert(liveStructCopies == 0);
+    args[1] = RValue_makeString("missing");
+    result = get(ctx, args, 2);
+    assert(result.type == RVALUE_UNDEFINED && liveStructCopies == 0);
+    args[0] = RValue_makeStructWeak(NULL);
+    result = get(ctx, args, 2);
+    assert(result.type == RVALUE_UNDEFINED && liveStructCopies == 0);
+    args[0] = RValue_makeStructWeak(&instance);
+    args[1] = RValue_makeString("value");
+    args[2] = RValue_makeOwnedString(strdup("kept"));
+    result = set(ctx, args, 3);
+    assert(result.type == RVALUE_UNDEFINED && liveStructCopies == 0);
+    RValue_free(&args[2]);
+    result = get(ctx, args, 2);
+    assert(result.type == RVALUE_STRING && result.ownsReference);
+    IntRValueHashMap_freeAllValues(&instance.selfVars);
+    assert(!strcmp(result.string, "kept"));
+    RValue_free(&result);
+    assert(liveStructCopies == 0);
+    trackStructCopies = 0;
+    for (ptrdiff_t i = 0; i < shlen(ctx->varNameMap); ++i) free(ctx->varNameMap[i].key);
+    shfree(ctx->varNameMap);
+    puts("PASS: struct builtin arity, value ownership and temporary-name cleanup");
+}
+
 int main(int argc, char **argv) {
     DataWin data = {0};
     Runner runner = {0};
@@ -308,6 +376,7 @@ int main(int argc, char **argv) {
     ctx.dataWin = &data;
     ctx.runner = &runner;
     VMBuiltins_registerAll(&ctx);
+    testStructNames(&ctx);
     testStrings(&ctx);
     testConversion(&ctx, RValue_makeReal(42), "42");
     testConversion(&ctx, RValue_makeReal(3.5), "3.50");
