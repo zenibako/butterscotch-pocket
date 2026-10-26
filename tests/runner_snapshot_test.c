@@ -621,6 +621,30 @@ static void testDynamicSpriteCaptureEligibility(void) {
     destroyFixture(&r);
 }
 
+/* A callee can have no locals or arguments and still be executing. Capturing
+ * it would omit the continuation, so frame presence alone must refuse. */
+static void testActiveCallFrameCaptureEligibility(void) {
+    Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
+    Room room; GameObject object;
+    fixture(&r, &dw, &vm, &renderer, &vtable, &room, &object);
+    CallFrame active = {0};
+    uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
+    vm.currentCallFrame = &active;
+    assert(Runner_snapshotCheck(&r) != NULL);
+    assert(!Runner_snapshotCapture(&r, 7, &bytes, &size, &reason));
+    assert(reason && bytes == NULL && size == 0);
+    assert(vm.currentCallFrame == &active);
+    vm.currentCallFrame = NULL;
+    assert(Runner_snapshotCapture(&r, 7, &bytes, &size, &reason));
+    RunnerSnapshot *prepared = Runner_snapshotPrepare(&r, 7, bytes, size, &reason);
+    assert(prepared);
+    Runner_snapshotApply(&r, prepared);
+    assert(vm.currentCallFrame == NULL && vm.envStack == NULL && vm.stack.top == 0);
+    Runner_snapshotFree(prepared);
+    free(bytes);
+    destroyFixture(&r);
+}
+
 static void testPausedCaptureEligibility(void) {
     Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
     Room room; GameObject object;
@@ -1722,6 +1746,7 @@ int main(void) {
 #endif
     testRoundTrip();
     testRejectsBadInputAndLiveResources();
+    testActiveCallFrameCaptureEligibility();
     testPausedCaptureEligibility();
     testDynamicSpriteCaptureEligibility();
     testBlockersWithInvalidSpriteRegistry();

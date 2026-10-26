@@ -91,18 +91,18 @@ jobs:
       - name: Check the interpreter loop is in block RAM
         working-directory: butterscotch/src/openfpga
         run: |
-          # OF_FAST_LOOP puts executeLoop in the app's uncached block RAM, below
+          # OF_FAST_LOOP puts executeBytecodeInstructions in the app's uncached block RAM, below
           # the SDRAM the rest of the program is linked into.
           for game in undertale deltarune; do
-            line=$(riscv64-unknown-elf-nm -S out/.obj/$game/app.elf | grep -E ' executeLoop(\..*)?$' || true)
+            line=$(riscv64-unknown-elf-nm -S out/.obj/$game/app.elf | grep -E ' executeBytecodeInstructions(\..*)?$' || true)
             if [ -z "$line" ]; then
-              echo "::error::executeLoop not found in $game's program"
+              echo "::error::executeBytecodeInstructions not found in $game's program"
               exit 1
             fi
             echo "$game: $line"
             address=$((0x$(echo "$line" | awk '{print $1}')))
             if [ "$address" -ge $((0x10000000)) ]; then
-              echo "::error::executeLoop of $game is in SDRAM, not block RAM"
+              echo "::error::executeBytecodeInstructions of $game is in SDRAM, not block RAM"
               exit 1
             fi
           done
@@ -161,6 +161,21 @@ jobs:
             PC_OBJ_DIR="$PWD/out/.obj/sanitized-undertale" \
             PC_EXTRA_CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize=alignment"
           ./bs_pc_compat_builtin_compat_fixture
+
+      - name: Check deferred and physics callback context
+        working-directory: butterscotch/src/openfpga
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          make call-later-fixture WADS="16 17" PC_BIN=bs_pc_callbacks \
+            PC_OBJ_DIR="$PWD/out/.obj/sanitized-undertale" \
+            PC_EXTRA_CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize=alignment"
+          ./bs_pc_callbacks_call_later_fixture
+          make physics-contact-fixture WADS="16 17" PC_BIN=bs_pc_callbacks \
+            PC_OBJ_DIR="$PWD/out/.obj/sanitized-undertale" \
+            PC_EXTRA_CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize=alignment"
+          ./bs_pc_callbacks_physics_contact_fixture
 
       - name: Check clipped sprite pixels and texture bounds
         working-directory: butterscotch/src/openfpga

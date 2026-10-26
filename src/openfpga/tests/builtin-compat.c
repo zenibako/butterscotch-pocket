@@ -5,6 +5,7 @@
 #include "stb_ds.h"
 #include "of_game.h"
 #include "runner_keyboard.h"
+#include "runner_gamepad.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -254,7 +255,7 @@ static void testSleepBenchmark(VMContext *ctx) {
     ctx->dataWin->room.rooms = rooms; ctx->dataWin->room.count = 8;
     ctx->dataWin->gen8.name = "DELTARUNE"; ctx->dataWin->gen8.wadVersion = 17;
     ctx->globalScopeInstance = Instance_create(1, STRUCT_OBJECT_INDEX, 0, 0);
-    r->vmContext = ctx; r->keyboard = RunnerKeyboard_create();
+    r->vmContext = ctx; r->keyboard = RunnerKeyboard_create(); r->gamepads = RunnerGamepad_create();
     r->frameCount = 30; r->pendingRoom = -1;
     assert(ofGame.sleepTest != NULL);
     ofGame.sleepTest(r);
@@ -284,6 +285,7 @@ static void testSleepBenchmark(VMContext *ctx) {
     ctx->dataWin->objt.objects = NULL; ctx->dataWin->objt.count = 0;
     Instance_free(ctx->globalScopeInstance); ctx->globalScopeInstance = NULL;
     RunnerKeyboard_free(r->keyboard); r->keyboard = NULL;
+    RunnerGamepad_free(r->gamepads); r->gamepads = NULL;
     for (ptrdiff_t i = 0; i < shlen(ctx->varNameMap); i++) free(ctx->varNameMap[i].key);
     shfree(ctx->varNameMap); r->currentRoom = NULL;
     ctx->dataWin->room.rooms = NULL; ctx->dataWin->room.count = 0;
@@ -328,8 +330,9 @@ static void testNativeComparisonTolerance(VMContext *ctx) {
     Instance_setSelfVar(self, VM_getOrAllocateVarID(ctx, "index"), RValue_makeReal(0));
     Instance_setSelfVar(self, VM_getOrAllocateVarID(ctx, "length"), RValue_makeReal(1.125));
     Instance_setSelfVar(self, VM_getOrAllocateVarID(ctx, "height"), RValue_makeReal(1.125));
-    Renderer *oldRenderer = r->renderer; Instance *oldInstance = ctx->currentInstance;
-    r->renderer = &renderer; ctx->currentInstance = self;
+    Renderer *oldRenderer = r->renderer; CallFrame *oldFrame = ctx->currentCallFrame;
+    CallFrame nativeFrame = {0}; nativeFrame.self = self;
+    r->renderer = &renderer; ctx->currentCallFrame = &nativeFrame;
     assert(grass(ctx));
     assert(grassColumns == 1 && grassRows == 1);
     epsilon = RValue_makeReal(GML_MATH_EPSILON);
@@ -337,7 +340,7 @@ static void testNativeComparisonTolerance(VMContext *ctx) {
     assert(!view(ctx, args, 2, &result)); /* Let bytecode handle a nonmatching property. */
     assert(grass(ctx));
     assert(grassColumns == 2 && grassRows == 2);
-    r->renderer = oldRenderer; ctx->currentInstance = oldInstance;
+    r->renderer = oldRenderer; ctx->currentCallFrame = oldFrame;
     Instance_free(self); r->mathEpsilon = oldEpsilon;
     r->views[0].portWidth = oldPortWidth;
     puts("PASS: native Deltarune comparisons follow the VM's current tolerance");

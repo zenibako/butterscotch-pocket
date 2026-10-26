@@ -113,6 +113,8 @@ make solid-fill-fixture      # builds exact RGB555 fill/blending and boundary ch
 make spatial-grid-fixture    # builds asset-free grid recovery/update checks
 make layer-lookup-fixture    # checks layer lookup order, mutation and repeated work
 make vm-call-args-fixture    # checks argument bounds, ownership and nested calls
+make call-later-fixture WADS="16 17" # checks deferred script/method/builtin callback context
+make physics-contact-fixture WADS="16 17" # checks collision callback self/other and inheritance
 make tile-shift-fixture GAME=deltarune # compares the guarded native with supplied real bytecode
 make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
                 # (GAME=deltarune: ./deltarune_pc, ./deltarune_pc_asan)
@@ -162,6 +164,14 @@ The VM call fixture is `./<game>_pc_vm_call_args_fixture`. It exercises actual
 CALL bytecode and WAD17 CALLV bytecode, stack/heap argument boundaries, value
 ownership and nested script/event execution without game assets. Run it once
 for each game with a separate object directory.
+
+The callback fixtures are `./<PC_BIN>_call_later_fixture` and
+`./<PC_BIN>_physics_contact_fixture` (`PC_BIN` defaults to `undertale_pc`).
+Build both with `WADS="16 17"` and run the produced executables. The deferred
+fixture checks idle and nested calls, bound-instance fallback, diagnostics
+without code entries, and returned-value ownership. The physics fixture checks
+collision self/other, target and handler inheritance, and caller restoration.
+Both are asset-free and run under ASan/UBSan in CI.
 
 The Forest sentry fixture is `./<game>_pc_forest_sentry_fixture`. Build with
 `GAME=deltarune WADS=17 forest-sentry-fixture`, then pass your Chapter 1

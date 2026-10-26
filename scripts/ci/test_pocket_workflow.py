@@ -16,6 +16,7 @@ BUILD_STEPS = (
     "Preserve the checked Pocket programs for upload", "Build the desktop test binaries",
     "Lint the port's own files", "Check save-state regressions with sanitizers",
     "Check script profiler accounting and toggles", "Check builtin compatibility with sanitizers",
+    "Check deferred and physics callback context",
     "Check clipped sprite pixels and texture bounds", "Check font sampling and menu layout",
     "Check shared battle speech and UI sampling",
 )
@@ -53,7 +54,7 @@ record.update({k: os.environ.get(k) for k in ("MAKEFLAGS", "PC_CC", "CC")})
 with open(os.environ["RECORD"], "a") as out:
     out.write(json.dumps(record) + "\n")
 if name == "riscv64-unknown-elf-nm":
-    print("00004000 00000100 T executeLoop")
+    print("00004000 00000100 T executeBytecodeInstructions")
 if name == "make":
     values = dict(arg.split("=", 1) for arg in sys.argv[1:] if "=" in arg)
     game = values.get("GAME", "undertale")
@@ -104,7 +105,9 @@ class PocketWorkflowTests(unittest.TestCase):
         executions = [(row["tool"], row["args"]) for row in records if row["tool"].startswith("bs_pc")]
         self.assertEqual(executions, [
             ("bs_pc_profiler_fixture", []), ("bs_pc_generic_profiler_fixture", []),
-            ("bs_pc_compat_builtin_compat_fixture", []), ("bs_pc_clipping_sprite_clipping_fixture", []),
+            ("bs_pc_compat_builtin_compat_fixture", []),
+            ("bs_pc_callbacks_call_later_fixture", []), ("bs_pc_callbacks_physics_contact_fixture", []),
+            ("bs_pc_clipping_sprite_clipping_fixture", []),
             ("bs_pc_fonts_font_sampling_fixture", []),
             *[("bs_pc_fonts_menu_fixture", [str(height)]) for height in (0, 6, 16, 24)],
             ("bs_pc_battle_undertale_battle_contrast_fixture", []),
@@ -138,7 +141,7 @@ class PocketWorkflowTests(unittest.TestCase):
                 configurations.append(flags)
         sanitized = [f for f in configurations if "-fsanitize=address,undefined" in f.get("PC_EXTRA_CFLAGS", "")]
         undertale = [f for f in sanitized if f.get("GAME", "undertale") == "undertale"]
-        self.assertEqual(len(undertale), 5)  # font/menu link separately
+        self.assertEqual(len(undertale), 7)  # font/menu link separately
         self.assertEqual(len({f["PC_OBJ_DIR"] for f in undertale}), 1)
         self.assertEqual(len({(f["WADS"], f["PC_EXTRA_CFLAGS"]) for f in undertale}), 1)
         deltarune = [f for f in sanitized if f.get("GAME") == "deltarune"]
@@ -151,6 +154,12 @@ class PocketWorkflowTests(unittest.TestCase):
     def test_fixture_failure_stops_its_step(self):
         self.env["FAIL_FIXTURE"] = "bs_pc_fonts_font_sampling_fixture"
         self.assertEqual(self.run_step("Check font sampling and menu layout", check=False).returncode, 23)
+
+    def test_callback_fixture_failure_stops_its_step(self):
+        for fixture in ("bs_pc_callbacks_call_later_fixture", "bs_pc_callbacks_physics_contact_fixture"):
+            with self.subTest(fixture=fixture):
+                self.env["FAIL_FIXTURE"] = fixture
+                self.assertEqual(self.run_step("Check deferred and physics callback context", check=False).returncode, 23)
 
     def test_sanitizer_runtime_checks_are_retained(self):
         for name in BUILD_STEPS[7:]:

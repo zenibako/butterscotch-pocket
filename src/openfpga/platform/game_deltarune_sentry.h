@@ -46,7 +46,7 @@ static bool forestSentryStep(VMContext *ctx) {
     /* Each VM arithmetic opcode rounds separately; a fused multiply/add would
      * change alpha and coordinates even when the expression looks equivalent. */
     Runner *runner = ctx->runner;
-    Instance *self = ctx->currentInstance;
+    Instance *self = ctx->currentCallFrame->self;
     if (runner == NULL || self == NULL || runner->dataWin == NULL || !isfinite(self->x) || !isfinite(self->y) ||
         runner->mathEpsilon != GML_MATH_EPSILON ||
         runner->dataWin->objt.count <= 185 || runner->instancesByObject == NULL) return false;

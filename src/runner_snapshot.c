@@ -554,8 +554,7 @@ static bool eligible(Runner *r, const char **reason, bool forCapture, BlockerLis
     if (r->freeCamPanX != 0.0f || r->freeCamPanY != 0.0f ||
         (r->freeCamZoom != 0.0f && r->freeCamZoom != 1.0f))
         REFUSE("Free camera offset is unsupported");
-    if (r->vmContext->callStack || r->vmContext->callDepth || r->vmContext->envStack ||
-        r->vmContext->stack.top || r->vmContext->localVars || r->vmContext->scriptArgs)
+    if (r->vmContext->currentCallFrame || r->vmContext->envStack || r->vmContext->stack.top)
         REFUSE("Game script is still executing");
     if (!r->vmContext->globalScopeInstance) REFUSE("Global scope is missing");
     if (arrlen(r->instanceSnapshots))
@@ -2250,8 +2249,7 @@ void Runner_snapshotApply(Runner *r, RunnerSnapshot *s) {
     r->paused = false;
     if (r->eventDispatchInstances) arrsetlen(r->eventDispatchInstances, 0);
     if (r->cachedDrawables) arrsetlen(r->cachedDrawables, 0);
-    r->vmContext->currentInstance = NULL;
-    r->vmContext->otherInstance = NULL;
+    r->vmContext->currentCallFrame = NULL;
     r->vmContext->currentArrayOwner = NULL;
     r->drawableListStructureDirty = true;
     r->drawableListSortDirty = false;

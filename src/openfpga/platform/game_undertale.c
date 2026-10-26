@@ -53,7 +53,7 @@ static void patchInstructions(DataWin *dw) {
 /* The attack prompt's Z is artwork, not text. Keep its PRESS sprite and
  * replace the separate keycap with the positional confirm icon. */
 static bool drawPressButton(VMContext *ctx) {
-    Instance *self = ctx->currentInstance;
+    Instance *self = ctx->currentCallFrame->self;
     Renderer *renderer = ctx->runner->renderer;
     if (self == NULL || renderer == NULL) return false;
     BuiltinFunc drawSelf = VM_findBuiltin(ctx, "draw_self");

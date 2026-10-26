@@ -25,6 +25,8 @@ struct Fixture {
     Sprite sprite;
     CodeEntry code;
     VMNativeCode native[1];
+    CallFrame caller;
+    IntIntHashMap codeLocals;
     Instance** byObject[OBJECTS];
     Instance** byExact[OBJECTS];
     int32_t* eventObjects[OBJT_EVENT_TYPE_COUNT];
@@ -56,13 +58,13 @@ static Instance* add(Fixture* f, int object, unsigned id) {
 
 static bool record(VMContext* ctx) {
     Fixture* f = (Fixture*) ctx->runner; /* Runner is the first member. */
-    Instance* self = ctx->currentInstance;
-    assert(ctx->currentEventType == EVENT_COLLISION);
-    assert(ctx->currentEventObjectIndex == SELF);
+    Instance* self = ctx->currentCallFrame->self;
+    assert(ctx->currentCallFrame->eventType == EVENT_COLLISION);
+    assert(ctx->currentCallFrame->eventObjectIndex == SELF);
     assert(f->pairCount < 256);
     f->pairs[f->pairCount++] = (Pair) {
-        self->instanceId - 100000, ctx->otherInstance->instanceId - 100000,
-        ctx->currentEventSubtype
+        self->instanceId - 100000, ctx->currentCallFrame->other->instanceId - 100000,
+        ctx->currentCallFrame->eventSubtype
     };
     if (f->acted) return true;
     f->acted = true;
@@ -149,11 +151,13 @@ static Fixture* fixture(void) {
     f->data.code.entries = &f->code;
     f->native[0] = record;
     f->vm.nativeCode = f->native;
+    f->vm.codeLocalsSlotMaps = &f->codeLocals;
     f->vm.dataWin = &f->data;
     f->vm.runner = &f->runner;
-    f->vm.currentEventType = -12;
-    f->vm.currentEventSubtype = -13;
-    f->vm.currentEventObjectIndex = -14;
+    f->vm.currentCallFrame = &f->caller;
+    f->vm.currentCallFrame->eventType = -12;
+    f->vm.currentCallFrame->eventSubtype = -13;
+    f->vm.currentCallFrame->eventObjectIndex = -14;
     f->events[0] = (FlattenedCollisionEvent) { PARENT, 0, SELF };
     f->events[1] = (FlattenedCollisionEvent) { CHILD, 0, SELF };
     f->lists[SELF].events = f->events;
@@ -189,9 +193,10 @@ static void run(Fixture* f, const Pair* want, int count) {
         assert(f->pairs[i].other == want[i].other);
         assert(f->pairs[i].target == want[i].target);
     }
-    assert(f->vm.currentInstance == NULL && f->vm.otherInstance == NULL);
-    assert(f->vm.currentEventType == -12 && f->vm.currentEventSubtype == -13);
-    assert(f->vm.currentEventObjectIndex == -14);
+    assert(f->vm.currentCallFrame == &f->caller);
+    assert(f->vm.currentCallFrame->self == NULL && f->vm.currentCallFrame->other == NULL);
+    assert(f->vm.currentCallFrame->eventType == -12 && f->vm.currentCallFrame->eventSubtype == -13);
+    assert(f->vm.currentCallFrame->eventObjectIndex == -14);
 }
 
 static void ordering(void) {

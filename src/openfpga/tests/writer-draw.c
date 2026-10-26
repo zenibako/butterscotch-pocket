@@ -20,7 +20,7 @@ static BuiltinFunc originals[9];
 static uint32_t color;
 __attribute__((no_instrument_function)) void __cyg_profile_func_enter(void *fn, void *caller) {
     (void)caller;
-    if (observe && fn == (void *)executeLoop) ++writerEntries;
+    if (observe && fn == (void *)executeBytecodeInstructions) ++writerEntries;
 }
 __attribute__((no_instrument_function)) void __cyg_profile_func_exit(void *fn, void *caller) { (void)fn; (void)caller; }
 static void word(uint64_t x) { trace = (trace ^ x) * 1099511628211ULL; }
@@ -77,7 +77,7 @@ static Outcome run(const char *text, int pos, int scenario, bool native) {
     Runner r = {0}; Renderer renderer = {0}; r.dataWin = dw; r.mathEpsilon = GML_MATH_EPSILON;
     r.renderer = &renderer; r.random = Random_create(7); r.pendingRoom = -1;
     VMContext *vm = VM_create(dw); r.vmContext = vm; vm->runner = &r;
-    Instance *self = Instance_create(100001, 10, 0, 0); vm->currentInstance = self;
+    Instance *self = Instance_create(100001, 10, 0, 0); CallFrame caller = {0}; caller.self = self; vm->currentCallFrame = &caller;
     Instance *global = Instance_create(0, STRUCT_OBJECT_INDEX, 0, 0); vm->globalScopeInstance = global;
     const char *num[] = {"formatted", "myfont", "special", "shake", "halt", "mycolor", "pos", "length", "writingx",
         "writingy", "hspace", "vspace", "siner", "skippable", "skipme", "automash_timer", "dialoguer", "wxskip"};
@@ -99,7 +99,7 @@ static Outcome run(const char *text, int pos, int scenario, bool native) {
         set(vm, self, "automash_timer", RValue_makeReal(1));
         button3 = debug = 1;
     }
-    bool decline = scenario >= 10 && scenario <= 23 || scenario == 25;
+    bool decline = (scenario >= 10 && scenario <= 23) || scenario == 25;
     if (scenario == 10) set(vm, self,"formatted",RValue_makeReal(0));
     if (scenario == 11) set(vm, self,"special",RValue_makeReal(2));
     if (scenario == 12) set(vm, self,"mycolor",RValue_makeReal(0));
@@ -160,14 +160,14 @@ static Outcome run(const char *text, int pos, int scenario, bool native) {
         Random initial = Random_create(7); assert(!memcmp(&r.random,&initial,sizeof(initial)));
         for (int i = 0; i < 12; ++i) assert(self->alarm[i] == 7+i);
     } else {
-        RValue result = VM_executeCode(vm,findCodeIndexByName(vm,writerName)); RValue_free(&result);
+        RValue result = VM_executeCode(vm,findCodeIndexByName(vm,writerName),self,NULL,CODE_NOT_RELATED_TO_EVENTS,CODE_NOT_RELATED_TO_EVENTS,CODE_NOT_RELATED_TO_EVENTS,NULL,0); RValue_free(&result);
     }
     observe = false;
     Outcome out = {.commands=trace, .calls=calls, .entries=writerEntries, .random=r.random, .mask=self->activeAlarmMask, .owner=vm->currentArrayOwner};
     memcpy(out.alarms, self->alarm, sizeof(out.alarms));
     trace = 1469598103934665603ULL;
     out.state = stateHash(vm,self);
-    Instance_free(self); Instance_free(global); vm->currentInstance = vm->globalScopeInstance = NULL;
+    Instance_free(self); Instance_free(global); vm->currentCallFrame = NULL; vm->globalScopeInstance = NULL;
     VM_free(vm); DataWin_free(dw); return out;
 }
 static void pair(const char *text, int pos, int scenario, bool fast) {

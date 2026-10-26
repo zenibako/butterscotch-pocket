@@ -10,7 +10,7 @@
 static unsigned entries, workFailures, checks;
 static bool observe;
 __attribute__((no_instrument_function)) void __cyg_profile_func_enter(void *fn, void *caller) {
-    (void)caller;if (observe && fn==(void*)executeLoop) ++entries;
+    (void)caller;if (observe && fn==(void*)executeBytecodeInstructions) ++entries;
 }
 __attribute__((no_instrument_function)) void __cyg_profile_func_exit(void *fn, void *caller) {(void)fn;(void)caller;}
 static const char *asset, *script="gml_Script___background_get_element";
@@ -21,7 +21,8 @@ static Outcome run(int native, int scenario, GMLReal epsilon, RValue bind, bool 
     DataWin *data=DataWin_parse(asset,options);assert(data);
     Runner r={0};r.dataWin=data;r.pendingRoom=-1;r.mathEpsilon=epsilon;r.nextLayerId=1000;
     VMContext *vm=VM_create(data);r.vmContext=vm;vm->runner=&r;
-    vm->currentInstance=Instance_create(50,-1,0,0);
+    CallFrame caller={0};vm->currentCallFrame=&caller;
+    caller.self=Instance_create(50,-1,0,0);
     Room room={0};RoomLayer staticLayers[3]={0};room.width=320;room.height=240;
     room.layers=staticLayers;room.layerCount=3;r.currentRoom=&room;
     const char *name=scenario==1 ? "Compatibility_Foreground_0" : "Compatibility_Background_0";
@@ -73,8 +74,8 @@ static Outcome run(int native, int scenario, GMLReal epsilon, RValue bind, bool 
         assert(vm->currentArrayOwner==before && unused.type==RVALUE_UNDEFINED);
     }
     RValue local=RValue_makeString("caller"),outer=RValue_makeInt32(789);
-    vm->localVars=&local;vm->localVarCount=1;vm->scriptArgs=&outer;vm->scriptArgCount=1;
-    vm->currentCodeName="fixture caller";vm->currentCodeIndex=-1;
+    vm->currentCallFrame->localVars=&local;vm->currentCallFrame->localVarsCount=1;vm->currentCallFrame->scriptArgs=&outer;vm->currentCallFrame->scriptArgsCount=1;
+    vm->currentCallFrame->codeIndex=-1;
     stackPush(vm,RValue_makeInt32(456));vm->currentArrayOwner=(void*)(intptr_t)123;
     Outcome out={0};
     for (int pass=0;pass<(scenario==9 || scenario==10 || scenario==18 || scenario==19 ? 2 : 1);++pass) {
@@ -108,15 +109,17 @@ static Outcome run(int native, int scenario, GMLReal epsilon, RValue bind, bool 
         assert(GMLArray_get(result.array,0).type==out.values[0].type &&
                RValue_toReal(GMLArray_get(result.array,0))==RValue_toReal(out.values[0]));
         RValue_free(&alias);RValue_free(&result);
-        assert(vm->localVars==&local && vm->localVarCount==1 && !strcmp(local.string,"caller"));
-        assert(vm->scriptArgs==&outer && vm->scriptArgCount==1 && outer.int32==789);
-        assert(vm->stack.top==1 && vm->stack.slots[0].int32==456 && vm->callDepth==0);
-        assert(!strcmp(vm->currentCodeName,"fixture caller"));
+        assert(vm->currentCallFrame->localVars==&local && vm->currentCallFrame->localVarsCount==1 && !strcmp(local.string,"caller"));
+        assert(vm->currentCallFrame->scriptArgs==&outer && vm->currentCallFrame->scriptArgsCount==1 && outer.int32==789);
+        assert(vm->stack.top==1 && vm->stack.slots[0].int32==456 && caller.parent==NULL);
+        assert(vm->currentCallFrame==&caller && caller.codeIndex==UINT32_MAX);
         ++checks;
     }
     out.layers=(int)arrlen(r.runtimeLayers);out.nextId=r.nextLayerId;
-    vm->localVars=NULL;vm->localVarCount=0;vm->scriptArgs=NULL;vm->scriptArgCount=0;
-    Instance_free(vm->currentInstance);VM_free(vm);
+    vm->currentCallFrame->localVars=NULL;vm->currentCallFrame->localVarsCount=0;vm->currentCallFrame->scriptArgs=NULL;vm->currentCallFrame->scriptArgsCount=0;
+    RValue sentinelValue=stackPop(vm);assert(sentinelValue.type==RVALUE_INT32 && sentinelValue.int32==456);
+    RValue_free(&sentinelValue);
+    Instance_free(caller.self);vm->currentCallFrame=NULL;VM_free(vm);
     for (ptrdiff_t i=0;i<arrlen(r.runtimeLayers);++i) {
         for (ptrdiff_t j=0;j<arrlen(r.runtimeLayers[i].elements);++j)
             if (r.runtimeLayers[i].elements[j].backgroundElement) free(r.runtimeLayers[i].elements[j].backgroundElement);

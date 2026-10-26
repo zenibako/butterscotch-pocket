@@ -1,4 +1,5 @@
 #include "vm.h"
+#include "op.h"
 #include "stb_ds.h"
 #include <assert.h>
 #include <stdio.h>
@@ -32,15 +33,14 @@ static void stats(Profiler* p, const char* name, uint64_t ops, uint64_t calls) {
 }
 
 static void run(VMContext* ctx) {
-    RValue result = VM_executeCode(ctx, 0);
+    RValue result = VM_executeCode(ctx, 0, NULL, NULL, CODE_NOT_RELATED_TO_EVENTS, CODE_NOT_RELATED_TO_EVENTS, CODE_NOT_RELATED_TO_EVENTS, NULL, 0);
     if (ctx->nativeCode != NULL && nativeDone) {
         assert(result.type == RVALUE_UNDEFINED);
     } else {
         assert(result.type == RVALUE_INT32 && result.int32 == 17);
     }
     RValue_free(&result);
-    assert(ctx->stack.top == 0 && ctx->callDepth == 0 && ctx->callStack == NULL);
-    assert(ctx->localVars == NULL && ctx->localVarCount == 0);
+    assert(ctx->stack.top == 0 && ctx->currentCallFrame == NULL);
     if (ctx->profiler != NULL) assert(ctx->profiler->frameDepth == 0);
 }
 
@@ -50,7 +50,7 @@ int main(void) {
         (uint32_t) OP_POPZ << 24,
         (uint32_t) OP_CALL << 24 | GML_TYPE_VARIABLE << 16, 1,
         (uint32_t) OP_RET << 24,
-        (uint32_t) OP_PUSHI << 24 | GML_TYPE_INT16 << 16 | 7,
+        (uint32_t) OP_PUSH_IMMEDIATE << 24 | GML_TYPE_INT16 << 16 | 7,
         (uint32_t) OP_RET << 24
     };
     CodeEntry codes[] = {
@@ -99,7 +99,7 @@ int main(void) {
         Profiler_reset(enabled); nativeDone = false;
         run(ctx);
         assert(enabled->instructionCount == 22);
-        stats(enabled, "parent", 4, 1); stats(enabled, "child", 2, 2);
+        stats(enabled, "parent", 4, 1); stats(enabled, "child", 2, 1);
         ctx->nativeScript = NULL;
 
         Profiler_reset(enabled); ctx->nativeCode = nativeCodes; nativeDone = true;
@@ -107,7 +107,7 @@ int main(void) {
         assert(enabled->instructionCount == 22); stats(enabled, "parent", 0, 1);
         Profiler_reset(enabled); nativeDone = false;
         run(ctx);
-        assert(enabled->instructionCount == 28); stats(enabled, "parent", 4, 2);
+        assert(enabled->instructionCount == 28); stats(enabled, "parent", 4, 1);
         ctx->nativeCode = NULL;
 
         Profiler_setEnabled(&ctx->profiler, false);

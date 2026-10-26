@@ -2,6 +2,7 @@
  * Runner event re-entry. No VM source is included or replaced. */
 #include "runner.h"
 #include "vm.h"
+#include "op.h"
 #include "gml_array.h"
 #include "gml_method.h"
 #include <assert.h>
@@ -32,7 +33,10 @@ typedef struct {
     RValue originals[MAX_ARGS];
     Instance *self, *eventSelf;
     int count, target, returnIndex;
-    unsigned checks, events;
+    unsigned checks, events, nativeCalls;
+    int nativeMode;
+    VMNativeScript nativeScripts[CODES];
+    VMNativeCode nativeCodes[CODES];
     bool inEvent;
 } Fixture;
 
@@ -60,8 +64,9 @@ static RValue argument(VMContext *ctx, RValue *args, int32_t count) {
 static RValue eventProbe(VMContext *ctx, RValue *args, int32_t count) {
     Fixture *f = (Fixture *)ctx->runner;
     assert(f->inEvent && args == NULL && count == 0);
-    assert(ctx->currentInstance == f->eventSelf);
-    assert(ctx->currentEventType == EVENT_CREATE);
+    assert(ctx->currentCallFrame->self == f->eventSelf);
+    assert(ctx->currentCallFrame->eventType == EVENT_CREATE);
+    assert(ctx->currentCallFrame->eventObjectIndex == 0 && ctx->currentCallFrame->eventSubtype == 0);
     ++f->events;
     return RValue_makeOwnedString(safeStrdup("event result"));
 }
@@ -70,17 +75,21 @@ static RValue checkArguments(VMContext *ctx, RValue *args, int32_t count) {
     Fixture *f = (Fixture *)ctx->runner;
     assert(count == f->count && (args == NULL) == (count == 0));
     for (int i = 0; i < count; ++i) equalValue(args[i], f->originals[i]);
-    assert(ctx->currentInstance == f->self);
-    RValue *savedArgs = ctx->scriptArgs;
-    int savedCount = ctx->scriptArgCount;
+    assert(ctx->currentCallFrame->self == f->self);
+    CallFrame *savedFrame = ctx->currentCallFrame;
+    RValue *savedArgs = savedFrame->scriptArgs;
+    int savedCount = ctx->currentCallFrame->scriptArgsCount;
     int savedTop = ctx->stack.top;
     assert(savedTop == 1 && RValue_toInt32(ctx->stack.slots[0]) == 1234);
     f->inEvent = true;
     Runner_executeEvent(&f->runner, f->eventSelf, EVENT_CREATE, 0);
     f->inEvent = false;
-    assert(ctx->scriptArgs == savedArgs && ctx->scriptArgCount == savedCount);
+    assert(ctx->currentCallFrame == savedFrame);
+    assert(ctx->currentCallFrame->scriptArgs == savedArgs && ctx->currentCallFrame->scriptArgsCount == savedCount);
     assert(ctx->stack.top == savedTop && RValue_toInt32(ctx->stack.slots[0]) == 1234);
-    assert(ctx->currentInstance == f->self && ctx->currentEventType == -12);
+    assert(ctx->currentCallFrame->self == f->self && ctx->currentCallFrame->other == f->eventSelf);
+    assert(ctx->currentCallFrame->eventType == -12 && ctx->currentCallFrame->eventSubtype == -13 &&
+           ctx->currentCallFrame->eventObjectIndex == -14);
     for (int j = 0; j < count; ++j) equalValue(args[j], f->originals[j]);
     ++f->checks;
     if (count == 0) return RValue_makeInt32(71);
@@ -89,15 +98,64 @@ static RValue checkArguments(VMContext *ctx, RValue *args, int32_t count) {
 
 static RValue scriptProbe(VMContext *ctx, RValue *args, int32_t count) {
     Fixture *f = (Fixture *)ctx->runner;
-    assert(args == NULL && count == 0 && ctx->callDepth == 1);
-    RValue checked = checkArguments(ctx, ctx->scriptArgs, ctx->scriptArgCount);
+    assert(args == NULL && count == 0 && ctx->currentCallFrame->parent != NULL && ctx->currentCallFrame->parent->parent == NULL);
+    RValue checked = checkArguments(ctx, ctx->currentCallFrame->scriptArgs, ctx->currentCallFrame->scriptArgsCount);
     RValue_free(&checked);
     if (f->count == 0) return RValue_makeInt32(71);
     /* A real script returns a weak view of its own argument storage. The VM
      * must strengthen it before scriptArgs and caller arguments are released. */
-    RValue result = ctx->scriptArgs[f->returnIndex];
+    RValue result = ctx->currentCallFrame->scriptArgs[f->returnIndex];
     result.ownsReference = false;
     return result;
+}
+
+/* A native callee must see its own frame before it can re-enter the runner.
+ * Returning a weak view of its copied storage exercises ownership cleanup. */
+static void nativeFrame(VMContext *ctx, RValue *args, int32_t count) {
+    Fixture *f = (Fixture *)ctx->runner;
+    CallFrame *frame = ctx->currentCallFrame;
+    assert(frame && frame->codeIndex == CHILD && frame->parent && frame->parent->codeIndex == ROOT);
+    assert(frame->self == f->self && frame->initialSelf == f->self);
+    assert(frame->other == f->eventSelf && frame->initialOther == f->eventSelf);
+    assert(frame->eventObjectIndex == -14 && frame->eventType == -12 && frame->eventSubtype == -13);
+    assert(frame->localVarsCount == 1 && frame->localVars != NULL);
+    assert(frame->localVars[0].type == RVALUE_UNDEFINED);
+    assert(frame->scriptArgsCount == count && (frame->scriptArgs == NULL) == (count == 0));
+    if (count && f->nativeMode < 3) assert(frame->scriptArgs != args);
+    for (int i = 0; i < count; ++i) {
+        equalValue(frame->scriptArgs[i], f->originals[i]);
+        if (f->nativeMode < 3 && args[i].type == RVALUE_STRING) assert(frame->scriptArgs[i].string != args[i].string);
+    }
+    ++f->nativeCalls;
+}
+
+static bool nativeScript(VMContext *ctx, RValue *args, int32_t count, RValue *result) {
+    Fixture *f = (Fixture *)ctx->runner;
+    CallFrame *frame = ctx->currentCallFrame;
+    nativeFrame(ctx, args, count);
+    if (f->nativeMode == 2) return false;
+    RValue checked = checkArguments(ctx, args, count);
+    RValue_free(&checked);
+    if (count == 0) *result = RValue_makeInt32(71);
+    else {
+        /* Local storage is also cleaned up on return. */
+        frame->localVars[0] = RValue_makeIndependent(frame->scriptArgs[f->returnIndex]);
+        *result = frame->localVars[0];
+        result->ownsReference = false;
+    }
+    return true;
+}
+
+static bool nativeCode(VMContext *ctx) {
+    Fixture *f = (Fixture *)ctx->runner;
+    CallFrame *frame = ctx->currentCallFrame;
+    nativeFrame(ctx, frame->scriptArgs, frame->scriptArgsCount);
+    if (f->nativeMode == 4) return false;
+    RValue checked = checkArguments(ctx, frame->scriptArgs, frame->scriptArgsCount);
+    RValue_free(&checked);
+    if (frame->scriptArgsCount)
+        frame->localVars[0] = RValue_makeIndependent(frame->scriptArgs[f->returnIndex]);
+    return true;
 }
 
 #if IS_WAD17_OR_HIGHER_ENABLED
@@ -117,7 +175,7 @@ static void word(Fixture *f, uint32_t value) {
     f->words[f->used++] = value;
 }
 static void push(Fixture *f, int value) {
-    word(f, (uint32_t)OP_PUSHI << 24 | GML_TYPE_INT16 << 16 | (uint16_t)value);
+    word(f, (uint32_t)OP_PUSH_IMMEDIATE << 24 | GML_TYPE_INT16 << 16 | (uint16_t)value);
 }
 static void call(Fixture *f, int function, int count) {
     word(f, (uint32_t)OP_CALL << 24 | GML_TYPE_VARIABLE << 16 | count);
@@ -162,13 +220,16 @@ static void referencesReleased(Fixture *f) {
 
 static void run(Fixture *f, bool dynamic) {
     program(f, dynamic);
-    unsigned before = f->checks, events = f->events;
-    RValue result = VM_executeCode(&f->vm, ROOT);
+    unsigned before = f->checks, events = f->events, natives = f->nativeCalls;
+    f->nativeScripts[CHILD] = f->nativeMode == 1 || f->nativeMode == 2 ? nativeScript : NULL;
+    f->nativeCodes[CHILD] = f->nativeMode >= 3 ? nativeCode : NULL;
+    RValue result = VM_executeCode(&f->vm, ROOT, f->self, f->eventSelf, -14, -12, -13, NULL, 0);
     if (f->target == UNKNOWN_TARGET) {
         assert(result.type == RVALUE_UNDEFINED && f->checks == before && f->events == events);
     } else {
         assert(f->checks == before + 1 && f->events == events + 1);
-        if (f->count == 0) assert(RValue_toInt32(result) == 71);
+        if (f->nativeMode == 3) assert(result.type == RVALUE_UNDEFINED);
+        else if (f->count == 0) assert(RValue_toInt32(result) == 71);
         else {
             equalValue(result, f->originals[f->returnIndex]);
             if (result.type == RVALUE_STRING || result.type == RVALUE_ARRAY ||
@@ -176,12 +237,10 @@ static void run(Fixture *f, bool dynamic) {
                 assert(result.ownsReference);
         }
     }
+    assert(f->nativeCalls == natives + (f->target == SCRIPT_TARGET && f->nativeMode ? 1 : 0));
     RValue_free(&result);
     referencesReleased(f);
-    assert(f->vm.stack.top == 0 && f->vm.callDepth == 0 && f->vm.callStack == NULL);
-    assert(f->vm.localVars == NULL && f->vm.localVarCount == 0);
-    assert(f->vm.scriptArgs == NULL && f->vm.scriptArgCount == 0);
-    assert(f->vm.currentInstance == f->self);
+    assert(f->vm.stack.top == 0 && f->vm.currentCallFrame == NULL);
 #if IS_WAD17_OR_HIGHER_ENABLED
     assert(f->vm.exception == NULL);
 #endif
@@ -193,8 +252,9 @@ int main(void) {
     assert(f != NULL);
     f->runner.dataWin = &f->data; f->runner.vmContext = &f->vm; f->runner.pendingRoom = -1;
     f->vm.runner = &f->runner; f->vm.dataWin = &f->data;
+    f->vm.nativeCode = f->nativeCodes;
+    f->vm.nativeScript = f->nativeScripts;
     f->vm.funcCallCache = f->cache; f->vm.codeLocalsSlotMaps = f->locals;
-    f->vm.currentEventType = -12;
     f->data.gen8.wadVersion = FIXTURE_WAD;
     f->data.bytecodeBuffer = (uint8_t *)f->words;
     f->data.code.count = CODES; f->data.code.entries = f->codes;
@@ -209,10 +269,11 @@ int main(void) {
 #if IS_WAD17_OR_HIGHER_ENABLED
     f->cache[METHOD].builtin = (void *)method;
 #endif
+    f->codes[CHILD].localsCount = 1;
+    IntIntHashMap_getOrInsertSequential(&f->locals[CHILD], 0);
     f->codes[ROOT].name = "caller"; f->codes[CHILD].name = "callee"; f->codes[EVENT].name = "event";
     f->self = Instance_create(100001, 0, 0, 0);
     f->eventSelf = Instance_create(100002, 0, 0, 0);
-    f->vm.currentInstance = f->self;
     /* Minimal resolved Create event table, as consumed by Runner_executeEvent. */
     int16_t slot = 0;
     uint32_t starts[] = {0, 1};
@@ -241,7 +302,10 @@ int main(void) {
                 int returns = f->count > 5 ? 5 : 1;
                 for (int r = 0; r < returns; ++r) {
                     f->returnIndex = r;
-                    run(f, dynamic != 0); ++cases;
+                    for (int native = 0; native <= (target == SCRIPT_TARGET ? 4 : 0); ++native) {
+                        f->nativeMode = native;
+                        run(f, dynamic != 0); ++cases;
+                    }
                 }
             }
         }
@@ -251,6 +315,7 @@ int main(void) {
         RValue_free(&f->originals[k]);
         if (structure != NULL) { assert(structure->refCount == 0); Instance_free(structure); }
     }
+    for (int i = 0; i < CODES; ++i) IntIntHashMap_free(&f->locals[i]);
     Instance_free(f->self); Instance_free(f->eventSelf);
     printf("PASS: VM call arguments WAD%d, %u cases, %u checked calls and nested events\n", FIXTURE_WAD, cases, f->checks);
     free(f);

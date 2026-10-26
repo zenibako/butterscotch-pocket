@@ -395,6 +395,16 @@ profiler-fixture: $(PC_OBJS)
 vm-call-args-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/vm-call-args.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_vm_call_args_fixture
 
+# Deferred WAD17 callbacks use the real dispatcher and VM with no game assets.
+.PHONY: call-later-fixture
+call-later-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) $(BS)/tests/call_later_test.c $(filter-out $(PC_OBJ_DIR)/main.o $(filter %/runner.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_call_later_fixture
+
+# Collision callbacks preserve self/other and inherited event context.
+.PHONY: physics-contact-fixture
+physics-contact-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) $(BS)/tests/physics_contact_test.c $(filter-out $(PC_OBJ_DIR)/main.o $(filter %/physics/physics.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_physics_contact_fixture
+
 # Asset-free builtin ownership and audio compatibility checks.
 .PHONY: builtin-compat-fixture
 builtin-compat-fixture: $(PC_OBJS)

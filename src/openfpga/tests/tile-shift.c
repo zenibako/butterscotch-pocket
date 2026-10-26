@@ -12,7 +12,7 @@ static unsigned interpreterEntries, workFailures, checks;
 static bool observe;
 __attribute__((no_instrument_function)) void __cyg_profile_func_enter(void *fn, void *caller) {
     (void)caller;
-    if (observe && fn == (void *)executeLoop)
+    if (observe && fn == (void *)executeBytecodeInstructions)
         ++interpreterEntries;
 }
 __attribute__((no_instrument_function)) void __cyg_profile_func_exit(void *fn, void *caller) {
@@ -87,19 +87,20 @@ static Outcome run(DataWin *dw, int code, int native, int scenario, GMLReal epsi
     r.vmContext = vm;
     vm->runner = &r;
     Instance *self = Instance_create(50, -1, 0, 0);
-    vm->currentInstance = self;
+    CallFrame caller = {0};
+    vm->currentCallFrame = &caller;
+    caller.self = self;
     vm->globalScopeInstance = Instance_create(0, STRUCT_OBJECT_INDEX, 0, 0);
     int sentinel = VM_getOrAllocateVarID(vm, "__tile_fixture_sentinel");
     Instance_setSelfVar(self, sentinel, RValue_makeInt32(123));
     /* Caller state must survive both the native and the interpreted script. */
     RValue locals[1] = {RValue_makeString("caller local")}, outerArgs[1] = {RValue_makeInt32(789)};
-    vm->localVars = locals;
-    vm->localVarCount = 1;
-    vm->scriptArgs = outerArgs;
-    vm->scriptArgCount = 1;
-    vm->currentCodeName = "fixture caller";
-    vm->currentCodeIndex = -1;
-    vm->currentEventType = EVENT_STEP;
+    vm->currentCallFrame->localVars = locals;
+    vm->currentCallFrame->localVarsCount = 1;
+    vm->currentCallFrame->scriptArgs = outerArgs;
+    vm->currentCallFrame->scriptArgsCount = 1;
+    vm->currentCallFrame->codeIndex = -1;
+    vm->currentCallFrame->eventType = EVENT_STEP;
     stackPush(vm, RValue_makeInt32(456));
     RoomTile tiles[6] = {0};
     for (int i = 0; i < 6; i++) {
@@ -188,11 +189,11 @@ static Outcome run(DataWin *dw, int code, int native, int scenario, GMLReal epsi
         ++workFailures;
     if (!native || !expectedFast)
         assert(interpreterEntries == 1);
-    assert(vm->currentInstance == self && vm->currentCodeName && !strcmp(vm->currentCodeName, "fixture caller"));
-    assert(vm->localVars == locals && vm->localVarCount == 1 && !strcmp(locals[0].string, "caller local"));
-    assert(vm->scriptArgs == outerArgs && vm->scriptArgCount == 1 && outerArgs[0].int32 == 789);
-    assert(vm->stack.top == 1 && vm->stack.slots[0].int32 == 456 && vm->callDepth == 0);
-    assert(vm->currentEventType == EVENT_STEP && IntRValueHashMap_count(&self->selfVars) == 1);
+    assert(vm->currentCallFrame->self == self && vm->currentCallFrame == &caller && caller.codeIndex == UINT32_MAX);
+    assert(vm->currentCallFrame->localVars == locals && vm->currentCallFrame->localVarsCount == 1 && !strcmp(locals[0].string, "caller local"));
+    assert(vm->currentCallFrame->scriptArgs == outerArgs && vm->currentCallFrame->scriptArgsCount == 1 && outerArgs[0].int32 == 789);
+    assert(vm->stack.top == 1 && vm->stack.slots[0].int32 == 456 && caller.parent == NULL);
+    assert(vm->currentCallFrame->eventType == EVENT_STEP && IntRValueHashMap_count(&self->selfVars) == 1);
     assert(Instance_getSelfVar(self, sentinel).int32 == 123);
     Outcome out = {.trace = trace, .calls = calls};
     for (int i = 0; i < 6; i++) {
@@ -209,10 +210,14 @@ static Outcome run(DataWin *dw, int code, int native, int scenario, GMLReal epsi
         arrfree(r.runtimeLayers[i].elements);
     arrfree(r.runtimeLayers);
     hmfree(r.instancesById);
-    vm->localVars = NULL;
-    vm->localVarCount = 0;
-    vm->scriptArgs = NULL;
-    vm->scriptArgCount = 0;
+    vm->currentCallFrame->localVars = NULL;
+    vm->currentCallFrame->localVarsCount = 0;
+    vm->currentCallFrame->scriptArgs = NULL;
+    vm->currentCallFrame->scriptArgsCount = 0;
+    RValue sentinelValue = stackPop(vm);
+    assert(sentinelValue.type == RVALUE_INT32 && sentinelValue.int32 == 456);
+    RValue_free(&sentinelValue);
+    vm->currentCallFrame = NULL;
     Instance_free(self);
     VM_free(vm);
     DataWin_free(dw);

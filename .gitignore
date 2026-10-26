@@ -7,3 +7,8 @@ compat/config.mk
 /.vs
 *.log
 __pycache__/
+
+# Android build artifacts
+src/android/frontend/.gradle/
+src/android/frontend/app/.cxx/
+src/android/frontend/local.properties

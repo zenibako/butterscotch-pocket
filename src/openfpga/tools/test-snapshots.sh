@@ -14,6 +14,9 @@ if [ "$(uname -s)" = Darwin ]; then
     export DYLD_FALLBACK_LIBRARY_PATH="${DYLD_FALLBACK_LIBRARY_PATH:-/opt/homebrew/lib}"
 else flags+=(-D_GNU_SOURCE -Wl,--gc-sections); fi
 export ASAN_OPTIONS=detect_leaks=0
+"$cc" "${flags[@]}" -fno-sanitize-recover=undefined \
+    "$repo/tests/opword_test.c" -o "$out/opword"
+"$out/opword"
 "$cc" "${flags[@]}" -I"$repo/vendor/miniz" -I"$repo/vendor/zstd" \
     "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" \
     "$repo/src/instance.c" "$repo/src/gml_array.c" "$repo/src/gml_method.c" "$repo/src/int_rvalue_hashmap.c" \

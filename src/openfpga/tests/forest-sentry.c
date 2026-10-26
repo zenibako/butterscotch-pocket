@@ -17,7 +17,7 @@ static const char *names[] = {"lengthdir_x", "lengthdir_y", "sin", "instance_exi
 static BuiltinFunc originals[4];
 __attribute__((no_instrument_function)) void __cyg_profile_func_enter(void *fn, void *caller) {
     (void)caller;
-    if (observe && fn == (void *)executeLoop) ++entries;
+    if (observe && fn == (void *)executeBytecodeInstructions) ++entries;
 }
 __attribute__((no_instrument_function)) void __cyg_profile_func_exit(void *fn, void *caller) {
     (void)fn; (void)caller;
@@ -89,7 +89,7 @@ static Outcome run(int scenario,bool native,bool decline) {
     arrsetlen(r.instancesByObject,dw->objt.count);
     memset(r.instancesByObject,0,dw->objt.count*sizeof(*r.instancesByObject));
     r.spatialGrid=SpatialGrid_create(2048,2048);
-    Instance *self=add(&r,100001,185,430.25f,650.75f); vm->currentInstance=self;
+    Instance *self=add(&r,100001,185,430.25f,650.75f); CallFrame caller={0};caller.self=self;vm->currentCallFrame=&caller;
     Instance *global=Instance_create(0,STRUCT_OBJECT_INDEX,0,0); vm->globalScopeInstance=global;
     const char *vars[]={"rot","rotspeed","eyer","offx","offy","boss","con","made","bmax","siner","xrange","yrange"};
     int nums[]={276,4,11,30,30,1,1,1,8,69,300,240};
@@ -163,10 +163,10 @@ static Outcome run(int scenario,bool native,bool decline) {
         else assert(!vm->nativeCode[code](vm));
         assert(calls==0 && entries==0 && initial==state(vm));
     } else for(int step=0;step<3;++step) {
-        RValue result=VM_executeCode(vm,code); RValue_free(&result);
+        RValue result=VM_executeCode(vm,code,self,NULL,185,EVENT_STEP,0,NULL,0); RValue_free(&result);
     }
     observe=false;
-    assert(vm->currentInstance==self && vm->globalScopeInstance==global);
+    assert(vm->currentCallFrame==&caller && caller.self==self && vm->globalScopeInstance==global);
     assert(Instance_getSelfVar(self,VM_getOrAllocateVarID(vm,"fb")).array==
            Instance_getSelfVar(global,VM_getOrAllocateVarID(vm,"alias")).array);
     Outcome out={trace,state(vm),calls,entries,r.random};
@@ -180,7 +180,7 @@ static Outcome run(int scenario,bool native,bool decline) {
     for(int i=0;i<arrlen(r.instances);++i)Instance_free(r.instances[i]);
     for(uint32_t i=0;i<dw->objt.count;++i)arrfree(r.instancesByObject[i]);
     arrfree(r.instancesByObject); arrfree(r.instances); arrfree(r.instanceSnapshots); hmfree(r.instancesById);
-    SpatialGrid_free(r.spatialGrid); Instance_free(global); vm->currentInstance=vm->globalScopeInstance=NULL;
+    SpatialGrid_free(r.spatialGrid); Instance_free(global); vm->currentCallFrame=NULL;vm->globalScopeInstance=NULL;
     VM_free(vm); DataWin_free(dw); return out;
 }
 int main(int argc,char **argv) {

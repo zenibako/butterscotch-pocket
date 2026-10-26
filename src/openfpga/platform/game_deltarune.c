@@ -47,7 +47,7 @@ static bool isNumber(RValue value) {
  */
 static bool purpleGrassDraw(VMContext *ctx) {
     static int32_t indexVar = -1, lengthVar, heightVar, iVar, jVar;
-    Instance *self = ctx->currentInstance;
+    Instance *self = ctx->currentCallFrame->self;
     Runner *runner = ctx->runner;
     if (self == NULL || runner->renderer == NULL) return false;
     if (indexVar < 0) {
@@ -248,10 +248,10 @@ static int32_t writerVars[W_COUNT];
 static int writerResolved; /* 0 unresolved, 1 compatible, -1 incompatible */
 static int32_t writerScripts[4];
 static RValue writerGet(VMContext *ctx, int field) {
-    return Instance_getSelfVar(field >= W_LANG ? ctx->globalScopeInstance : ctx->currentInstance, writerVars[field]);
+    return Instance_getSelfVar(field >= W_LANG ? ctx->globalScopeInstance : ctx->currentCallFrame->self, writerVars[field]);
 }
 static void writerSet(VMContext *ctx, int field, RValue value) {
-    Instance_setSelfVar(ctx->currentInstance, writerVars[field], value);
+    Instance_setSelfVar(ctx->currentCallFrame->self, writerVars[field], value);
 }
 static void writerNumber(VMContext *ctx, int field, GMLReal value) {
     writerSet(ctx, field, RValue_makeReal(value));
@@ -267,7 +267,7 @@ static void writerDiscard(VMContext *ctx, BuiltinFunc fn, RValue *args, int coun
     RValue_free(&value);
 }
 static bool writerDraw(VMContext *ctx) {
-    if (ctx->currentInstance == NULL || ctx->globalScopeInstance == NULL || ctx->runner == NULL ||
+    if (ctx->currentCallFrame->self == NULL || ctx->globalScopeInstance == NULL || ctx->runner == NULL ||
         ctx->runner->renderer == NULL || ctx->runner->mathEpsilon != GML_MATH_EPSILON) return false;
     if (writerResolved == 0) {
         static const char *const scripts[] = {
@@ -372,8 +372,8 @@ static bool writerDraw(VMContext *ctx) {
         RValue_free(&result);
         /* SETOWNER precedes the two builtin alarm stores in the bytecode. */
         ctx->currentArrayOwner = (void *)(intptr_t)68121;
-        ctx->currentInstance->alarm[0] = ctx->currentInstance->alarm[1] = -1;
-        ctx->currentInstance->activeAlarmMask &= (uint16_t)~3u;
+        ctx->currentCallFrame->self->alarm[0] = ctx->currentCallFrame->self->alarm[1] = -1;
+        ctx->currentCallFrame->self->activeAlarmMask &= (uint16_t)~3u;
     }
     writerNumber(ctx,W_N,1);
     for (GMLReal n = 1; lessThan(n,pos,epsilon); n = n + 1) {
