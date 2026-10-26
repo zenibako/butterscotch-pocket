@@ -21,7 +21,7 @@ WORKFLOWS = {
     "build-macos.yml": {"macos"}, "build-haiku.yml": {"haiku"},
     "build-console.yml": JOB_DOMAINS["Consoles"], "build-other.yml": JOB_DOMAINS["Other"],
     "build-old-compilers.yml": {"compilers"}, "build-pocket.yml": {"pocket"},
-    "build-pocket-data-tools.yml": {"pocket_tools"}, "tests.yml": {"tests"},
+    "build-pocket-data-tools.yml": {"pocket_tools"}, "release-pocket.yml": {"pocket_tools"}, "publish-pocket.yml": {"pocket_tools"}, "tests.yml": {"tests"},
 }
 PORT_PREFIXES = {
     "src/ps2/": {"ps2"}, "src/audio/ps2/": {"ps2"}, "src/ps3/": {"ps3"},
@@ -79,7 +79,7 @@ def domains_for_path(path):
     if path == "LICENSE":  # Included in the downloadable preparation-tool bundles.
         return {"pocket_tools"}
     if path.startswith("src/openfpga/"):
-        return {"pocket"}
+        return {"pocket", "pocket_tools"}
     for prefix, domains in PORT_PREFIXES.items():
         if path.startswith(prefix):
             return domains

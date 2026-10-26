@@ -37,7 +37,15 @@ class SelectionTests(unittest.TestCase):
         return {name for name in DOMAINS if value[name]}
 
     def test_pocket_platform_change_skips_unrelated_builds(self):
-        self.assertEqual(self.selected(["src/openfpga/platform/of_menu.c"]), {"pocket"})
+        self.assertEqual(self.selected(["src/openfpga/platform/of_menu.c"]), {"pocket", "pocket_tools"})
+
+    def test_release_inputs_select_program_and_distribution_checks(self):
+        for path in ("src/openfpga/release/pipeline.py", "src/openfpga/release/core.lock.json",
+                     "src/openfpga/release/runtime/os.bin", "src/openfpga/Makefile"):
+            with self.subTest(path=path):
+                self.assertEqual(self.selected([path]), {"pocket", "pocket_tools"})
+        for path in (".github/workflows/release-pocket.yml", ".github/workflows/publish-pocket.yml"):
+            self.assertEqual(self.selected([path]), {"pocket_tools"})
 
     def test_go_module_and_bundled_guide_select_tools(self):
         for path in ("src/openfpga/tools/pocket-data/go.mod", "src/openfpga/GAME-DATA.md"):
@@ -78,7 +86,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_mixed_changes_union_their_dependencies(self):
         self.assertEqual(self.selected(["src/ps2/main.c", "src/openfpga/platform/of_menu.c",
-                                        "docs/notes.md"]), {"ps2", "pocket"})
+                                        "docs/notes.md"]), {"ps2", "pocket", "pocket_tools"})
 
     def test_move_between_ports_checks_both_old_and_new_paths(self):
         self.assertEqual(self.selected(["src/ps2/input.c", "src/vita/input.c"]), {"ps2", "vita"})
