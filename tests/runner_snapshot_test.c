@@ -11,6 +11,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include "snapshot_v9_fixtures.h"
+#ifdef ENABLE_SW_RENDERER
+#include "sw/sw_renderer.h"
+/* Asset-free adapter for the synthetic renderer; no backend is linked. */
+bool SWRenderer_snapshotGetState(Renderer *r, SWRendererSnapshotState *state) {
+    (void)r; memset(state, 0, sizeof(*state)); state->writeMask = 15; return true;
+}
+void SWRenderer_snapshotApplyState(Renderer *r, const SWRendererSnapshotState *state) {
+    (void)r; (void)state;
+}
+#endif
 
 /* Host adapter for the core test, with no Pocket platform dependency. */
 void platformLog(logType type, const char *format, va_list args) {
@@ -114,8 +125,15 @@ static void invalidIniMagic(uint8_t *raw, size_t n) {
         }
     assert(false);
 }
+/* Revision 10 appends explicit renderer scalars after epsilon. */
+static void toRevision9(uint8_t *raw, uint32_t *rawLen, uint32_t rooms) {
+    size_t at = roomBlock(raw, *rawLen, rooms) - 5;
+    memmove(raw + at, raw + at + 5, *rawLen - at - 5);
+    *rawLen -= 5;
+}
 /* Revision 9 adds epsilon immediately after the unchanged RunnerPlain POD. */
 static void toRevision8(uint8_t *raw, uint32_t *rawLen, uint32_t rooms) {
+    toRevision9(raw, rawLen, rooms);
     size_t at = roomBlock(raw, *rawLen, rooms) - sizeof(GMLReal);
     memmove(raw + at, raw + at + sizeof(GMLReal), *rawLen - at - sizeof(GMLReal));
     *rawLen -= sizeof(GMLReal);
@@ -410,6 +428,87 @@ static void testRoundTrip(void) {
     destroyFixture(&r);
 }
 
+/* Load real historical bytes, rather than rebuilding an old format with
+ * today's producer (which missed the silent renderer-tail expansion). */
+static void testHistoricalRendererLayouts(void) {
+#if UINTPTR_MAX > UINT32_MAX
+    for (unsigned expanded = 0; expanded < 2; expanded++) {
+        Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
+        Room rooms[15]; GameObject object;
+        fixture(&r, &dw, &vm, &renderer, &vtable, &rooms[0], &object);
+#ifdef ENABLE_SW_RENDERER
+        for (int i = 1; i < 15; i++) rooms[i] = rooms[0];
+        dw.room.count = 15;
+#endif
+        int liveD3d;
+        renderer.d3d = (struct D3DState *)&liveD3d;
+        renderer.drawDepth = -2; renderer.legacyTextureCoordinates = true;
+#ifdef ENABLE_SW_RENDERER
+        const uint8_t *bytes = expanded ? snapshot_v9_expanded_sw : snapshot_v9_original_sw;
+        size_t size = expanded ? sizeof(snapshot_v9_expanded_sw) : sizeof(snapshot_v9_original_sw);
+#else
+        const uint8_t *bytes = expanded ? snapshot_v9_expanded : snapshot_v9_original;
+        size_t size = expanded ? sizeof(snapshot_v9_expanded) : sizeof(snapshot_v9_original);
+#endif
+        const char *reason = NULL;
+        RunnerSnapshot *s = Runner_snapshotPrepare(&r, 123, bytes, size, &reason);
+        assert(s && "historical revision-9 Memory must load");
+        assert(r.score == 0 && renderer.drawDepth == -2);
+        Runner_snapshotApply(&r, s); Runner_snapshotFree(s);
+        assert(r.score == 321 && r.mathEpsilon == (GMLReal)0.125);
+        assert(renderer.drawColor == 0x654321 && renderer.cameraCurrent == 7);
+        assert(renderer.d3d == (struct D3DState *)&liveD3d);
+        assert(renderer.drawDepth == (expanded ? 0.75f : 0.0f));
+        assert(renderer.legacyTextureCoordinates == (expanded != 0));
+        destroyFixture(&r);
+    }
+#endif
+}
+
+static void testRendererScalarsAndPointerOwnership(void) {
+    Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
+    Room room; GameObject object;
+    fixture(&r, &dw, &vm, &renderer, &vtable, &room, &object);
+    int oldD3d, liveD3d;
+    renderer.d3d = (struct D3DState *)&oldD3d;
+    renderer.drawDepth = 0.75f; renderer.legacyTextureCoordinates = true;
+    uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
+    assert(Runner_snapshotCapture(&r, 124, &bytes, &size, &reason));
+    renderer.d3d = (struct D3DState *)&liveD3d;
+    renderer.drawDepth = -2; renderer.legacyTextureCoordinates = false;
+    RunnerSnapshot *s = Runner_snapshotPrepare(&r, 124, bytes, size, &reason);
+    assert(s && renderer.drawDepth == -2);
+    Runner_snapshotApply(&r, s); Runner_snapshotFree(s);
+    assert(renderer.d3d == (struct D3DState *)&liveD3d);
+    assert(renderer.drawDepth == 0.75f && renderer.legacyTextureCoordinates);
+    free(bytes); bytes = NULL;
+    renderer.drawDepth = NAN;
+    assert(!Runner_snapshotCapture(&r, 124, &bytes, &size, &reason));
+    assert(bytes == NULL);
+    destroyFixture(&r);
+}
+
+static void testMalformedRevision9LeavesRunnerUntouched(void) {
+#if UINTPTR_MAX > UINT32_MAX && !defined(ENABLE_SW_RENDERER)
+    Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
+    Room room; GameObject object;
+    fixture(&r, &dw, &vm, &renderer, &vtable, &room, &object);
+    uint8_t *bytes = malloc(sizeof(snapshot_v9_original));
+    size_t size = sizeof(snapshot_v9_original); assert(bytes);
+    memcpy(bytes, snapshot_v9_original, size);
+    uint32_t rawLen; uint8_t *raw = decodeRaw(bytes, size, &rawLen);
+    size_t at = roomBlock(raw, rawLen, 1);
+    /* The expanded ABI's epsilon/count follow the original by 16 bytes. */
+    memset(raw + at + 12, 0, 4); write32(raw + at + 16, 1);
+    encodeRaw(&bytes, &size, raw, rawLen, 9);
+    const char *reason = NULL;
+    assert(Runner_snapshotPrepare(&r, 123, bytes, size, &reason) == NULL);
+    assert(reason != NULL);
+    assert(r.score == 0 && r.frameCount == 42);
+    free(raw); free(bytes); destroyFixture(&r);
+#endif
+}
+
 static void testComparisonToleranceRoundTrip(void) {
     Runner r; DataWin dw; VMContext vm; Renderer renderer; RendererVtable vtable;
     Room room; GameObject object;
@@ -417,7 +516,7 @@ static void testComparisonToleranceRoundTrip(void) {
     r.mathEpsilon = (GMLReal)0.125;
     uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
     assert(Runner_snapshotCapture(&r, 96, &bytes, &size, &reason));
-    assert(le32(bytes + 4) == 9);
+    assert(le32(bytes + 4) == 10);
     r.mathEpsilon = (GMLReal)0.5;
     RunnerSnapshot *s = Runner_snapshotPrepare(&r, 96, bytes, size, &reason);
     assert(s && r.mathEpsilon == (GMLReal)0.5);
@@ -439,12 +538,12 @@ static void testInvalidComparisonTolerance(void) {
     assert(Runner_snapshotCapture(&r, 97, &bytes, &size, &reason));
     uint32_t rawLen;
     uint8_t *raw = decodeRaw(bytes, size, &rawLen);
-    size_t at = roomBlock(raw, rawLen, 1) - sizeof(GMLReal);
+    size_t at = roomBlock(raw, rawLen, 1) - sizeof(GMLReal) - 5;
     GMLReal invalid[] = {(GMLReal)NAN, (GMLReal)INFINITY, (GMLReal)-1, (GMLReal)1};
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
         memcpy(raw + at, &invalid[i], sizeof(invalid[i]));
         /* Repair checksums so rejection exercises the scalar validation. */
-        encodeRaw(&bytes, &size, raw, rawLen, 9);
+        encodeRaw(&bytes, &size, raw, rawLen, 10);
         assert(Runner_snapshotPrepare(&r, 97, bytes, size, &reason) == NULL);
         assert(r.mathEpsilon == (GMLReal)0.125 && r.frameCount == 42);
     }
@@ -1133,7 +1232,7 @@ static void testGms2ValuesRoundTrip(void) {
 
     uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
     assert(Runner_snapshotCapture(&r, 77, &bytes, &size, &reason));
-    assert(le32(bytes + 4) == 9);
+    assert(le32(bytes + 4) == 10);
 
     /* Disturb the live state, then load. */
     Instance_setSelfVar(vm.globalScopeInstance, 2, RValue_makeReal(0));
@@ -1284,11 +1383,12 @@ static void checkTilemapCellsColdRestore(uint32_t version) {
     uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
     r.mathEpsilon = (GMLReal)0.125;
     assert(Runner_snapshotCapture(&r, 67, &bytes, &size, &reason));
-    if (version == 8) {
+    if (version <= 9) {
         uint32_t rawLen;
         uint8_t *raw = decodeRaw(bytes, size, &rawLen);
-        toRevision8(raw, &rawLen, 2);
-        encodeRaw(&bytes, &size, raw, rawLen, 8);
+        if (version == 8) toRevision8(raw, &rawLen, 2);
+        else toRevision9(raw, &rawLen, 2);
+        encodeRaw(&bytes, &size, raw, rawLen, version);
         free(raw);
     }
     destroyFixture(&r);
@@ -1348,6 +1448,7 @@ static void checkTilemapCellsColdRestore(uint32_t version) {
 static void testTilemapCellsColdRestore(void) {
     checkTilemapCellsColdRestore(8);
     checkTilemapCellsColdRestore(9);
+    checkTilemapCellsColdRestore(10);
 }
 
 /* Legacy formats describe no live vertex resources. Never displace a plain
@@ -1423,7 +1524,7 @@ static void testZstdV4FrameValidation(void) {
     memcpy(&r.lives, &livesBits, sizeof(livesBits));
     uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
     assert(Runner_snapshotCapture(&r, 58, &bytes, &size, &reason));
-    assert(le32(bytes + 4) == 9);
+    assert(le32(bytes + 4) == 10);
     uint32_t rawLen;
     uint8_t *raw = decodeRaw(bytes, size, &rawLen);
     toRevision6(raw, &rawLen, 1);
@@ -1604,7 +1705,7 @@ static void testStaticStringReferences(void) {
     arrput(r.dsListPool, list);
     uint8_t *bytes = NULL; size_t size = 0; const char *reason = NULL;
     assert(Runner_snapshotCapture(&r, 91, &bytes, &size, &reason));
-    assert(le32(bytes + 4) == 9);
+    assert(le32(bytes + 4) == 10);
     uint32_t rawLen;
     uint8_t *raw = decodeRaw(bytes, size, &rawLen);
     dw.strg.count = 0;
@@ -1726,6 +1827,9 @@ static void testDecoderStaticStringExpansionBudget(void) {
 }
 
 int main(void) {
+    testHistoricalRendererLayouts();
+    testRendererScalarsAndPointerOwnership();
+    testMalformedRevision9LeavesRunnerUntouched();
     testComparisonToleranceRoundTrip();
     testInvalidComparisonTolerance();
     testDestroyedInstanceAwaitingCleanup();

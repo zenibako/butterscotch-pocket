@@ -18,7 +18,8 @@
 
 /* This is a same-build, WAD16/17 wire format. Never write live pointers. */
 #define SNAP_MAGIC 0x31504e53u /* SNP1 */
-#define SNAP_VERSION 9u
+#define SNAP_VERSION 10u
+#define SNAP_RENDERER_VERSION 10u
 #define SNAP_EPSILON_VERSION 9u
 #define SNAP_TILEMAP_VERSION 8u
 #define SNAP_GMS2_VERSION 7u
@@ -144,11 +145,30 @@ typedef struct {
     RunnerGamepadState gamepads;
     RunnerMouseState mouse;
     uint8_t rendererBefore[offsetof(Renderer, runner) - offsetof(Renderer, drawColor)];
-    uint8_t rendererAfter[sizeof(Renderer) - offsetof(Renderer, gmlMatrices)];
+    /* Freeze the pre-D3D tail, including its historical pointer-alignment
+     * padding. Growing Renderer must never grow the snapshot or copy pointers.
+     * Five matrices, shader, filter+padding, blend factors, camera = 348 bytes. */
+    uint8_t rendererAfter[sizeof(void *) == 8 ? 352 : 348];
 #ifdef ENABLE_SW_RENDERER
     SWRendererSnapshotState swState;
 #endif
 } RunnerPlain;
+typedef char SnapshotRendererLayoutCheck[
+    offsetof(Renderer, cameraCurrent) + sizeof(int32_t) -
+    offsetof(Renderer, gmlMatrices) == 348 ? 1 : -1];
+typedef struct { uint8_t byte; RunnerPlain plain; } SnapshotPlainAlignment;
+
+/* The upstream-sync candidate accidentally wrote a larger revision-9 POD.
+ * Its D3D pointer is untrusted padding on input, never a restorable address. */
+#define SNAP_EXPANDED_RENDERER_BYTES (sizeof(void *) == 8 ? 368u : 360u)
+static size_t expandedPlainSize(void) {
+    size_t size = offsetof(RunnerPlain, rendererAfter) + SNAP_EXPANDED_RENDERER_BYTES;
+#ifdef ENABLE_SW_RENDERER
+    size += sizeof(SWRendererSnapshotState);
+#endif
+    size_t alignment = offsetof(SnapshotPlainAlignment, plain);
+    return (size + alignment - 1) / alignment * alignment;
+}
 
 static RunnerPlain makePlain(const Runner *r) {
     RunnerPlain p = {0};
@@ -192,7 +212,7 @@ static RunnerPlain makePlain(const Runner *r) {
     if (r->gamepads) p.gamepads = *r->gamepads;
     if (r->mouse) p.mouse = *r->mouse;
     memcpy(p.rendererBefore, (const uint8_t *)r->renderer + offsetof(Renderer, drawColor), sizeof(p.rendererBefore));
-    memcpy(p.rendererAfter, (const uint8_t *)r->renderer + offsetof(Renderer, gmlMatrices), sizeof(p.rendererAfter));
+    memcpy(p.rendererAfter, (const uint8_t *)r->renderer + offsetof(Renderer, gmlMatrices), 348);
 #ifdef ENABLE_SW_RENDERER
     SWRenderer_snapshotGetState(r->renderer, &p.swState);
 #endif
@@ -231,6 +251,8 @@ struct RunnerSnapshot {
     bool applied;
     RunnerPlain plain;
     GMLReal mathEpsilon;
+    float drawDepth;
+    bool legacyTextureCoordinates;
     Room *room;
     Instance *global;
     Instance **instances;
@@ -543,6 +565,8 @@ static bool eligible(Runner *r, const char **reason, bool forCapture, BlockerLis
         REFUSE("Invalid room");
     if (forCapture && !r->currentRoom->payloadLoaded) REFUSE("Current room payload is unavailable");
     if (forCapture && r->paused) REFUSE("Paused runner is unsupported for capture");
+    if (forCapture && (isnan(r->renderer->drawDepth) || isinf(r->renderer->drawDepth)))
+        REFUSE("Renderer depth is not finite");
     if (spritesValid && hasLiveDynamicSprite(r->dataWin))
         REFUSE("Dynamic sprite is unsupported");
     if (forCapture && !SpatialGrid_dimensionsValid(r->currentRoom->width,
@@ -941,8 +965,11 @@ bool Runner_snapshotCapture(Runner *r, uint64_t gameId, uint8_t **data,
     put32(&w, SNAP_MAGIC); put32(&w, SNAP_VERSION); put64(&w, gameId);
     put32(&w, 0); put32(&w, 0); /* length and checksum filled below */
     RunnerPlain plain = makePlain(r); put(&w, &plain, sizeof(plain));
-    /* Keep RunnerPlain unchanged so revisions 3-8 retain their POD layout. */
+    /* Explicit extensions leave the historical POD layout frozen. */
     put(&w, &r->mathEpsilon, sizeof(r->mathEpsilon));
+    put(&w, &r->renderer->drawDepth, sizeof(float));
+    uint8_t legacyCoordinates = r->renderer->legacyTextureCoordinates;
+    put(&w, &legacyCoordinates, 1);
     put32(&w, r->dataWin->room.count);
     for (uint32_t i = 0; i < r->dataWin->room.count; i++) {
         uint8_t initialized = r->savedRoomStates && r->savedRoomStates[i].initialized;
@@ -1482,6 +1509,35 @@ static bool buildIndexes(RunnerSnapshot *s, Runner *r) {
     return true;
 }
 
+static bool plainLayoutMatches(const Reader *rd, size_t plainSize, uint32_t rooms) {
+    Reader probe = *rd;
+    if (plainSize > probe.n || sizeof(GMLReal) + 4 > probe.n - plainSize) return false;
+    probe.pos = plainSize;
+    GMLReal epsilon = 0; get(&probe, &epsilon, sizeof(epsilon));
+    if (!probe.ok || !(epsilon >= 0 && epsilon < 1) || get32(&probe) != rooms ||
+        !countOK(rooms)) return false;
+    /* A candidate's SW blend mode/write mask can resemble the other ABI's
+     * epsilon/room count. Validate the complete room block before selecting;
+     * this probe never allocates or changes the live room definitions. */
+    for (uint32_t i = 0; i < rooms; i++) {
+        uint8_t initialized = 0; get(&probe, &initialized, 1);
+        if (!probe.ok || initialized > 1) return false;
+    }
+    for (uint32_t i = 0; i < rooms; i++) {
+        uint32_t width = get32(&probe), height = get32(&probe);
+        get32(&probe); /* speed */
+        uint8_t persistent = 0, loaded = 0;
+        get(&probe, &persistent, 1); get(&probe, &loaded, 1);
+        uint32_t tiles = get32(&probe);
+        if (!probe.ok || persistent > 1 || loaded > 1 ||
+            !SpatialGrid_dimensionsValid(width, height) || !countOK(tiles) ||
+            (!loaded && tiles) || (size_t)tiles > (probe.n - probe.pos) / sizeof(RoomTile))
+            return false;
+        probe.pos += (size_t)tiles * sizeof(RoomTile);
+    }
+    return probe.ok;
+}
+
 RunnerSnapshot *Runner_snapshotPrepare(Runner *r, uint64_t gameId,
                                        const uint8_t *data, size_t size,
                                        const char **reason) {
@@ -1500,7 +1556,8 @@ RunnerSnapshot *Runner_snapshotPrepare(Runner *r, uint64_t gameId,
     uint32_t bodyLen = get32(&hdr), crc = get32(&hdr);
     uint32_t rawLen = get32(&hdr), rawCrc = get32(&hdr);
     if (!hdr.ok || magic != SNAP_MAGIC ||
-        (version != SNAP_VERSION && version != SNAP_TILEMAP_VERSION &&
+        (version != SNAP_VERSION && version != SNAP_EPSILON_VERSION &&
+         version != SNAP_TILEMAP_VERSION &&
          version != SNAP_GMS2_VERSION && version != SNAP_SAVED_ROOM_VERSION &&
          version != SNAP_STRING_REF_VERSION &&
          version != SNAP_ZSTD_LEGACY_VERSION && version != SNAP_LEGACY_VERSION) ||
@@ -1553,10 +1610,42 @@ RunnerSnapshot *Runner_snapshotPrepare(Runner *r, uint64_t gameId,
     if (!s) { if (reason) *reason = "Out of memory"; free(raw); return NULL; }
     Room *shadowRooms = NULL;
     const char *failure = NULL;
-    get(&rd, &s->plain, sizeof(s->plain));
+    bool expanded = false;
+    if (version == SNAP_EPSILON_VERSION) {
+        bool original = plainLayoutMatches(&rd, sizeof(RunnerPlain), r->dataWin->room.count);
+        expanded = plainLayoutMatches(&rd, expandedPlainSize(), r->dataWin->room.count);
+        /* Never guess if corrupt input makes both revision-9 layouts plausible.
+         * The selected layout still passes the complete body validation below. */
+        if (original == expanded) {
+            failure = "Unrecognized or ambiguous revision-9 renderer layout"; goto bad;
+        }
+    }
+    if (expanded) {
+        size_t after = offsetof(RunnerPlain, rendererAfter);
+        get(&rd, &s->plain, after);
+        get(&rd, s->plain.rendererAfter, 348);
+        /* Skip only the serialized address, not the new scalar state. */
+        rd.pos = after + (sizeof(void *) == 8 ? 352 : 348) + sizeof(void *);
+        get(&rd, &s->drawDepth, sizeof(float));
+        uint8_t coordinates = 0; get(&rd, &coordinates, 1);
+        if (!rd.ok || coordinates > 1) goto bad;
+        s->legacyTextureCoordinates = coordinates != 0;
+#ifdef ENABLE_SW_RENDERER
+        rd.pos = after + SNAP_EXPANDED_RENDERER_BYTES;
+        get(&rd, &s->plain.swState, sizeof(s->plain.swState));
+#endif
+        rd.pos = expandedPlainSize();
+    } else get(&rd, &s->plain, sizeof(s->plain));
     s->mathEpsilon = GML_MATH_EPSILON;
     if (version >= SNAP_EPSILON_VERSION)
         get(&rd, &s->mathEpsilon, sizeof(s->mathEpsilon));
+    if (version >= SNAP_RENDERER_VERSION) {
+        get(&rd, &s->drawDepth, sizeof(float));
+        uint8_t coordinates = 0; get(&rd, &coordinates, 1);
+        if (!rd.ok || coordinates > 1) goto bad;
+        s->legacyTextureCoordinates = coordinates != 0;
+    }
+    if (isnan(s->drawDepth) || isinf(s->drawDepth)) goto bad;
     if (!(s->mathEpsilon >= 0 && s->mathEpsilon < 1)) goto bad;
     if (!rd.ok || s->plain.roomIndex < 0 ||
         (uint32_t)s->plain.roomIndex >= r->dataWin->room.count ||
@@ -2122,7 +2211,7 @@ static void applyPlain(Runner *r, const RunnerPlain *p) {
     memcpy((uint8_t *)r->renderer + offsetof(Renderer, drawColor),
            p->rendererBefore, sizeof(p->rendererBefore));
     memcpy((uint8_t *)r->renderer + offsetof(Renderer, gmlMatrices),
-           p->rendererAfter, sizeof(p->rendererAfter));
+           p->rendererAfter, 348);
 #ifdef ENABLE_SW_RENDERER
     SWRenderer_snapshotApplyState(r->renderer, &p->swState);
 #endif
@@ -2244,6 +2333,8 @@ void Runner_snapshotApply(Runner *r, RunnerSnapshot *s) {
     }
     applyPlain(r, &s->plain);
     r->mathEpsilon = s->mathEpsilon;
+    r->renderer->drawDepth = s->drawDepth;
+    r->renderer->legacyTextureCoordinates = s->legacyTextureCoordinates;
     /* Capture refuses paused runners, so every supported snapshot resumes.
      * The caller restores audio after this core commit. */
     r->paused = false;

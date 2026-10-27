@@ -39,6 +39,21 @@ echo "runner snapshot: passed"
     "$repo/vendor/miniz/miniz_tinfl.c" "$repo/vendor/zstd/zstd.c" -lm -o "$out/runner17"
 "$out/runner17"
 echo "runner snapshot (WAD 17): passed"
+# Exercise the historical renderer tail with the Pocket's SW-state trailer too.
+for wad in 16 17; do
+    "$cc" "${flags[@]}" -DENABLE_WAD"$wad" -DENABLE_SW_RENDERER \
+        -I"$repo/vendor/miniz" -I"$repo/vendor/zstd" \
+        "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" \
+        "$repo/src/instance.c" "$repo/src/gml_array.c" "$repo/src/gml_method.c" "$repo/src/int_rvalue_hashmap.c" \
+        "$repo/src/spatial_grid.c" "$repo/src/random.c" "$repo/src/ini.c" \
+        "$repo/src/stb_ds.c" "$repo/src/gettime.c" "$repo/src/data_win.c" \
+        "$repo/src/binary_reader.c" "$repo/src/log.c" \
+        "$repo/src/physics/disabled/physics_disabled.c" \
+        "$repo/vendor/miniz/miniz.c" "$repo/vendor/miniz/miniz_tdef.c" \
+        "$repo/vendor/miniz/miniz_tinfl.c" "$repo/vendor/zstd/zstd.c" -lm -o "$out/runner-sw$wad"
+    "$out/runner-sw$wad"
+    echo "runner snapshot (WAD $wad, software renderer): passed"
+done
 "$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" \
     "$repo/tests/sw_button_cache_test.c" "$repo/src/log.c" -lm -o "$out/button-cache"
 "$out/button-cache"
