@@ -1,3 +1,4 @@
 {
-  "declare_ai": ["OpenAI Codex", "Claude Code"]
+  "declare_ai": ["OpenAI Codex", "Claude Code"],
+  "plugins": ["https://github.com/zenibako/butterscotch-pocket"]
 }

@@ -86,12 +86,13 @@ class PackageTests(ReleaseFixture):
             self.assertIn("Assets/butterscotch/common/deltarune.elf", z.namelist())
             self.assertEqual(z.read("Cores/zenibako.Butterscotch/os25.rbf_r"), (self.pocket/"release/runtime/os25.rbf_r").read_bytes())
 
-    def test_packaged_ai_declaration_matches_release_metadata(self):
-        """Keep explicit AI disclosure in the installed core rather than only the README."""
+    def test_packaged_updater_metadata_supports_disclosure_and_plugin_discovery(self):
+        """Keep AI disclosure and companion plugin discovery in the installed core."""
         archive = self.package()
         with zipfile.ZipFile(archive) as z:
-            declaration = json.loads(z.read(f"Cores/{pipeline.CORE_ID}/updaters.json"))
-        self.assertEqual(declaration["declare_ai"], ["OpenAI Codex", "Claude Code"])
+            metadata = json.loads(z.read(f"Cores/{pipeline.CORE_ID}/updaters.json"))
+        self.assertEqual(metadata["declare_ai"], ["OpenAI Codex", "Claude Code"])
+        self.assertEqual(metadata.get("plugins"), ["https://github.com/zenibako/butterscotch-pocket"])
 
     def test_missing_program_fails_without_publishing(self):
         """Ensure a missing game ELF leaves no published core archive."""
