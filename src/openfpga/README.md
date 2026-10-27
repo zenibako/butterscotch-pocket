@@ -634,6 +634,11 @@ and the texture packs are not modified.
 
 ## On-device diagnostics
 
+For platform shortlisting, actual-artifact profiles and private report collection,
+follow [Pocket benchmark integration](docs/BENCHMARKING.md). It distinguishes
+software, same-ELF platform and different-ELF configuration comparisons while
+preserving the game's correctness and physical Pocket lifecycle checks.
+
 **The log as a file.** A screenshot of the log overlay holds only the last
 few lines. The whole log, from start-up on, is also written as text to the
 game's second save slot, `undertale_1.sav` or `deltarune_1.sav`: when the
@@ -641,7 +646,9 @@ core halts (the end of a benchmark, a fatal error), from the menu's "Save
 log", and on Select + Y with the debug buttons on. A core can only write to its save slots, so that is where it
 goes; the Pocket copies the slot to `Saves/butterscotch/common/` on the
 card when the core is left through the Analogue menu. The text ends at the
-first NUL byte (`strings`, or `tr -d '\0'`, reads it).
+first NUL byte. Preserve the original file and use the shared collector's
+`inspect` to select the intended complete report; removing NULs can expose a
+stale tail.
 
 **The benchmark.** The Benchmark entries (`make compare`) play a fixed
 route with scripted input and end by writing a report to the log: time per
