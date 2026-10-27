@@ -13,16 +13,13 @@ Preserve matched runtime inputs, diagnostic isolation and the release gates belo
 
 ## Inputs
 
-This skill names no machines. Use paths and host choices already established
-in the session or supplied handoff. Ask once only for required information
-that cannot be established from that evidence:
+Use session/handoff paths and hosts; ask once for missing required inputs.
+Do not guess machines.
 
-- **checkout**: where the working checkout, the game data and the Pocket
-  toolchain are. A local path, or `host:path` when it is on another machine
-  reached over SSH. Commands below write it as `$CHECKOUT`.
-- **card**: where the Pocket's SD card is mounted, and on which machine
-  (for example `/Volumes/Pocket` on a Mac). Commands below write it as
-  `$CARD`.
+- **checkout** (`$CHECKOUT`): working checkout, game data and Pocket toolchain;
+  a local path or SSH `host:path`.
+- **card** (`$CARD`): Pocket SD mount path and machine, e.g. `/Volumes/Pocket`
+  on a Mac.
 
 ## Where things are
 
