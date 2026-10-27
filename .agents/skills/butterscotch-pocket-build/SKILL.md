@@ -21,126 +21,22 @@ Do not guess machines.
 - **card** (`$CARD`): Pocket SD mount path and machine, e.g. `/Volumes/Pocket`
   on a Mac.
 
-## Where things are
+## Local development builds
 
-```
-undertale-pocket/                 not a git repo; holds the pieces below
-├── env.sh                        source before any RISC-V build on macOS
-├── butterscotch-pocket/          THIS REPOSITORY: fork of ButterscotchRunner/Butterscotch; trunk is `main` (it was `pocket` until 2026-10-10)
-│   ├── src/                      Butterscotch itself; src/sw is the software renderer the port draws with
-│   └── src/openfpga/             THE PORT
-│       ├── main.c, Makefile, README.md
-│       ├── platform/             of_* glue: video, audio, saves, log, bench
-│       ├── tools/                mktexpack.c, mkmusic.c, mkcompare.sh, sdcopy.sh
-│       ├── dist/                 Pocket core definition (core.json, data slots, instance JSON)
-│       ├── platform/game_<game>.c   what differs per game; the rest of platform/ is shared
-│       ├── games/<game>/         the user's own game data (data.win, music/) and the
-│       │                         packs built from it (textures.bin, music.bin); gitignored.
-│       │                         Undertale's was in src/openfpga/ itself until 2026-10-13
-│       └── out/                  everything the build writes (gitignored):
-│           └── build/pocket/butterscotch/   assembled SD card tree
-├── openfpgaSDK/                  the openfpgaOS SDK, read only; SDK_ROOT points here by default
-├── Diablo/                       reference port; also the source of the v0.9 SDK + runtime
-└── screenshots/                  captures sent to the user
-```
-
-**Which machine.** Build in `$CHECKOUT`; the card may be on a different
-machine from it. If `$CHECKOUT` is a `host:path`, run builds there over SSH
-using the host name the user gave, since a `.local` name may not resolve
-from every machine. A
-cloud session has neither the game data nor a device toolchain, so it can
-lint and build `undertale_pc` against a test game but cannot build the
-Pocket ELF or check the real game's output.
-
-Read `src/openfpga/README.md` first; it is kept current and describes each
-subsystem. The SDK is a dependency, not part of this repository: never edit
-it. Until 2026-10-08 the port lived inside a fork of the SDK
-(`openfpgaSDK/src/undertale`, branch `undertale`) with Butterscotch cloned
-inside it; that tree is superseded by this one.
+Read `src/openfpga/README.md` first; the external SDK is read-only.
+Before locating a checkout, building either game, or assembling a local card,
+read [local build procedures](references/local-builds.md) for workspace layout,
+host/toolchain checks, cache isolation and the per-game commands.
+Use a fresh named `ROOT` when changing compiler, SDK, layout or other build definitions;
+preserve existing evidence. For Memories or sleep/wake, also read
+[native save-state builds](references/native-save-state-builds.md): the convenience
+target overrides `ROOT`. Keep production `FOCUS_BENCH=0` and diagnostic ELFs separate.
 
 ## Public distributions
 
 For public packages use `src/openfpga/docs/BUILD.md` and `pocket-release`.
 Runner and nested tools build from one clean commit with matched external
-SDK/runtime pins. Commands below cover local development.
-
-## Building
-
-```bash
-cd undertale-pocket && source env.sh
-make -C src/openfpga undertale_pc   # desktop binary only; never touches build/
-make -C src/openfpga                # RISC-V ELF + packs + SD tree (v0.7 core only)
-make -C src/openfpga compare        # the above + Benchmark entries + v0.9 cores
-```
-
-Before importing dependency images or building, check free space on the host
-and output volume. If containers will be used, also check Docker's actual
-backing filesystem and available capacity, and VM memory. Archives on an
-external disk do not move Docker's backing store.
-Inspect existing containers, projects and local changes before proposing cleanup
-or VM changes; do not prune images or relocate/restart the VM without permission.
-Read a supplied dependency manifest and verify its checksums before using it.
-
-`env.sh` supplies GNU sed (the SDK uses GNU-only `sed -i`) and normally selects
-Homebrew's `riscv64-elf-gcc` with `USE_SDK_CONTAINER=0`. Inspect its actual settings
-and the staged runtime's requirements; a previous Docker/keychain failure does
-not establish that containers are unavailable now. Record the compiler actually
-used rather than assuming host and container builds are equivalent.
-
-A change to any header under `src/`, `src/*/` or `platform/` empties the
-object directories a run builds into (the Makefile keeps a checksum of the
-headers in each one's `.headers`), so objects are never left built against an
-old struct layout: that links without complaint and crashes on the device.
-The key also tracks `STATE_GAME_ID`, `SAVESTATES`, `GAME`, `WADS`,
-`FOCUS_BENCH` and `FOCUS_BUILD_ID` for native and PC objects. It is not a
-complete compiler/flag fingerprint: use a fresh named `ROOT` when changing
-other definitions, compiler, SDK or layout. Preserve existing build evidence.
-The `save-states`/`native-saves` convenience target hardcodes its recursive
-`ROOT`; passing a fresh `ROOT` to that target does not isolate its builds.
-Use the explicit per-game `SAVESTATES=1 ... all` workflow in
-[Native save-state builds](references/native-save-state-builds.md) for a fresh
-release root, and keep that root through packaging and copy verification.
-For a production release, explicitly select `FOCUS_BENCH=0`; build diagnostic
-ELFs separately with an identifying `FOCUS_BUILD_ID`. A build-ID string alone
-does not prove which ELF was packaged. The shared-root transition regression is
-`tests/test_focus_build_cache.py`, run by `tools/test-snapshots.sh`.
-
-The device build prints many warnings and notes; they are expected and not
-a problem. What matters is that there are no errors. `make compare` output
-should end with `Comparison cores added: ...`, and a build that prints
-nothing after that line succeeded. To see only the lines that matter:
-
-```bash
-make -C src/openfpga compare 2>&1 | grep -E " error|undefined reference|Comparison|mkcompare:|\*\*\*"
-make -C src/openfpga GAME=deltarune 2>&1 | grep -E " error|undefined reference|\*\*\*"
-```
-
-The first should print only the `Comparison cores added` line and the
-second nothing.
-
-## Two games, one core
-
-For Memories or sleep/wake cards, read
-[Native save-state builds](references/native-save-state-builds.md). The ordinary
-build commands above do not select the save-state runtime or output tree.
-
-The core is `zenibako.Butterscotch`, platform `butterscotch`, with one
-entry per game on the Pocket. `GAME=deltarune` on any make target builds
-Deltarune's program instead of Undertale's (WAD 17, data in
-`games/deltarune/`, binary `deltarune_pc`); run
-`tools/deltarune-setup.sh <game Resources folder> [chapter]` once first.
-Every device build ends by reassembling the one SD tree from all games
-built so far (`tools/mkcard.sh`), so a full card is `make && make
-GAME=deltarune`. `compare` adds Undertale benchmark entries and v0.9
-cores to that same tree.
-
-Until 2026-10-08 the platform folder was `undertale`. A card set up before
-then has `Assets/undertale/`, `Saves/undertale/` and possibly
-`Cores/zenibako.Deltarune` with `Assets/deltarune/`; the save belongs in
-`Saves/butterscotch/common/` now. Before the first launch of the new
-core, copy the save files under `Saves/undertale/` there, or the game
-starts as if nothing had been saved. Don't copy over a file that is
-already there and newer: that one is progress made since.
+SDK/runtime pins. The linked local build procedures cover development.
 
 ## Keeping `src/openfpga/README.md` true
 
@@ -173,79 +69,15 @@ which takes a minute or more. Rebuilding mid-copy hands them a mixed tree.
   it alone. If they said they are about to copy, do not rebuild until they
   confirm the copy is done.
 
-## Getting it onto the SD card
+## SD-card deployment
 
-Three routes, in order of preference:
-
-1. **Card in the machine that has the checkout:** `make -C src/openfpga compare-copy`
-   (or `copy` for the single core). This runs `tools/sdcopy.sh`, which waits
-   for the card, mounts it, copies, removes `._*` sidecar files, verifies,
-   and unmounts. It prints a specific message on each failure.
-2. **Card in a second Mac:** SSH from the build machine
-   cannot touch the card (macOS blocks removable volumes for remote
-   logins; that restriction is the user's and is not to be worked around).
-   Give the user these to run in a Terminal on that Mac:
-
-   ```bash
-   rsync -rc --exclude '._*' --exclude '.DS_Store' "$CHECKOUT/src/openfpga/out/build/pocket/butterscotch/" "$CARD/"
-   dot_clean -m "$CARD/Assets/butterscotch" "$CARD/Cores" "$CARD/Platforms"
-   diskutil unmount "$CARD"
-   ```
-
-   - `dot_clean -m "$CARD"` on the whole card prints "Operation
-     not permitted" for `.Spotlight-V100`, `.Trashes` and
-     `.TemporaryItems`. Those are macOS's own folders and the lines are
-     harmless; the narrower paths above avoid them.
-   - If the unmount is "dissented by" a `com.apple.Virtualization`
-     process, the Claude desktop app has the card open for a session that
-     was reading it. Once the copy has finished,
-     `diskutil unmount force "$CARD"` is safe.
-   - The rsync never deletes, so old benchmark ELFs and instance files
-     stay on the card. That is harmless.
-   - If `$CHECKOUT` is on a work branch, the user builds main
-     with `git fetch <fork remote> && git switch --detach <fork remote>/main` after checking `git status` is
-     clean, and switches back afterwards.
-3. **Manual:** `cp -R src/openfpga/out/build/pocket/butterscotch/{Cores,Assets,Platforms} "$CARD/"`
-
-**Checking what is on a card.** Every core's `core.json` says version
-0.1.0, so it cannot tell builds apart. Compare file times against when the
-change merged, `cmp` the ELF against a fresh build, or look for a string
-the change added (`strings "$CARD/Assets/butterscotch/common/undertale.elf" | grep "Music only"`).
-
-Plain `copy` after a `compare-copy` leaves stale v0.9 cores on the card; use
-`compare-copy` again if those cores should stay current.
-
-Unmount, never eject (`diskutil unmount`, as `sdcopy.sh` does): after an
-eject a Mac does not see the card again until it is reseated, and
-sometimes not then, and the user asked on 2026-10-09 for unmount to be
-used so the card is found next time.
-
-A card reader on an idle, headless Mac can fail to notice a card inserted
-while the machine is idle. `sdcopy.sh` declares user activity to
-wake it; if no disk appears at all, the card needs reseating.
-
-## What is on the card
-
-| File (Assets/butterscotch/common) | Slot | Source |
-|---|---|---|
-| `os.bin`, `undertale_os.ini`, `undertale.elf` | 1, 2, 3 | SDK runtime, dist, build |
-| `data.win` | 4 | the user's copy (`game.ios` on macOS, renamed) |
-| `deltarune.elf`, `deltarune_os.ini`, `deltarune.win`, `dr_textures.bin`, `dr_music.bin` | 3, 2, 4, 5, 6 | the same for the Deltarune entry |
-| `textures.bin` | 5 | `tools/mktexpack` from data.win |
-| `music.bin` | 6 | `tools/mkmusic` from data.win + `music/*.ogg` |
-| `undertale_0.sav` | 10 | written by the game (save archive) |
-
-`undertale_0.sav` lives under `Saves/butterscotch/common/` on the card and is
-never part of the build tree. `make import-save SAVE_DIR=<desktop save
-folder>` builds one from a desktop save (`tools/mksave`); copying it to the
-card replaces the Pocket's own progress, so only do that when asked.
-
-Only slots 4–6 are available for data, and file names are limited to 23
-characters. The OS config must not be called `undertale.ini`: the game
-reads and writes a file of that name itself.
-
-The core uses the **os25** bitstream from the SDK's own runtime (v0.7). Do
-not switch it to os20 with that runtime; it boot-loops before the OS banner.
+Before copying, verifying or troubleshooting a card, read
+[SD-card procedures and layout](references/sd-card.md). Use the supplied checkout
+and card hosts; keep the tree frozen through the copy and verification.
+Progress saves are outside the build tree; replace them only when asked, and
+preserve newer progress during migration. Unmount the card after copying.
+Keep the SDK runtime and its os25 bitstream matched; switching that runtime to
+os20 boot-loops before the OS banner.
 
 ## Committing
 
