@@ -6,16 +6,22 @@ argument-hint: "[card: SD mount path] [harness: path or host:path of a zenibako/
 
 # Performance work on the Pocket
 
+For profile selection, benchmark packaging, report transfer and comparison,
+use the local [pocket-benchmarking router](../pocket-benchmarking/SKILL.md) and
+[maintained integration guide](../../../src/openfpga/docs/BENCHMARKING.md).
+Keep scene selection, counter interpretation and the game-specific checks below.
+
 ## Inputs
 
-Take these from the arguments; if the task needs one that is missing, ask
-the user once rather than guessing a machine or path:
+Use paths and host choices established in the session or supplied arguments.
+Ask once only for required information that cannot be established there:
 
 - **card**: where the Pocket's SD card is mounted (written `$CARD` below).
 - **harness**: where the user's checkout of the private
   [zenibako/pocket-harness](https://github.com/zenibako/pocket-harness)
-  repository is, as a path or `host:path`, for simulated runs. Without it,
-  say a simulated check is possible and ask; don't hunt for it.
+  repository is, as a path or `host:path`. For collector work, resolve the
+  checkout through the local router above (including `POCKET_HARNESS_ROOT`).
+  Simulated runs require its separate canonical `os25-harness` skill.
 
 ## Reading the log off the card
 
@@ -26,14 +32,16 @@ Y with the debug buttons on, and reaches
 the card when the user leaves the core through the Analogue menu:
 
 ```bash
-tr -d '\0' < "$CARD"/Saves/butterscotch/common/deltarune_1.sav   # or undertale_1.sav
+python3 -c 'import sys; sys.stdout.buffer.write(open(sys.argv[1], "rb").read().split(b"\0", 1)[0])' "$CARD/Saves/butterscotch/common/deltarune_1.sav"
 ```
 
 Check the first line (`Butterscotch log, <game>`) and the timestamps: the
-file stays on the card until the next dump overwrites it, so an old one can
-be mistaken for a new run. A benchmark's report ends with ms-per-frame and
-calls-per-frame tables by section; start there before theorising about
-where a section's time goes.
+file can retain earlier reports or a previous tail, so an old one can be
+mistaken for a new run. Text ends at the first NUL; do not strip padding and
+concatenate later bytes. Use the shared collector's `inspect` and explicitly
+select the intended completed report. Standard reports lack a source commit;
+attach actual build metadata. Read the ms-per-frame and calls-per-frame tables
+before theorising about where a section's time goes.
 
 ## Speed and accuracy
 

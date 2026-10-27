@@ -18,6 +18,10 @@ hidden under `Assets/butterscotch/common/.butterscotch-install-*`. CLI preparati
 retains its separate-output/refuse-existing contract.
 The v0.7.0 plugin predates direct installation.
 
+For diagnostic packages, platform profile selection and benchmark evidence,
+follow [Pocket benchmark integration](BENCHMARKING.md). These measurements keep
+the matched-input, clean-source, correctness and complete-release gates below.
+
 ## Dependency lock
 
 [`release/core.lock.json`](../release/core.lock.json) is the release input

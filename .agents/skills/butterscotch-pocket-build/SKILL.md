@@ -6,6 +6,11 @@ argument-hint: "[checkout: path or host:path with game data + toolchain] [card: 
 
 # Building and deploying the Undertale Pocket port
 
+For benchmark packages and platform/profile experiments, follow the local
+[pocket-benchmarking router](../pocket-benchmarking/SKILL.md) and
+[integration guide](../../../src/openfpga/docs/BENCHMARKING.md).
+Preserve matched runtime inputs, diagnostic isolation and the release gates below.
+
 ## Inputs
 
 This skill names no machines. Use paths and host choices already established
