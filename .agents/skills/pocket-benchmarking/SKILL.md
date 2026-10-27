@@ -16,9 +16,9 @@ and continue applicable project checks; do not copy the shared skill body or
 create a cross-repository skill symlink.
 
 Keep scene selection and counter interpretation in
-[performance](../../../.claude/skills/butterscotch-pocket-perf/SKILL.md), output and
-lifecycle checks in [verification](../../../.claude/skills/butterscotch-pocket-verify/SKILL.md),
-and diagnostic construction in [build](../../../.claude/skills/butterscotch-pocket-build/SKILL.md).
+[performance](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md), output and
+lifecycle checks in [verification](../../../.agents/skills/butterscotch-pocket-verify/SKILL.md),
+and diagnostic construction in [build](../../../.agents/skills/butterscotch-pocket-build/SKILL.md).
 The [release skill](../pocket-release/SKILL.md) still owns complete distributions.
 Shortlist compatible profiles for this project; all four matrix cells are not
 required. Register actual packaged artifacts and preserve raw private evidence.

@@ -31,9 +31,16 @@ lines. It is written to the game's spare save slot when the core halts
 Y with the debug buttons on, and reaches
 the card when the user leaves the core through the Analogue menu:
 
+Set `GAME` to `undertale` or `deltarune` for the game under investigation:
+
 ```bash
-python3 -c 'import sys; sys.stdout.buffer.write(open(sys.argv[1], "rb").read().split(b"\0", 1)[0])' "$CARD/Saves/butterscotch/common/deltarune_1.sav"
+GAME=undertale # or deltarune
+LOG="$CARD/Saves/butterscotch/common/${GAME}_1.sav"
+python3 -c 'import sys; sys.stdout.buffer.write(open(sys.argv[1], "rb").read().split(b"\0", 1)[0])' "$LOG"
 ```
+
+For focused tiles measurements, select `deltarune_tiles_1.sav` instead; follow
+[focused benchmarks](references/focused-benchmarks.md) for that workflow.
 
 Check the first line (`Butterscotch log, <game>`) and the timestamps: the
 file can retain earlier reports or a previous tail, so an old one can be

@@ -140,12 +140,12 @@ configuration against this project's targets and observed variability, or report
 a tie/insufficient evidence. One candidate shows suitability, not superiority
 over untested profiles. There is no automatic ranking command.
 
-The [performance skill](../../../.claude/skills/butterscotch-pocket-perf/SKILL.md)
+The [performance skill](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md)
 retains scene/counter interpretation. The
-[verification skill](../../../.claude/skills/butterscotch-pocket-verify/SKILL.md)
+[verification skill](../../../.agents/skills/butterscotch-pocket-verify/SKILL.md)
 retains both-game deterministic pixels/PCM, scene oracles and relevant launch,
 progress-save, audio, Memory and sleep/wake checks. Desktop checks cannot prove
-Pocket timing or lifecycle behavior. The [build skill](../../../.claude/skills/butterscotch-pocket-build/SKILL.md)
+Pocket timing or lifecycle behavior. The [build skill](../../../.agents/skills/butterscotch-pocket-build/SKILL.md)
 and [pocket-release](../../../.agents/skills/pocket-release/SKILL.md) retain clean
 same-commit builds, matched pins, provenance, complete packaging and explicit
 version/publication gates. Collector acceptance replaces none of these checks.
