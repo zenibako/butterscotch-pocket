@@ -1,6 +1,6 @@
 ---
 name: pocket-benchmarking
-description: Use when choosing Butterscotch Pocket platform profiles, planning benchmark cores, collecting Undertale or Deltarune reports, or comparing software and platform configurations with pocket-harness.
+description: Use when choosing Butterscotch Pocket profiles, preserving routine regression baselines, collecting Undertale or Deltarune reports, or comparing software and platform configurations.
 ---
 
 # Pocket benchmarking route
@@ -34,3 +34,16 @@ Use the strict default for software changes, same-ELF platform mode for controll
 platform changes, or configuration mode with `--reason` for different ELFs.
 Whole-configuration deltas cannot isolate a CPU, clock or OS effect. Collector
 verification does not replace game correctness, hardware or release gates.
+
+## Routine regression checks
+
+For recurring software checks, require the shared `benchmarks/REGRESSIONS.md`
+and read it with this project's benchmark guide. The contract was introduced in
+`fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58`; record the actual verified shared
+checkout commit. Preserve the accepted reference, create independent candidates,
+and require project correctness and negative controls before interpreting deltas.
+A missing adapter or fixture is an explicit coverage gap. Collector `verify` or
+`compare` is not an output-regression gate or a substitute for device checks.
+For supported Butterscotch os25 cases, use `regression.py baseline/check` after
+reading shared `docs/REGRESSION.md` and current CLI help. Never recapture or
+promote over a reference; retain mismatch reports/images and explicit failures.
