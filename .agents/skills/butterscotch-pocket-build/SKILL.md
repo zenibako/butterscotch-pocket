@@ -1,6 +1,6 @@
 ---
 name: butterscotch-pocket-build
-description: Use when building, packaging or deploying the Butterscotch Analogue Pocket port, preparing Undertale and Deltarune update ZIPs, staging dependencies or save-state runtimes, committing Pocket changes, or handling the port's build and CI review feedback.
+description: Use when building, packaging or deploying the Butterscotch Analogue Pocket port, preparing Undertale and Deltarune update ZIPs, staging dependencies or save-state runtimes, committing Pocket changes, handling Pocket Sync plugin icons, or handling the port's build and CI review feedback.
 argument-hint: "[checkout: path or host:path with game data + toolchain] [card: SD mount path, and which machine]"
 ---
 
@@ -37,6 +37,14 @@ target overrides `ROOT`. Keep production `FOCUS_BENCH=0` and diagnostic ELFs sep
 For public packages use `src/openfpga/docs/BUILD.md` and `pocket-release`.
 Runner and nested tools build from one clean commit with matched external
 SDK/runtime pins. The linked local build procedures cover development.
+
+## Pocket Sync plugin icons
+
+Before changing plugin artwork or investigating a huge plugin row, read
+[plugin icon sizing and delivery](references/plugin-icons.md). It covers
+intrinsic dimensions, both Pocket Sync views, catalog discovery, and published
+asset verification. Apply this to each discovered plugin logo, not unrelated
+core `icon.bin`, banner, or game artwork.
 
 ## Keeping `src/openfpga/README.md` true
 
