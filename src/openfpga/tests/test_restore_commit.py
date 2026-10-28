@@ -30,7 +30,6 @@ static bool ofSnapshotUnpack(uint64_t id,const uint8_t *d,size_t n,OfSnapshotSec
 }
 static bool ofSnapshotFromOtherGame(uint64_t id,const uint8_t *d,size_t n) { (void)id;(void)d;(void)n;return false; }
 static uint64_t g_gameId;
-static uint64_t g_legacyGameId;
 static uint32_t ofSnapGetU32(OfSnapshotReader *r) { r->offset+=4;return 0; }
 static void ofAudioSnapshotLock(bool b) {locked=b;}
 static RunnerSnapshot *Runner_snapshotPrepare(Runner *r,uint64_t id,const uint8_t*d,size_t n,const char **s) {

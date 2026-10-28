@@ -122,11 +122,11 @@ def build_core(source, output):
         with tarfile.open(POCKET_ROOT / lock["sdk"]["archive"]) as archive:
             archive.extractall(scratch / "sdk", filter="data")
         for game in ("undertale", "deltarune"):
-            # The public build has no compile-time private game fingerprint.
+            # Public and local builds use the same runtime game identity.
             run("make", "-j2", "-C", str(source / "src/openfpga"),
                 "USE_SDK_CONTAINER=0", "OF_SDK_IN_CONTAINER=1", "SAVESTATES=1",
                 f"SDK_ROOT={scratch / 'sdk'}", f"ROOT={scratch / 'objects'}",
-                f"GAME={game}", f"G={scratch / 'no-game-data'}/", "STATE_GAME_ID=", "elf")
+                f"GAME={game}", f"G={scratch / 'no-game-data'}/", "elf")
             elf = scratch / "objects/.obj" / game / "app.elf"
             check_elf(elf)
             symbols = subprocess.check_output(["riscv64-unknown-elf-nm", "-S", str(elf)], text=True)

@@ -1,4 +1,4 @@
-"""Exercise current/legacy game identity selection with real snapshot envelopes."""
+"""Private/public builds exchange states without weakening identity validation."""
 from pathlib import Path
 import re
 import subprocess
@@ -85,7 +85,7 @@ static void check(Runner *r, uint64_t outer, uint64_t inner, bool expected,
     if (!expected) assert(reason);
     free(data);
 }
-int main(void) {
+int main(int argc, char **argv) {
     uint8_t code[] = {1, 2, 3, 4};
     CodeEntry entry = {true, "fixture", 100, sizeof(code)};
     DataWin dw = {.gen8 = {42, 123456, {9}}, .code = {1, &entry},
@@ -97,30 +97,52 @@ int main(void) {
     legacy = hash(legacy, dw.gen8.licenseMD5, sizeof(dw.gen8.licenseMD5));
     legacy = hash(legacy, entry.name, strlen(entry.name));
     legacy = hash(legacy, code, sizeof(code));
+    assert(legacy == UINT64_C(0x0db7bb454f3ef446)); /* Existing public fixture identity. */
     uint64_t current = legacy;
-#ifdef OF_STATE_GAME_ID
-    uint64_t packaged = OF_STATE_GAME_ID;
-    current = hash(current, &packaged, sizeof(packaged));
-#endif
     ofSavestateInit(&r);
     assert(g_gameId == current);
+    if (argc == 3) {
+        uint8_t id[8], platform[12] = {0}, content[] = {1};
+        for (unsigned i = 0; i < 8; ++i) id[i] = current >> (8 * i);
+        OfSnapshotSection sections[4] = {{id, 8}, {content, 1}, {content, 1}, {platform, 12}};
+        uint8_t *data; size_t n;
+        if (!strcmp(argv[1], "write")) {
+            assert(ofSnapshotPack(g_gameId, sections, &data, &n));
+            FILE *f = fopen(argv[2], "wb"); assert(f);
+            assert(fwrite(data, 1, n, f) == n); assert(!fclose(f)); free(data);
+        } else {
+            uint8_t buffer[256]; const char *reason = NULL;
+            FILE *f = fopen(argv[2], "rb"); assert(f);
+            n = fread(buffer, 1, sizeof(buffer), f); assert(!ferror(f)); assert(!fclose(f));
+            assert(restoreState(&r, buffer, n, &reason, NULL));
+            assert(r.state == 1 && !locked);
+        }
+        return 0;
+    }
     check(&r, current, current, true, false, false, true);
     check(&r, legacy, legacy, true, false, false, true);
-    assert(g_gameId == current); /* Loading legacy never weakens new captures. */
+    assert(g_gameId == current);
     check(&r, legacy ^ 1, legacy ^ 1, false, false, false, false);
     check(&r, current ^ 1, current ^ 1, false, false, false, false);
     check(&r, legacy, legacy, false, true, false, false);
     check(&r, legacy, legacy, false, false, true, false);
     check(&r, legacy, legacy ^ 1, false, false, false, true);
     check(&r, current, current ^ 1, false, false, false, true);
-    if (current != legacy) {
-        check(&r, legacy, current, false, false, false, true);
-        check(&r, current, legacy, false, false, false, true);
-    }
+    /* A private fingerprint from a superseded build is not a migration target. */
+    uint64_t privateFingerprint = UINT64_C(0x0123456789abcdef);
+    uint64_t oldPrivate = hash(legacy, &privateFingerprint, sizeof(privateFingerprint));
+    check(&r, oldPrivate, oldPrivate, false, false, false, false);
+    code[0]++; ofSavestateInit(&r);
+    check(&r, current, current, false, false, false, false);
+    code[0]--; dw.gen8.timestamp++; ofSavestateInit(&r);
+    check(&r, current, current, false, false, false, false);
+    dw.gen8.timestamp--; dw.gen8.licenseMD5[0]++; ofSavestateInit(&r);
+    check(&r, current, current, false, false, false, false);
+    dw.gen8.licenseMD5[0]--;
     dw.gen8.gameID++; ofSavestateInit(&r);
     check(&r, legacy, legacy, false, false, false, false);
     check(&r, current, current, false, false, false, false);
-    puts("PASS: current and legacy identities, wrong game, damage, truncation, inner mismatch");
+    puts("PASS: shared build identity, wrong game/code/metadata, damage, truncation, inner mismatch");
 }
 '''
 globals_ = '\n'.join(re.findall(r'static uint64_t g_\w+;', source))
@@ -128,9 +150,19 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / 'test.c').write_text(pre + globals_ + '\n' + function('ofSavestateInit')
                                + '\n' + function('restoreState') + post)
-    for flags in ([], ['-DOF_STATE_GAME_ID=0x93ee8d4353f0d618ULL']):
+    binaries = []
+    for index, flags in enumerate(([], ['-DOF_STATE_GAME_ID=0x0123456789abcdefULL'],
+                                    ['-DOF_STATE_GAME_ID=0xfedcba9876543210ULL'])):
+        binary = root / f'test-{index}'
         subprocess.run(['clang', '-std=c11', '-fsanitize=address,undefined',
                         '-I' + str(repo / 'src/openfpga/platform'), *flags,
                         str(root / 'test.c'), str(repo / 'src/openfpga/platform/of_snapshot_envelope.c'),
-                        '-o', str(root / 'test')], check=True)
-        subprocess.run([str(root / 'test')], check=True)
+                        '-o', str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)
+        binaries.append(binary)
+    for index, writer in enumerate(binaries):
+        payload = root / f'capture-{index}.bin'
+        subprocess.run([str(writer), 'write', str(payload)], check=True)
+        for reader in binaries:
+            subprocess.run([str(reader), 'read', str(payload)], check=True)
+    print('PASS: all 9 cross-build capture/load combinations')
