@@ -65,7 +65,7 @@ A change to any header under `src/`, `src/*/` or `platform/` empties the
 object directories a run builds into (the Makefile keeps a checksum of the
 headers in each one's `.headers`), so objects are never left built against an
 old struct layout: that links without complaint and crashes on the device.
-The key also tracks `STATE_GAME_ID`, `SAVESTATES`, `GAME`, `WADS`,
+The key also tracks `SAVESTATES`, `GAME`, `WADS`,
 `FOCUS_BENCH` and `FOCUS_BUILD_ID` for native and PC objects. It is not a
 complete compiler/flag fingerprint: use a fresh named `ROOT` when changing
 other definitions, compiler, SDK or layout. Preserve existing build evidence.

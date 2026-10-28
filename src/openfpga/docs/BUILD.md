@@ -47,9 +47,12 @@ repository; they are not active build inputs in this fork.
 This is the previously tested experimental os25 sleep/clock runtime at
 100 MHz, with -0.777 ns worst setup slack in the slow 85°C corner. It misses
 that timing target. Do not describe it as a timing-clean FPGA build or swap
-in another runtime merely because it is newer. Public ELFs omit private
-compile-time game fingerprints; Memories from private test ELFs may not load
-because identities differ. Ordinary game progress saves are separate.
+in another runtime merely because it is newer. Local/private and public ELFs
+use the same metadata-and-bytecode Memory identity; local game files do not
+alter it. Use matching game data and a compatible snapshot format. Changes
+outside metadata and bytecode are not whole-file verified. Older private-build
+Memories with a compile-time fingerprint are not migrated. Ordinary game
+progress saves are separate.
 
 To update dependencies, review the new core/SDK/API/runtime combination,
 record complete revisions and hashes, rebuild both game programs and repeat

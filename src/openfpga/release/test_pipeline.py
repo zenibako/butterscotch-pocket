@@ -216,7 +216,6 @@ elif name == "riscv64-unknown-elf-nm":
     print("00000100 00000020 T executeBytecodeInstructions")
 else:
     args = dict(arg.split("=", 1) for arg in sys.argv[1:] if "=" in arg)
-    assert args["STATE_GAME_ID"] == ""
     assert "no-game-data" in args["G"]
     elf = Path(args["ROOT"]) / ".obj" / args["GAME"] / "app.elf"
     elf.parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,5 @@
-"""A container-supplied game fingerprint must survive an unavailable data.win."""
+"""Local assets and container builds must not inject a private Memory identity."""
 from pathlib import Path
-import hashlib
 import os
 import subprocess
 import tempfile
@@ -10,49 +9,33 @@ sdk = os.environ.get('SDK_ROOT', str(port / 'out/savestate-sdk-strg'))
 source = (port / 'Makefile').read_text()
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
-    (root / 'Makefile').write_text(source + '\n.PHONY: fingerprint-fixture\nfingerprint-fixture:\n\t@echo $(BS_DEFS)\n')
-    def flags(*args):
-        return subprocess.check_output(['make', '--no-print-directory', 'fingerprint-fixture',
-            f'SDK_ROOT={sdk}', 'SAVESTATES=1', *args], cwd=root, text=True)
-    supplied = '0123456789abcdef'
-    assert f'-DOF_STATE_GAME_ID=0x{supplied}ULL' in flags(f'STATE_GAME_ID={supplied}')
-    # Local builds still calculate the same hash, and missing-file CI builds
-    # remain valid when they do not claim to be tied to supplied game data.
-    data = b'fingerprint fixture game data'
-    game = root / 'games/undertale'
-    game.mkdir(parents=True)
-    (game / 'data.win').write_bytes(data)
-    expected = hashlib.sha256(data).hexdigest()[:16]
-    assert f'-DOF_STATE_GAME_ID=0x{expected}ULL' in flags()
-    assert f'-DOF_STATE_GAME_ID=0x{supplied}ULL' in flags(f'STATE_GAME_ID={supplied}')
-    failed = subprocess.run(['make', '--no-print-directory', 'fingerprint-fixture',
-        f'SDK_ROOT={sdk}', 'SAVESTATES=1', 'STATE_GAME_ID='], cwd=root, capture_output=True, text=True)
-    assert failed.returncode and 'Could not fingerprint' in failed.stderr
-    # Run the real wrapper with an OCI stub: it must hash the moved host data
-    # before forwarding the ID into a container that cannot follow its symlink.
+    (root / 'Makefile').write_text(source + '\n.PHONY: identity-fixture\nidentity-fixture:\n\t@echo $(BS_DEFS)\n')
+
+    def flags(game, *args):
+        return subprocess.check_output(['make', '--no-print-directory', 'identity-fixture',
+            f'SDK_ROOT={sdk}', 'SAVESTATES=1', f'GAME={game}', *args], cwd=root, text=True)
+
+    for game in ('undertale', 'deltarune'):
+        public = flags(game)
+        data = root / 'games' / game / 'data.win'
+        data.parent.mkdir(parents=True)
+        data.write_bytes(b'private fixture game data')
+        assert flags(game) == public, 'Local game data changed the build identity'
+        assert flags(game, 'STATE_GAME_ID=0123456789abcdef') == public
+        assert flags(game, 'STATE_GAME_ID=') == public
+
+    # Native builds must work without host game files, just like the public
+    # pipeline. An OCI stub captures the real wrapper's invocation boundary.
     wrapper_port = root / 'repo/src/openfpga'
     (wrapper_port / 'tools').mkdir(parents=True)
-    (wrapper_port / 'games/undertale').mkdir(parents=True)
-    (wrapper_port / 'games/undertale/data.win').write_bytes(data)
     wrapper = wrapper_port / 'tools/native-sdk-container.sh'
     wrapper.write_text((port / 'tools/native-sdk-container.sh').read_text())
     stub_sdk = root / 'stub-sdk'
     (stub_sdk / 'tools').mkdir(parents=True)
     (stub_sdk / 'tools/oci.sh').write_text('oci_run() { printf "%s\\n" "$@"; }\n')
-    forwarded = subprocess.check_output(['bash', str(wrapper), 'make'],
-        cwd=wrapper_port, env={**os.environ, 'SDK_ROOT': str(stub_sdk)}, text=True)
-    assert f'STATE_GAME_ID={expected}' in forwarded
-    # A Deltarune build names its own data through OF_STATE_DATA.
-    other = b'another game'
-    (wrapper_port / 'games/deltarune').mkdir(parents=True)
-    (wrapper_port / 'games/deltarune/data.win').write_bytes(other)
-    forwarded = subprocess.check_output(['bash', str(wrapper), 'make'], cwd=wrapper_port,
-        env={**os.environ, 'SDK_ROOT': str(stub_sdk),
-             'OF_STATE_DATA': str(wrapper_port / 'games/deltarune/data.win')}, text=True)
-    assert f'STATE_GAME_ID={hashlib.sha256(other).hexdigest()[:16]}' in forwarded
-    # The Makefile hands the wrapper the data of the game it builds.
-    deltarune = root / 'games/deltarune'
-    deltarune.mkdir(parents=True)
-    (deltarune / 'data.win').write_bytes(other)
-    assert f'-DOF_STATE_GAME_ID=0x{hashlib.sha256(other).hexdigest()[:16]}ULL' in flags('GAME=deltarune')
-print('PASS: supplied/local fingerprints and missing-fingerprint validation')
+    forwarded = subprocess.check_output(['bash', str(wrapper), 'make', 'GAME=deltarune'],
+        cwd=wrapper_port, env={**os.environ, 'SDK_ROOT': str(stub_sdk),
+                              'OF_STATE_DATA': str(root / 'absent-game-data')}, text=True)
+    assert 'GAME=deltarune' in forwarded
+    assert 'STATE_GAME_ID=' not in forwarded
+print('PASS: public/local build flags match and native wrapper needs no game fingerprint')

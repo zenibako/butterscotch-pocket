@@ -146,22 +146,6 @@ endif
 BS_DEFS += -DOF_NATIVE_SAVESTATES
 SDK_CONTAINER = $(CURDIR)/tools/native-sdk-container.sh
 export SDK_ROOT
-# The wrapper fingerprints this game's data on the host (see STATE_GAME_ID).
-export OF_STATE_DATA := $(abspath $(G)data.win)
-endif
-
-# Bind snapshots to the user's complete game file as well as loaded bytecode.
-# Recomputed once per make invocation; changes also invalidate cached objects.
-ifneq ($(wildcard $(G)data.win),)
-ifndef STATE_GAME_ID
-STATE_GAME_ID := $(shell python3 -c 'import hashlib; h=hashlib.sha256(); f=open("$(G)data.win", "rb"); [h.update(b) for b in iter(lambda:f.read(1048576), b"")]; print(h.hexdigest()[:16])')
-endif
-ifeq ($(STATE_GAME_ID),)
-$(error Could not fingerprint data.win; when compiling in a container pass STATE_GAME_ID=<host SHA256 prefix>)
-endif
-endif
-ifneq ($(STATE_GAME_ID),)
-BS_DEFS += -DOF_STATE_GAME_ID=0x$(STATE_GAME_ID)ULL
 endif
 
 BS_WARN = -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function \
@@ -198,7 +182,7 @@ MISTER_ASSETS ?= $(wildcard $(G)data.win) $(GAME_PACKS)
 # compiled code and save filenames, so they must invalidate the same objects.
 # (Before sdk.mk, which looks at what is
 # in them; PC_OBJ_DIR is only set this early when a sub-make passes it.)
-HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(STATE_GAME_ID) $(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID)'; } | cksum | cut -d' ' -f1)
+HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID)'; } | cksum | cut -d' ' -f1)
 $(foreach d,$(OBJ_DIR) $(or $(PC_OBJ_DIR),$(ROOT)/.obj/$(APP)-pc),$(shell [ "$$(cat $(d)/.headers 2>/dev/null)" = "$(HEADER_SUM)" ] || { rm -rf $(d); mkdir -p $(d); echo $(HEADER_SUM) > $(d)/.headers; }))
 
 # Declare default target before sdk.mk's rules

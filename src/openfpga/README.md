@@ -258,16 +258,17 @@ switch (`sleep_supported` in `core.json`) belongs to the core, so each game's
 program answers every save and load request. Both games accept cutscenes
 when the runner can preserve their live resources; the player-control marker
 (`obj_mainchara.cutscene`) does not itself prevent a snapshot. A state is bound
-to the game and the exact `data.win` it was taken with. The Pocket lists
+to the loaded game's metadata and bytecode. The Pocket lists
 every game's Memories together, so loading one into the other game, or after
-the game's data has changed, is refused with "This Memory is from another
-game or version".
+the game's metadata or bytecode has changed, is refused with
+"This Memory is from another game or version".
 
-Memories from older builds that omitted the whole-file fingerprint are also
-readable when their original metadata-and-code identity matches the loaded
-game. Those legacy states cannot verify changes elsewhere in `data.win`, so
-use the original game data. Loading one keeps all format, checksum, and resource
-validation; subsequent captures use the current whole-file fingerprint.
+New Memories use the same identity in local/private and public builds, so they
+can move between those builds when the game identity and snapshot format match.
+The identity checks metadata and bytecode, not every asset byte in `data.win`;
+use the original game data. All format, checksum, and resource validation still
+applies. Existing public-build Memories remain readable. Older private-build
+Memories that included a compile-time whole-file fingerprint are not migrated.
 
 The Pocket can still power off after a refused save. In the hardware test, wake
 then replayed an older sleep payload. A refusal therefore means the current
@@ -327,7 +328,7 @@ Desktop verification uses `BS_STATE_SAVE_FRAME=<n>` with
 boundaries. `make snapshot-tests` checks the runner, audio, archive and envelope
 code with sanitizers, including the desktop SDK's audio queue, native close
 failure handling, notice bounds, and request completion. It also checks
-container-supplied game fingerprints. Native hardware
+private/public capture-and-restore compatibility. Native hardware
 behavior still requires Pocket tests.
 
 To see where a state can be taken, `BS_STATE_PROBE=<n>` makes the desktop build
