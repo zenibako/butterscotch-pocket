@@ -11,6 +11,11 @@ For archived benchmark evidence and platform/configuration comparisons, use the
 Collector verification preserves evidence; retain the independent game/output and
 physical Pocket lifecycle checks below.
 
+For routine supported os25 updates, follow the integration guide's
+[preserved-baseline checks](../../../src/openfpga/docs/BENCHMARKING.md#routine-regression-checks)
+before another device benchmark campaign. Keep an immutable accepted reference
+and fresh candidates; simulated success retains all applicable device gates.
+
 The Pocket can only be tested by the user: copy to SD, walk to the device,
 report back. That loop is slow and they pay for it, so everything that can
 be checked on the desktop should be, first. `undertale_pc` runs the same

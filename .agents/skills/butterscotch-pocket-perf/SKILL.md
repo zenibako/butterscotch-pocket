@@ -1,7 +1,7 @@
 ---
 name: butterscotch-pocket-perf
 description: Use when investigating Butterscotch Undertale or Deltarune performance on the Analogue Pocket, interpreting benchmark logs, diagnosing battle text or flashing-tile slowdowns, comparing optimization candidates, or assessing os20/os25 timing claims.
-argument-hint: "[card: SD mount path] [harness: path or host:path of a zenibako/pocket-harness checkout, if any]"
+argument-hint: "[card: SD mount path] [harness: path or host:path of a zenibako/pocket-dev-tools checkout, if any]"
 ---
 
 # Performance work on the Pocket
@@ -10,6 +10,11 @@ For profile selection, benchmark packaging, report transfer and comparison,
 use the local [pocket-benchmarking router](../pocket-benchmarking/SKILL.md) and
 [maintained integration guide](../../../src/openfpga/docs/BENCHMARKING.md).
 Keep scene selection, counter interpretation and the game-specific checks below.
+
+For routine supported os25 updates, follow the integration guide's
+[preserved-baseline checks](../../../src/openfpga/docs/BENCHMARKING.md#routine-regression-checks)
+before another device benchmark campaign. Keep an immutable accepted reference
+and fresh candidates; simulated success retains all applicable device gates.
 
 ## Inputs
 
@@ -224,7 +229,7 @@ uncached". What still holds, whatever the cause:
 ## Simulated runs: the os25 harness (2026-10-11)
 
 The user has a cycle-level simulator of the os25 CPU and memory system,
-the os25 harness, in the private repository zenibako/pocket-harness (the
+the os25 harness, in the shared repository zenibako/pocket-dev-tools (the
 **harness** input). The Butterscotch workload is its original one, at the
 repository root. Read its `README.md` and its
 `.agents/skills/os25-harness/SKILL.md` before running it. Game data,

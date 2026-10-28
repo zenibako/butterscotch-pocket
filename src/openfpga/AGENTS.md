@@ -24,5 +24,9 @@ Run the Go module tests, vet, decoder regressions, mandatory C-reference and
 Extism checks for tooling changes; run release unit tests and real complete
 packaging for pipeline changes. Platform/VM/renderer/snapshot changes also
 need the build/verify skills, both-game fixtures and deterministic frames.
+For routine software checks, use the [preserved-baseline workflow](docs/BENCHMARKING.md#routine-regression-checks)
+and local `pocket-benchmarking` router. Supported os25 cases use the shared
+immutable `regression.py` gate; its simulated pass does not replace the affected
+game, shipping-runtime or physical Pocket checks.
 State explicitly which checks are desktop versus physical Pocket evidence.
 Use signed conventional commits and preserve published history.
