@@ -1,72 +1,32 @@
 ---
 name: pocket-release
-description: Verify complete Butterscotch Pocket distribution CI or prepare an explicitly versioned draft release from the single upstream fork. Use for release coordination and matched external SDK/runtime dependency updates.
+description: Use when validating Butterscotch Pocket distributions, preparing release candidates or drafts, publishing explicitly authorized releases, or updating matched runtime dependencies.
 ---
 
-The upstream fork `zenibako/butterscotch-pocket` owns runner, Pocket platform,
-tools and releases. Read repository instructions and `src/openfpga/docs/BUILD.md`
-first. Active release inputs live in `src/openfpga/release`; the Go module is
-`src/openfpga/tools/pocket-data`. Historical SDK trees are not build inputs.
+# Butterscotch Pocket releases
 
-## Verify a candidate
+Read repository instructions and the [build and release guide](../../../src/openfpga/docs/BUILD.md) first.
 
-1. Inspect local changes and `src/openfpga/release/core.lock.json`. Schema 2
-   selects the current checkout for runner and tools. Never add a self commit
-   pin or clone a separate core checkout. Record the intended full commit.
-2. Preserve the immutable SDK/runtime revisions and every binary hash unless
-   the task explicitly updates a reviewed, matched dependency set. API headers,
-   firmware, loader and bitstream must remain compatible; never recertify
-   arbitrary binaries by replacing their hashes.
-3. Use a clean checkout of the candidate. Run:
+## Read the shared workflow
 
-   ```sh
-   python3 src/openfpga/release/pipeline.py validate
-   python3 -m unittest discover -s src/openfpga/release -p 'test_*.py'
-   (cd src/openfpga/tools/pocket-data && go test ./... && go vet ./... && go test -C third_party/vorbis ./...)
-   ```
+Canonical owner: <https://github.com/zenibako/pocket-dev-tools> (formerly
+`pocket-harness`). Use the root established in this session, then
+`POCKET_DEV_TOOLS_ROOT`, then legacy `POCKET_HARNESS_ROOT`. Resolve conflicting
+explicit roots before proceeding. A sibling `pocket-dev-tools` or `pocket-harness`
+is only a candidate: verify `.agents/skills/pocket-release/SKILL.md` and
+`docs/RELEASING.md`, confirm the Git remote identifies the canonical repository
+(or its former name), and record its full commit. Resolve and read that canonical
+skill before following its relative links. Apply it together with this project's
+local release guide; stronger local checks remain required.
 
-4. Follow the build guide to run mandatory plugin/C-reference checks, compile
-   both public games and assemble the complete distribution. Outputs default
-   to ignored `src/openfpga/out/`. Source verification rejects another checkout
-   or dirty source. Keep the generated program/source provenance together;
-   assembly requires matching core/tool source commits, exact dependency pins,
-   the complete core ZIP manifest and matching entry/runtime bytes. Preserve
-   tracked HEAD notices; ignored local logs must never enter native bundles or
-   license archives. Runtime source must be the locked checkout's root.
-5. Make a signed conventional commit and verify the complete distribution CI
-   on that exact commit. CI's Pocket tools domain reuses `release-pocket.yml`;
-   don't add duplicate builds or a core-pin preparation workflow. Push only
-   with session authorization. Report the commit, CI link and remaining
-   device checks. Provide an outline for the maintainer's PR description;
-   do not publish external descriptions/comments without authorization.
+If the shared checkout is unavailable, report the missing dependency and continue
+applicable local checks. Do not claim shared validation, copy the shared skill
+body, or create cross-repository skill symlinks. A checkout predating the release
+skill needs an explicit update; a matching directory name alone is insufficient.
 
-## Prepare a release
+## Project contract
 
-Require complete distribution CI on the intended commit and the hardware
-compatibility checks required by the build guide. Record Undertale and
-Deltarune launch/progress-save checks plus applicable Memory/sleep checks
-using the user's own data. State unperformed checks explicitly. Preserve
-experimental runtime/timing limits; CI is not hardware proof.
+Both games, pinned os25 runtime and the complete core/tools/source/license inventory remain required. Use this checkout's `release-pocket.yml` and `publish-pocket.yml`, with its explicit version and source provenance rules.
 
-Obtain the intended version and explicit release authorization before a
-version/tag action. For an authorized draft, dispatch **Prepare complete Pocket draft
-release** (`publish-pocket.yml`) on the reviewed ref with `version=vX.Y.Z`,
-`create_draft=true`. It calls the read-only complete distribution workflow
-with that version, then grants write permission only to the draft job after
-validation passes. Commit its notes first at
-`src/openfpga/docs/release-notes/vX.Y.Z.md`. Draft creation refuses missing or
-empty notes and invalid versions. Reusable workflow calls and normal tags
-only validate/build; they do not create a draft or publish a stable release.
-
-Never create a tools-only latest release. The core ZIP, plugin/icon, six
-native bundles, WASI, both source provenance records, complete source/license
-archives, game-data guide and checksums belong together. Inspect assets,
-source identities and checksums and report the draft link. The publisher
-checks that the provenance version matches the explicit version input and
-that both core/tools identify the workflow's exact source commit. Stable publication
-is a separate, explicitly authorized action. Never upload game data, saves,
-local staging folders or private logs.
-
-For hosted-runner acquisition failures, inspect annotations and retry only
-with authorization, at most twice. Never convert a cancelled required job to
-success or retry test failures blindly.
+Read the preserved [project procedures](references/project-release.md) for
+local commands, device checks and release recovery details.

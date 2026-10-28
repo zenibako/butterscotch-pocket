@@ -18,7 +18,7 @@ Ask once only for required information that cannot be established there:
 
 - **card**: where the Pocket's SD card is mounted (written `$CARD` below).
 - **harness**: where the user's checkout of the private
-  [zenibako/pocket-harness](https://github.com/zenibako/pocket-harness)
+  [zenibako/pocket-dev-tools](https://github.com/zenibako/pocket-dev-tools)
   repository is, as a path or `host:path`. For collector work, resolve the
   checkout through the local router above (including `POCKET_HARNESS_ROOT`).
   Simulated runs require its separate canonical `os25-harness` skill.
