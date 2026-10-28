@@ -21,7 +21,8 @@ because that screen displays it larger. Recheck the consumer when it changes:
 
 1. Enumerate `plugin.json` manifests and `logo_url` references. Pocket Sync v7.1.1
    discovers suggestions from cores' `updaters.json` `plugins` arrays and
-   installed plugins from `pocket-sync.json` `config.plugins`; it also accepts
+   installed plugins from the top-level `plugins` array in `pocket-sync.json`
+   (the client reads `config.plugins`); it also accepts
    manually entered GitHub repositories. There is no exhaustive central
    catalog. Read available card/config metadata and report the scope,
    revision/date, count and any unavailable URLs. See
