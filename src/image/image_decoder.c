@@ -62,7 +62,7 @@ static uint8_t* decodeQoi(const uint8_t* restrict data, size_t dataSize, int* re
     const uint8_t* restrict pixelData = data + QOI_HEADER_SIZE;
     const uint8_t* restrict pixelDataEnd = pixelData + length;
     size_t rawSize = (size_t)width * (size_t)height;
-    uint32_t* restrict raw = (uint32_t*)safeMalloc(rawSize * sizeof(uint32_t));
+    uint32_t* restrict raw = (uint32_t*)malloc(rawSize * sizeof(uint32_t)); // nullable: sw_texture_lru evicts and retries
     if (!raw) return nullptr;
 
     const uint32_t* rawStart = raw;
