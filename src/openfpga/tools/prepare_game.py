@@ -56,7 +56,7 @@ def build_tools(destination):
                 vendor/'stb/ds', vendor/'stb/image', vendor/'stb/vorbis', vendor/'bzip2']
     flags = ['-O2', '-std=gnu99', '-DOF_HOST_TOOL', '-DPIXEL_SIZE=16', '-DENABLE_SW_RENDERER',
              '-DENABLE_WAD16', '-DENABLE_WAD17', '-DUSE_FLOAT_REALS', '-DNO_RVALUE_INT64',
-             '-DBUTTERSCOTCH_VIDEO_NULL', '-DOF_GAME_NAME="undertale"', '-DOF_LOG_SLOT_FILE="undertale_1.sav"']
+             '-DBUTTERSCOTCH_VIDEO_NULL', '-DUSE_STB_IMGDEC', '-DOF_GAME_NAME="undertale"', '-DOF_LOG_SLOT_FILE="undertale_1.sav"']
     flags += [f'-I{p}' for p in includes]
     if platform.system() == 'Windows':
         flags += ['-static', '-static-libgcc']
