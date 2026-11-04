@@ -2516,6 +2516,12 @@ static void flattenCollisionEvents(Runner* runner) {
     }
 }
 
+static int compareIntsAscending(const void* a, const void* b) {
+    int32_t ia = *(const int32_t*)a;
+    int32_t ib = *(const int32_t*)b;
+    return (ia > ib) - (ia < ib);
+}
+
 // Populates objectsWithAnyEventOfType[eventType] from the resolved event table: for each event type, the deduplicated list of concrete object indices that respond to ANY subtype of that event. Walks the inverted bySlot index per slot and dedups via a scratch byte set.
 // Used by collision dispatch to skip non-collision objects in the outer loop, mirroring how the native obj_has_event table partitions instance iteration by event class.
 static void populateObjectsWithAnyEventOfType(Runner* runner) {
@@ -2547,6 +2553,12 @@ static void populateObjectsWithAnyEventOfType(Runner* runner) {
     }
 
     free(seen);
+
+    // Collision dispatch walks this list in ascending object index (the native runner's slot-index order).
+    // Sort it once here rather than copying and sorting it on every step.
+    int32_t* collisionObjects = runner->objectsWithAnyEventOfType[EVENT_COLLISION];
+    if (collisionObjects != nullptr)
+        qsort(collisionObjects, (size_t) arrlen(collisionObjects), sizeof(int32_t), compareIntsAscending);
 }
 
 // Validates if all required renderer functions are not null
@@ -3894,24 +3906,14 @@ void Runner_takeCollisionWork(Runner* runner, RunnerCollisionWork* out) {
 }
 #endif
 
-static int compareIntsAscending(const void* a, const void* b) {
-    int32_t ia = *(const int32_t*)a;
-    int32_t ib = *(const int32_t*)b;
-    return (ia > ib) - (ia < ib);
-}
-
 static void dispatchCollisionEvents(Runner* runner) {
     DataWin* dataWin = runner->dataWin;
     // Iterate only the objects that have any collision event in their parent chain.
-    int32_t* allSelfObjects = (runner->objectsWithAnyEventOfType != nullptr) ? runner->objectsWithAnyEventOfType[EVENT_COLLISION] : nullptr;
-    if (allSelfObjects == nullptr) return;
-    int32_t selfObjCount = (int32_t) arrlen(allSelfObjects);
+    // Sorted by ascending object index in populateObjectsWithAnyEventOfType, so collision dispatch order matches the native runner's slot-index order.
+    int32_t* selfObjects = (runner->objectsWithAnyEventOfType != nullptr) ? runner->objectsWithAnyEventOfType[EVENT_COLLISION] : nullptr;
+    if (selfObjects == nullptr) return;
+    int32_t selfObjCount = (int32_t) arrlen(selfObjects);
     if (selfObjCount == 0) return;
-
-    // Copy and sort by ascending object index so collision dispatch order matches the native runner's slot-index order.
-    int32_t* selfObjects = (int32_t*)safeMalloc((size_t)selfObjCount * sizeof(int32_t));
-    memcpy(selfObjects, allSelfObjects, (size_t)selfObjCount * sizeof(int32_t));
-    qsort(selfObjects, (size_t)selfObjCount, sizeof(int32_t), compareIntsAscending);
 
     repeat(selfObjCount, soIdx) {
         int32_t selfObjIdx = selfObjects[soIdx];
@@ -4123,7 +4125,6 @@ static void dispatchCollisionEvents(Runner* runner) {
 
         arrsetlen(runner->instanceSnapshots, selfSnapBase);
     }
-    free(selfObjects);
 }
 
 // ===[ View Following + Clamping ]===
