@@ -477,39 +477,43 @@ class AssemblyTests(ReleaseFixture):
 
 
 class TestVersionTests(unittest.TestCase):
-    """Number device test builds as <next>-rc.<N> from the release tags."""
+    """Test builds take their <next>-rc.<N> version from pocket-dev-tools."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.repo = Path(self.tmp.name)
-        self.git("init", "-q")
-        self.commit("release")
-        self.git("tag", "v0.7.8")
+        self.tools = Path(self.tmp.name)
+        # A stand-in for the shared script, which pocket-dev-tools tests itself.
+        (self.tools / "pocket_version.py").write_text(
+            "import os, sys\n"
+            "args = sys.argv[1:]\n"
+            "assert args[0] == '--repo', args\n"
+            "next = os.environ.get('NEXT_VERSION')\n"
+            "if next == 'old':\n"
+            "    print('pocket_version: NEXT_VERSION must be newer than v0.7.8', file=sys.stderr)\n"
+            "    sys.exit(1)\n"
+            "print((next or '0.7.9') + '-rc.2')\n")
+        env = {"POCKET_DEV_TOOLS_ROOT": str(self.tools), "NEXT_VERSION": "9.9.9"}
+        self.enterContext(patch.dict(os.environ, env))
 
-    def git(self, *args):
-        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
-                       check=True, capture_output=True)
+    def test_uses_the_shared_script(self):
+        self.assertEqual(pipeline.test_version(Path(".")), "v0.7.9-rc.2")
+        self.assertEqual(pipeline.test_version(Path("."), "0.8.0"), "v0.8.0-rc.2")
 
-    def commit(self, message):
-        self.git("commit", "-q", "--allow-empty", "-m", message)
+    def test_reports_the_shared_script_error(self):
+        with self.assertRaisesRegex(ValueError, "^NEXT_VERSION must be newer than v0.7.8$"):
+            pipeline.test_version(Path("."), "old")
 
-    def test_counts_commits_since_the_last_release(self):
-        self.assertEqual(pipeline.test_version(self.repo), "v0.7.9-rc.0")
-        self.commit("one")
-        self.commit("two")
-        self.git("tag", "v0.7.9-rc.2")
-        self.assertEqual(pipeline.test_version(self.repo), "v0.7.9-rc.2")
-        self.assertEqual(pipeline.test_version(self.repo, "0.8.0"), "v0.8.0-rc.2")
-
-    def test_rejects_a_next_version_that_is_not_newer(self):
-        with self.assertRaisesRegex(ValueError, "newer"):
-            pipeline.test_version(self.repo, "0.7.8")
+    def test_explains_a_missing_checkout(self):
+        os.environ["POCKET_DEV_TOOLS_ROOT"] = str(self.tools / "missing")
+        with self.assertRaisesRegex(ValueError, "POCKET_DEV_TOOLS_ROOT"):
+            pipeline.test_version(Path("."))
 
     def test_test_version_is_a_valid_core_version(self):
-        version = pipeline.test_version(self.repo)
+        version = pipeline.test_version(Path("."))
         core = json.loads(pipeline.release_core_json(json.dumps(
             {"core": {"metadata": {}, "framework": {}, "cores": [{"filename": "os25.rbf_r"}]}}), version))
-        self.assertEqual(core["core"]["metadata"]["version"], "0.7.9-rc.0")
+        self.assertEqual(core["core"]["metadata"]["version"], "0.7.9-rc.2")
+
 
 if __name__ == "__main__":
     unittest.main()

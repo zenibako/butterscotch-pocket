@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -142,33 +143,43 @@ def build_core(source, output):
     return programs
 
 
-def test_version(source, next_version=None):
-    """Return the core version for a test build of the next release: <next>-rc.<N>.
+def shared_tools_root():
+    """Find the pocket-dev-tools checkout that owns the shared release scripts.
 
-    N counts commits since the newest vX.Y.Z tag reachable from HEAD, so it
-    sorts above the last release and below the next one, and every machine
-    numbers a commit the same way. <next> is NEXT_VERSION when given, else the
-    last release with its patch number bumped.
+    POCKET_DEV_TOOLS_ROOT wins, then the legacy POCKET_HARNESS_ROOT, then a
+    sibling pocket-dev-tools or pocket-harness checkout.
     """
-    stable = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
-    tags = [tag for tag in git(source, "tag", "--merged", "HEAD", "--list", "v*").split()
-            if stable.fullmatch(tag)]
-    if not tags:
-        raise ValueError("no vX.Y.Z release tag reachable from HEAD; run `git fetch --tags`")
-    def parse(tag):
-        return tuple(int(part) for part in stable.fullmatch(tag).groups())
-    tag = max(tags, key=parse)
-    last = parse(tag)
+    for name in ("POCKET_DEV_TOOLS_ROOT", "POCKET_HARNESS_ROOT"):
+        if os.environ.get(name):
+            return Path(os.environ[name])
+    for name in ("pocket-dev-tools", "pocket-harness"):
+        if (REPO_ROOT.parent / name / "pocket_version.py").is_file():
+            return REPO_ROOT.parent / name
+    return None
+
+
+def test_version(source, next_version=None):
+    """Return the core version for a test build of the next release: v<next>-rc.<N>.
+
+    Every Pocket port numbers test builds with pocket-dev-tools'
+    pocket_version.py, so they follow one rule: N counts commits since the
+    newest vX.Y.Z tag reachable from HEAD and <next> is NEXT_VERSION when
+    given, else the last release with its patch number bumped.
+    """
+    root = shared_tools_root()
+    script = root / "pocket_version.py" if root else None
+    if not script or not script.is_file():
+        raise ValueError("test builds need a pocket-dev-tools checkout with pocket_version.py; "
+                         "set POCKET_DEV_TOOLS_ROOT or clone it next to this repository")
+    env = dict(os.environ)
+    env.pop("NEXT_VERSION", None)
     if next_version:
-        if not stable.fullmatch("v" + next_version.removeprefix("v")):
-            raise ValueError("NEXT_VERSION must be MAJOR.MINOR.PATCH")
-        upcoming = parse("v" + next_version.removeprefix("v"))
-        if upcoming <= last:
-            raise ValueError(f"NEXT_VERSION must be newer than {tag}")
-    else:
-        upcoming = (last[0], last[1], last[2] + 1)
-    count = int(git(source, "rev-list", "--count", f"{tag}..HEAD"))
-    return "v%d.%d.%d-rc.%d" % (*upcoming, count)
+        env["NEXT_VERSION"] = next_version
+    result = subprocess.run([sys.executable, str(script), "--repo", str(source)],
+                            env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip().removeprefix("pocket_version: ") or "pocket_version.py failed")
+    return "v" + result.stdout.strip()
 
 
 def release_core_json(contents, version):
@@ -209,6 +220,8 @@ def package_core(source, programs, output, version):
             raise ValueError(f"program artifact hash mismatch: {name}")
     if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?", version):
         raise ValueError("version must be a semantic release version")
+    if len(version.removeprefix("v")) > 31:
+        raise ValueError("core.json version must be 31 characters or fewer")
     files = {}
     for name in DIST_FILES:
         path = source / "src/openfpga/dist" / name
