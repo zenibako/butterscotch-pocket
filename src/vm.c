@@ -2300,7 +2300,9 @@ static void handlePushEnv(VMContext* ctx, OpWord opword, uint32_t instrAddr) {
     int32_t target = RValue_toInt32(targetValue);
     // BC17: -9 (INSTANCE_STACKTOP) means "pop again for the real target"
     if (IS_WAD17_OR_HIGHER(ctx) && target == INSTANCE_STACKTOP) {
-        target = stackPopInt32(ctx);
+        // Keep the real target's value so an undefined one still maps to noone below.
+        targetValue = stackPop(ctx);
+        target = RValue_toInt32(targetValue);
     }
     if (targetValue.type == RVALUE_UNDEFINED) target = INSTANCE_NOONE;
 

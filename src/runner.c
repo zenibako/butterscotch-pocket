@@ -1156,6 +1156,12 @@ void Runner_draw(Runner* runner) {
                     }
                 }
             }
+            // Sequence_draw runs instance Draw events, which can destroy or reallocate runtime layers.
+            runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+            if (runtimeLayer == nullptr) {
+                Runner_popLayerShader(runner, previousShader);
+                continue;
+            }
 
             // Everything after this point is static/parsed layers from the Room itself
             RoomLayer* parsedLayer = Runner_findRoomLayerById(runner->currentRoom, (int32_t) runtimeLayer->id);

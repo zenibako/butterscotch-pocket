@@ -470,7 +470,8 @@ static inline void MatrixStack_push(MatrixStack* stack, const Matrix4f* matrix) 
 }
 
 static inline void MatrixStack_pop(MatrixStack* stack) {
-    if (stack->top < 1) {
+    // Popping the last pushed matrix leaves the stack empty (top == -1), as matrix_stack_is_empty expects.
+    if (stack->top < 0) {
         logError("Matrix stack underflow!\n");
         abort();
     }
