@@ -358,11 +358,12 @@ void ofPlatformSetUncapped(bool uncapped) {
     g_uncapped = uncapped;
 }
 
-bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless) {
+bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless, bool fullscreen) {
     (void) reqW;
     (void) reqH;
     (void) title;
     (void) headless;
+    (void) fullscreen;
 
     /* Stay on the text terminal until the first frame is ready, so load-time
      * log lines (and any early failure) are visible on the device. */

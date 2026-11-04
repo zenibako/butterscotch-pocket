@@ -64,6 +64,9 @@ jobs:
     if: needs.Changes.outputs.haiku == 'true'
     uses: ./.github/workflows/build-haiku.yml
 
+  Illumos:
+    uses: ./.github/workflows/build-illumos.yml
+
   Consoles:
     needs: Changes
     if: >-

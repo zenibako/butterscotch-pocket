@@ -52,7 +52,7 @@ def build_tools(destination):
         raise PreparationError('C compiler not found. Use a prebuilt converter bundle, or set CC to a GCC-compatible compiler (MinGW GCC on Windows).')
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    includes = [src, src/'sw', src/'image', src/'video', src/'debug_font', src/'openfpga/platform',
+    includes = [src, src/'sw', src/'image', src/'video', src/'openfpga/platform',
                 vendor/'stb/ds', vendor/'stb/image', vendor/'stb/vorbis', vendor/'bzip2']
     flags = ['-O2', '-std=gnu99', '-DOF_HOST_TOOL', '-DPIXEL_SIZE=16', '-DENABLE_SW_RENDERER',
              '-DENABLE_WAD16', '-DENABLE_WAD17', '-DUSE_FLOAT_REALS', '-DNO_RVALUE_INT64',
