@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04] # Pocket targets only; macOS runners stall. `tools` still cross-builds all six native bundles.
     runs-on: ${{ matrix.os }}
     defaults:
       run:
