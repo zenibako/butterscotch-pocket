@@ -271,6 +271,7 @@ int32_t Sequence_create(Runner* runner, int32_t layerId, int32_t assetIndex, flo
     el.visible = true;
     el.alpha = 1.0f;
     el.blend = 0xFFFFFFu;
+    Runner_invalidateLayerElementLookup(runner);
     arrput(layer->elements, el);
     runner->drawableListStructureDirty = true;
     return elementId;
@@ -322,6 +323,7 @@ void Sequence_destroy(Runner* runner, int32_t elementId) {
     if (el == nullptr || el->type != RuntimeLayerElementType_Sequence) return;
     RuntimeSequence* seq = el->sequenceElement;
     seq->destroyed = true;
+    Runner_invalidateLayerElementLookup(runner);
     arrdel(layer->elements, el - layer->elements);
     if (seq->nodes != nullptr) destroyNodeInstances(seq, seq->nodes, seq->asset->trackCount);
     Sequence_release(seq);

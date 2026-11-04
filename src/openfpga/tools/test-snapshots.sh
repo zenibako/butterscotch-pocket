@@ -18,7 +18,7 @@ export ASAN_OPTIONS=detect_leaks=0
     "$repo/tests/opword_test.c" -o "$out/opword"
 "$out/opword"
 "$cc" "${flags[@]}" -I"$repo/vendor/miniz" -I"$repo/vendor/zstd" \
-    "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" \
+    "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" "$repo/src/sequence.c" \
     "$repo/src/instance.c" "$repo/src/gml_array.c" "$repo/src/gml_method.c" "$repo/src/int_rvalue_hashmap.c" \
     "$repo/src/spatial_grid.c" "$repo/src/random.c" "$repo/src/ini.c" \
     "$repo/src/stb_ds.c" "$repo/src/gettime.c" "$repo/src/data_win.c" \
@@ -29,7 +29,7 @@ export ASAN_OPTIONS=detect_leaks=0
 "$out/runner"
 echo "runner snapshot: passed"
 "$cc" "${flags[@]}" -DENABLE_WAD17 -I"$repo/vendor/miniz" -I"$repo/vendor/zstd" \
-    "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" \
+    "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" "$repo/src/sequence.c" \
     "$repo/src/instance.c" "$repo/src/gml_array.c" "$repo/src/gml_method.c" "$repo/src/int_rvalue_hashmap.c" \
     "$repo/src/spatial_grid.c" "$repo/src/random.c" "$repo/src/ini.c" \
     "$repo/src/stb_ds.c" "$repo/src/gettime.c" "$repo/src/data_win.c" \
@@ -43,7 +43,7 @@ echo "runner snapshot (WAD 17): passed"
 for wad in 16 17; do
     "$cc" "${flags[@]}" -DENABLE_WAD"$wad" -DENABLE_SW_RENDERER \
         -I"$repo/vendor/miniz" -I"$repo/vendor/zstd" \
-        "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" \
+        "$repo/tests/runner_snapshot_test.c" "$repo/src/runner_snapshot.c" "$repo/src/runner.c" "$repo/src/sequence.c" \
         "$repo/src/instance.c" "$repo/src/gml_array.c" "$repo/src/gml_method.c" "$repo/src/int_rvalue_hashmap.c" \
         "$repo/src/spatial_grid.c" "$repo/src/random.c" "$repo/src/ini.c" \
         "$repo/src/stb_ds.c" "$repo/src/gettime.c" "$repo/src/data_win.c" \
