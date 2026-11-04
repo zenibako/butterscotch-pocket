@@ -6,7 +6,9 @@ first. Active release inputs live in `src/openfpga/release`; the Go module is
 ## Test builds
 
 Device test zips run `package-core` without `--version`, so core.json reports
-`<next>-rc.<N>` (N = commits since the last `vX.Y.Z` tag; set
+`<next>-rc.<N>` from pocket-dev-tools' shared `pocket_version.py` (found
+through `POCKET_DEV_TOOLS_ROOT` or a sibling checkout; N = commits since the
+last `vX.Y.Z` tag; set
 `NEXT_VERSION=X.Y.Z` when the next release is not a patch bump; run
 `git fetch --tags`, or `git fetch --unshallow --tags` in a shallow clone, if no tag is found). Never package a test build as the
 published version or as `0.0.0-dev`. A bench core made from a test package
