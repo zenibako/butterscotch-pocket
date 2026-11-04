@@ -80,7 +80,6 @@ BS_VENDOR = $(BS)/vendor
 BS_CORE_SRCS   = $(wildcard $(BS_SRC)/*.c)
 BS_SW_SRCS     = $(wildcard $(BS_SRC)/sw/*.c)
 BS_IMAGE_SRCS  = $(wildcard $(BS_SRC)/image/*.c)
-BS_FONT_SRCS   = $(wildcard $(BS_SRC)/debug_font/*.c)
 BS_VIDEO_SRCS  = $(BS_SRC)/video/null_video.c
 BS_STB_SRCS    = $(BS_SRC)/embedded/stb_impl.c
 BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
@@ -94,14 +93,13 @@ BS_PHYSICS_SRCS = $(BS_SRC)/physics/physics.c $(BS_SRC)/physics/disabled/physics
 SRCS = main.c platform/game_$(GAME).c platform/of_platform.c platform/of_diag.c platform/of_log.c \
        platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c \
        platform/of_strings.c platform/of_buttons.c platform/of_gamepad.c platform/of_save_fs.c platform/of_native.c platform/of_focus.c platform/of_focus_stats.c \
-       platform/of_font.c platform/of_menu.c platform/of_state_requests.c \
+       platform/of_font.c platform/debug_font.c platform/of_menu.c platform/of_state_requests.c \
        platform/of_snapshot_envelope.c \
-       $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) $(BS_FONT_SRCS) \
+       $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS) $(BS_PHYSICS_SRCS)
 SRCS_CXX =
 
 BS_INCLUDES = -Iplatform -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
-              -I$(BS_SRC)/debug_font \
               -I$(BS_VENDOR)/stb/ds -I$(BS_VENDOR)/stb/image -I$(BS_VENDOR)/stb/vorbis \
               -I$(BS_VENDOR)/bzip2 -I$(BS_VENDOR)/sha1 -I$(BS_VENDOR)/md5 \
               -I$(BS_VENDOR)/base64 -I$(BS_VENDOR)/miniz -I$(BS_VENDOR)/zstd
