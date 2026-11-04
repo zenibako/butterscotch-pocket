@@ -154,7 +154,7 @@ def test_version(source, next_version=None):
     tags = [tag for tag in git(source, "tag", "--merged", "HEAD", "--list", "v*").split()
             if stable.fullmatch(tag)]
     if not tags:
-        raise ValueError("no vX.Y.Z release tag reachable from HEAD; run `git fetch --tags`")
+        raise ValueError("no vX.Y.Z release tag reachable from HEAD; run `git fetch --tags` (`git fetch --unshallow --tags` in a shallow clone)")
     def parse(tag):
         return tuple(int(part) for part in stable.fullmatch(tag).groups())
     tag = max(tags, key=parse)
@@ -168,7 +168,10 @@ def test_version(source, next_version=None):
     else:
         upcoming = (last[0], last[1], last[2] + 1)
     count = int(git(source, "rev-list", "--count", f"{tag}..HEAD"))
-    return "v%d.%d.%d-rc.%d" % (*upcoming, count)
+    version = "v%d.%d.%d-rc.%d" % (*upcoming, count)
+    if len(version) - 1 > 31:
+        raise ValueError(f"version is longer than the 31 characters core.json allows: {version}")
+    return version
 
 
 def release_core_json(contents, version):
@@ -209,6 +212,8 @@ def package_core(source, programs, output, version):
             raise ValueError(f"program artifact hash mismatch: {name}")
     if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?", version):
         raise ValueError("version must be a semantic release version")
+    if len(version.removeprefix("v")) > 31:
+        raise ValueError("core.json version must be 31 characters or fewer")
     files = {}
     for name in DIST_FILES:
         path = source / "src/openfpga/dist" / name

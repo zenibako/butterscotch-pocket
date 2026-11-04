@@ -8,7 +8,7 @@ first. Active release inputs live in `src/openfpga/release`; the Go module is
 Device test zips run `package-core` without `--version`, so core.json reports
 `<next>-rc.<N>` (N = commits since the last `vX.Y.Z` tag; set
 `NEXT_VERSION=X.Y.Z` when the next release is not a patch bump; run
-`git fetch --tags` if no tag is found). Never package a test build as the
+`git fetch --tags`, or `git fetch --unshallow --tags` in a shallow clone, if no tag is found). Never package a test build as the
 published version or as `0.0.0-dev`. A bench core made from a test package
 keeps its version. Name the zip after that version and the short commit, for
 example `butterscotch-v0.7.10-rc.3-<sha>-<topic>.zip`. Pocket Sync still offers

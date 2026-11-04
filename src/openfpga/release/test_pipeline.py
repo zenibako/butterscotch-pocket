@@ -501,6 +501,10 @@ class TestVersionTests(unittest.TestCase):
         self.assertEqual(pipeline.test_version(self.repo), "v0.7.9-rc.2")
         self.assertEqual(pipeline.test_version(self.repo, "0.8.0"), "v0.8.0-rc.2")
 
+    def test_rejects_versions_longer_than_core_json_allows(self):
+        with self.assertRaisesRegex(ValueError, "31"):
+            pipeline.test_version(self.repo, "0.7." + "9" * 30)
+
     def test_rejects_a_next_version_that_is_not_newer(self):
         with self.assertRaisesRegex(ValueError, "newer"):
             pipeline.test_version(self.repo, "0.7.8")
