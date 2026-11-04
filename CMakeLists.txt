@@ -53,9 +53,17 @@ else()
 endif()
 
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    include(CheckLinkerFlag)
+    
     if(MSVC)
         # equivalent to -fomit-frame-pointer
         add_compile_options(/Oy)
+
+        # equivalent to -Wl,--icf=all
+        check_linker_flag(C "/OPT:ICF" HAS_MSVC_ICF)
+        if(HAS_MSVC_ICF)
+            add_link_options("$<$<NOT:$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/OPT:ICF>")
+        endif()
     else()
         add_compile_options(-ffast-math -fno-finite-math-only)
 
@@ -65,13 +73,18 @@ if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         if(HAS_FOMIT_FRAME_POINTER)
             add_compile_options(-fomit-frame-pointer)
         endif()
+
+        # bfd sucks ass but this saves a couple kbs of binary size on linkers that do support this
+        check_linker_flag(C "-Wl,--icf=all" HAS_ICF_ALL)
+        if(HAS_ICF_ALL)
+            add_link_options("-Wl,--icf=all")
+        endif()
     endif()
 endif()
 
 set(PLATFORM "cli" CACHE STRING "Platform backend")
 set(BACKEND "" CACHE STRING "Desktop platform backend")
 set(AUDIO_BACKEND "" CACHE STRING "Audio backend")
-set(IMAGE_DECODER "wuffs" CACHE STRING "Image decoder")
 
 if(PLATFORM STREQUAL "cli" AND BACKEND STREQUAL "")
     message(FATAL_ERROR "You need to set a BACKEND!")
@@ -172,6 +185,7 @@ file(GLOB SOURCES src/*.c)
 # Pocket snapshots and Zstandard are built by the port and its dedicated tests.
 # Generic frontends do not use the codec, including the legacy compiler targets.
 list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/runner_snapshot.c")
+file(GLOB DEFAULT_FONT_SOURCES src/default_font/*.c)
 if(ENABLE_FMOD)
     list(APPEND SOURCES src/fmod/fmod.c src/fmod/fmod_bank.c src/fmod/fsb.c src/fmod/fmod_dsp.c)
 endif()
@@ -193,9 +207,9 @@ endif()
 file(GLOB PLATFORM_SOURCES src/${PLATFORM}/*.c)
 
 if(PLATFORM STREQUAL "android")
-    add_library(butterscotch SHARED ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
+    add_library(butterscotch SHARED ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES} ${DEFAULT_FONT_SOURCES})
 else()
-    add_executable(butterscotch ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES})
+    add_executable(butterscotch ${SOURCES} ${PLATFORM_SOURCES} ${AUDIO_SOURCES} ${DEFAULT_FONT_SOURCES})
 endif()
 
 # Video playback backend
@@ -341,29 +355,17 @@ target_compile_options(sha1 PRIVATE -w)
 target_sources(butterscotch PRIVATE vendor/base64/base64.c)
 target_include_directories(butterscotch PUBLIC vendor/base64)
 
-# Image decoding deps
-if (IMAGE_DECODER STREQUAL "wuffs")
-    # wuffs
-    target_sources(butterscotch PRIVATE vendor/wuffs/wuffs-v0.4.c)
-    target_include_directories(butterscotch SYSTEM PUBLIC vendor/wuffs)
-    add_compile_definitions(USE_WUFFS_IMGDEC)
-elseif(IMAGE_DECODER STREQUAL "stb")
-    # bzip2 for GMQOZ
-    add_library(bzip2 STATIC
-        vendor/bzip2/bz_internal_error.c
-        vendor/bzip2/bzlib.c
-        vendor/bzip2/crctable.c
-        vendor/bzip2/decompress.c
-        vendor/bzip2/huffman.c
-        vendor/bzip2/randtable.c
-    )
-    target_include_directories(bzip2 PUBLIC vendor/bzip2)
-    target_compile_options(bzip2 PRIVATE -w)
-    add_compile_definitions(USE_STB_IMGDEC)
-endif()
-
-# stb_image (needed for write regardless)
-target_include_directories(butterscotch PUBLIC vendor/stb/image)
+# bzip2
+add_library(bzip2 STATIC
+    vendor/bzip2/bz_internal_error.c
+    vendor/bzip2/bzlib.c
+    vendor/bzip2/crctable.c
+    vendor/bzip2/decompress.c
+    vendor/bzip2/huffman.c
+    vendor/bzip2/randtable.c
+)
+target_include_directories(bzip2 PUBLIC vendor/bzip2)
+target_compile_options(bzip2 PRIVATE -w)
 
 # miniz 3.1.2 (https://github.com/richgel999/miniz, tag 3.1.2, commit 77d0dce86277).
 # All files vendored byte-for-byte from that tag except:
@@ -471,10 +473,6 @@ if(PLATFORM STREQUAL "cli" OR PLATFORM STREQUAL "vita" OR PLATFORM STREQUAL "swi
     target_sources(butterscotch PRIVATE ${GL_SOURCES})
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/image)
 
-    file(GLOB DEBUG_FONT_SOURCES src/debug_font/*.c)
-    target_sources(butterscotch PRIVATE ${DEBUG_FONT_SOURCES})
-    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/debug_font)
-
     if (MSVC)
         target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/compat/getopt)
         add_compile_definitions(NO_STRTOK_R)
@@ -511,16 +509,16 @@ if(PLATFORM STREQUAL "cli" OR PLATFORM STREQUAL "vita" OR PLATFORM STREQUAL "swi
         add_compile_definitions(ENABLE_FILE_PICKER)
     endif()
 
+    # stb_image
+    target_include_directories(butterscotch PUBLIC vendor/stb/image)
+
     if (ENABLE_FILE_PICKER)
         # tinyfd
         target_sources(butterscotch PRIVATE vendor/tinyfd/tinyfiledialogs.c)
         target_include_directories(butterscotch PUBLIC vendor/tinyfiledialogs)
     endif()
 
-    set(PLATFORM_LIBRARIES stb_ds sha1 stb_vorbis)
-    if (IMAGE_DECODER STREQUAL "stb")
-        set(PLATFORM_LIBRARIES ${PLATFORM_LIBRARIES} bzip2)
-    endif()
+    set(PLATFORM_LIBRARIES bzip2 stb_ds sha1 stb_vorbis)
     if(NOT PLATFORM STREQUAL "vita" AND NOT PLATFORM STREQUAL "switch")
         if(ENABLE_LEGACY_GL OR ENABLE_MODERN_GL OR BACKEND STREQUAL "glfw3" OR BACKEND STREQUAL "glfw2")
             # GLAD
@@ -731,7 +729,7 @@ elseif(PLATFORM STREQUAL "android")
     if (NOT ENABLE_MODERN_GL)
         message(FATAL_ERROR "Android requires modern gl!")
     endif()
-    file(GLOB GL_SOURCES src/gl/*.c src/gl_common/*.c src/image/*.c src/debug_font/*.c)
+    file(GLOB GL_SOURCES src/gl/*.c src/gl_common/*.c src/image/*.c)
     target_sources(butterscotch PRIVATE ${GL_SOURCES})
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl)
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl_common)
@@ -773,20 +771,14 @@ elseif(PLATFORM STREQUAL "android")
     # stb_vorbis (for miniaudio's OGG decoding)
     target_include_directories(butterscotch PUBLIC vendor/stb/vorbis)
     # bzip2
-    if (IMAGE_DECODER STREQUAL "stb")
-        target_link_libraries(butterscotch PRIVATE bzip2)
-    endif()
+    target_link_libraries(butterscotch PRIVATE bzip2)
 
     # Android NDK system libraries:
     # - log: __android_log_*
     # - GLESv3: OpenGL ES 3.0 functions
     # - OpenSLES: miniaudio's OpenSL ES backend (it dlopen's libaaudio.so at runtime when available, so no link-time aaudio dep)
-    target_link_libraries(butterscotch PRIVATE log GLESv3 OpenSLES stb_ds sha1 stb_vorbis)
+    target_link_libraries(butterscotch PRIVATE log GLESv3 OpenSLES bzip2 stb_ds sha1 stb_vorbis)
 elseif(PLATFORM STREQUAL "ps2")
-    file(GLOB DEBUG_FONT_SOURCES src/debug_font/*.c)
-    target_sources(butterscotch PRIVATE ${DEBUG_FONT_SOURCES})
-    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/debug_font)
-
     # The PS2 EE has a single-precision FPU only, so double is software-emulated
     add_compile_definitions(USE_FLOAT_REALS)
     # By disabling Int64 support, we can fit the entire RValue struct in 8 bytes, improving performance and memory usage
@@ -968,11 +960,9 @@ elseif(PLATFORM STREQUAL "ps3")
         message(FATAL_ERROR "PS3 requires legacy gl!")
     endif()
     file(GLOB GL_SOURCES src/gl_common/*.c src/gl_legacy/*.c src/image/*.c)
-    file(GLOB DEBUG_FONT_SOURCES src/debug_font/*.c)
-    target_sources(butterscotch PRIVATE ${GL_SOURCES} ${DEBUG_FONT_SOURCES})
+    target_sources(butterscotch PRIVATE ${GL_SOURCES})
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl_legacy)
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/image)
-    target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/debug_font)
     target_include_directories(butterscotch PRIVATE ${CMAKE_SOURCE_DIR}/src/gl_common)
 
     # ps3gl
@@ -1030,7 +1020,7 @@ elseif(PLATFORM STREQUAL "ps3")
     target_include_directories(butterscotch PRIVATE ${SDL2_INCLUDE_DIRS})
     # mojoal calls SDL atomics/threads, so SDL2 must link after it (static link order)
     target_link_libraries(mojoal PUBLIC ${SDL2_LIBRARIES})
-    target_link_libraries(butterscotch PRIVATE sha1 ps3gl mojoal ${SDL2_LIBRARIES} gcm_sys rsx sysutil io audio rt lv2 m stb_ds stb_vorbis)
+    target_link_libraries(butterscotch PRIVATE bzip2 sha1 ps3gl mojoal ${SDL2_LIBRARIES} gcm_sys rsx sysutil io audio rt lv2 m stb_ds stb_vorbis)
 elseif(PLATFORM STREQUAL "vita")
 else()
     message(FATAL_ERROR "Unknown platform! ${PLATFORM}")
