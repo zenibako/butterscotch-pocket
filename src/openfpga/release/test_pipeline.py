@@ -475,5 +475,41 @@ class AssemblyTests(ReleaseFixture):
             pipeline.seal_release(self.source, self.runtime, self.output)
         self.assertFalse((self.output / "SHA256SUMS").exists())
 
+
+class TestVersionTests(unittest.TestCase):
+    """Number device test builds as <next>-rc.<N> from the release tags."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        self.git("init", "-q")
+        self.commit("release")
+        self.git("tag", "v0.7.8")
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                       check=True, capture_output=True)
+
+    def commit(self, message):
+        self.git("commit", "-q", "--allow-empty", "-m", message)
+
+    def test_counts_commits_since_the_last_release(self):
+        self.assertEqual(pipeline.test_version(self.repo), "v0.7.9-rc.0")
+        self.commit("one")
+        self.commit("two")
+        self.git("tag", "v0.7.9-rc.2")
+        self.assertEqual(pipeline.test_version(self.repo), "v0.7.9-rc.2")
+        self.assertEqual(pipeline.test_version(self.repo, "0.8.0"), "v0.8.0-rc.2")
+
+    def test_rejects_a_next_version_that_is_not_newer(self):
+        with self.assertRaisesRegex(ValueError, "newer"):
+            pipeline.test_version(self.repo, "0.7.8")
+
+    def test_test_version_is_a_valid_core_version(self):
+        version = pipeline.test_version(self.repo)
+        core = json.loads(pipeline.release_core_json(json.dumps(
+            {"core": {"metadata": {}, "framework": {}, "cores": [{"filename": "os25.rbf_r"}]}}), version))
+        self.assertEqual(core["core"]["metadata"]["version"], "0.7.9-rc.0")
+
 if __name__ == "__main__":
     unittest.main()

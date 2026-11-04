@@ -121,7 +121,12 @@ python3 src/openfpga/release/pipeline.py build-tools
 python3 src/openfpga/release/pipeline.py assemble-release
 ```
 
-Replace `vX.Y.Z` with the intended release version. Use a fresh artifact output
+Replace `vX.Y.Z` with the intended release version. For a device test build,
+omit `--version`: the core then reports `<next>-rc.<N>`, where N counts the
+commits since the last `vX.Y.Z` tag and the next version is the last release
+with its patch bumped (set `NEXT_VERSION=X.Y.Z` for a minor or major release).
+A test build never reports the published version, and later builds of the same
+release sort higher. Use a fresh artifact output
 folder for each release. `assemble-release` requires the complete expected
 asset set and refuses missing or unexpected files before writing `SHA256SUMS`.
 It also includes source archives and license/provenance records. The core

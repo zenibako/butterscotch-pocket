@@ -142,6 +142,35 @@ def build_core(source, output):
     return programs
 
 
+def test_version(source, next_version=None):
+    """Return the core version for a test build of the next release: <next>-rc.<N>.
+
+    N counts commits since the newest vX.Y.Z tag reachable from HEAD, so it
+    sorts above the last release and below the next one, and every machine
+    numbers a commit the same way. <next> is NEXT_VERSION when given, else the
+    last release with its patch number bumped.
+    """
+    stable = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+    tags = [tag for tag in git(source, "tag", "--merged", "HEAD", "--list", "v*").split()
+            if stable.fullmatch(tag)]
+    if not tags:
+        raise ValueError("no vX.Y.Z release tag reachable from HEAD; run `git fetch --tags`")
+    def parse(tag):
+        return tuple(int(part) for part in stable.fullmatch(tag).groups())
+    tag = max(tags, key=parse)
+    last = parse(tag)
+    if next_version:
+        if not stable.fullmatch("v" + next_version.removeprefix("v")):
+            raise ValueError("NEXT_VERSION must be MAJOR.MINOR.PATCH")
+        upcoming = parse("v" + next_version.removeprefix("v"))
+        if upcoming <= last:
+            raise ValueError(f"NEXT_VERSION must be newer than {tag}")
+    else:
+        upcoming = (last[0], last[1], last[2] + 1)
+    count = int(git(source, "rev-list", "--count", f"{tag}..HEAD"))
+    return "v%d.%d.%d-rc.%d" % (*upcoming, count)
+
+
 def release_core_json(contents, version):
     """Apply release metadata while preserving the checkout's core identifiers."""
     core = json.loads(contents)
@@ -399,7 +428,7 @@ def main():
     parser.add_argument("--runtime-source", type=Path, default=POCKET_ROOT / "out/runtime-source")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--programs", type=Path, default=POCKET_ROOT / "out/build/programs")
-    parser.add_argument("--version", default="0.0.0-dev")
+    parser.add_argument("--version", help="release version; omit for a numbered test build (<next>-rc.<N>)")
     args = parser.parse_args()
     default_output = POCKET_ROOT / ("out/build" if args.command == "build-core" else "out/artifacts")
     source, output = args.source.resolve(), (args.out or default_output).resolve()
@@ -408,7 +437,10 @@ def main():
     elif args.command == "build-core":
         build_core(source, output)
     elif args.command == "package-core":
-        package_core(source, args.programs.resolve(), output, args.version)
+        version = args.version or test_version(source, os.environ.get("NEXT_VERSION"))
+        if not args.version:
+            print(f"test build version: {version}")
+        package_core(source, args.programs.resolve(), output, version)
     elif args.command == "build-tools":
         build_tools(output)
     elif args.command == "assemble-release":
