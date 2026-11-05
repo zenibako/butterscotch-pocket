@@ -94,7 +94,7 @@ SRCS = main.c platform/game_$(GAME).c platform/of_platform.c platform/of_diag.c 
        platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c \
        platform/of_strings.c platform/of_buttons.c platform/of_gamepad.c platform/of_save_fs.c platform/of_native.c platform/of_focus.c platform/of_focus_stats.c \
        platform/of_font.c platform/debug_font.c platform/of_menu.c platform/of_state_requests.c \
-       platform/of_snapshot_envelope.c platform/of_gpu_fill.c \
+       platform/of_snapshot_envelope.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS) $(BS_PHYSICS_SRCS)
 SRCS_CXX =

@@ -27,8 +27,6 @@ AudioSystem *platformCreateAudioSystem(void);
 FileSystem *platformCreateFileSystem(void);
 void platformDestroyFileSystem(FileSystem *base);
 uint16_t *platformAcquireFramebuffer(int width, int height);
-/* Fills the whole of a buffer from platformAcquireFramebuffer with one colour, or returns false for the renderer to do it. */
-bool platformFillFramebuffer(uint16_t *fb, int width, int height, uint16_t color);
 void platformSetNextFramebuffer(uint16_t *framebuffer, int width, int height, int bpp);
 bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *dest);
 uint64_t platformPackRefusedNanos(void);

@@ -145,9 +145,6 @@ int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed) { (void) out; (
 // the start of every frame and may return a different buffer each time; the
 // contents are undefined, the renderer clears them.
 uintpixel_t* platformAcquireFramebuffer(int width, int height);
-// Optional: fills the whole of such a buffer with one colour (a hardware
-// clear), or returns false for the renderer to do it.
-bool platformFillFramebuffer(uintpixel_t* fb, int width, int height, uintpixel_t color);
 
 static bool swrAcquirePlatformFramebuffer(SWRenderer* swr, int width, int height)
 {
@@ -936,16 +933,6 @@ static void SWRenderer_drawSurfaceTiled(Renderer* renderer, int32_t surfaceID, f
     }
 }
 
-// Fills the whole main buffer with one colour, by the platform's hardware
-// where it has a way.
-static void swrFillMain(SWRenderer* swr, uintpixel_t color)
-{
-#ifdef SW_PLATFORM_FRAMEBUFFER
-    if (swr->fbIsPlatform && platformFillFramebuffer(swr->mainFb, swr->mainWidth, swr->mainHeight, color)) return;
-#endif
-    swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
-}
-
 // The main loop clears the window (clearFrameBuffer) before every frame, and
 // the runner then clears the whole target again with the room's background
 // colour before drawing views. On slow memory two full-screen fills per frame
@@ -957,7 +944,7 @@ static void swrFlushPendingClear(SWRenderer* swr)
     if (!swr->pendingClear) return;
     swr->pendingClear = false;
     if (!swr->mainFb) return;
-    swrFillMain(swr, swr->pendingClearColor);
+    swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, swr->pendingClearColor);
 }
 
 // A clear of the whole main buffer is held back as well: a room's tiles
@@ -973,7 +960,7 @@ void swrClearSettle(SWRenderer* swr)
         SWR_NOTED("  of which: held clear and tiled written", swrTiledHeldWrite(swr, swr->clearHeldColor));
         return;
     }
-    SWR_NOTED("  of which: held clear written", swrFillMain(swr, swr->clearHeldColor));
+    SWR_NOTED("  of which: held clear written", swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, swr->clearHeldColor));
 }
 
 static void SWRenderer_clearScreen(Renderer* renderer, uint32_t color, float alpha)
