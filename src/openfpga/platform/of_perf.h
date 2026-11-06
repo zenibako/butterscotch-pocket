@@ -111,7 +111,7 @@ void ofPerfTakeTotals(OfPerfTotals *out);
 /* Marks the start of a phase; time since the previous mark goes to the
  * phase that was running. */
 void ofPerfPhase(OfPhase phase);
-void ofPerfFrame(uint16_t *fb, int width, int height);
+bool ofPerfFrame(uint16_t *fb, int width, int height); /* true if it drew on fb */
 /* Writes a few words in the top right corner, in the game's font (see
  * of_font.h): which way L's speed/accuracy toggle is set, or a notice. */
 void ofPerfDrawMode(uint16_t *fb, int width, int height, const char *label);

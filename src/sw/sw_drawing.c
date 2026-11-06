@@ -15,6 +15,7 @@ FORCE_INLINE void swrPlotPixel_(Renderer* renderer, int x, int y, uintpixel_t co
     if (x < swr->portX || y < swr->portY) return;
     if (x >= swr->maxX || y >= swr->maxY) return;
     
+    swrDirtyRow(swr, y, x, x + 1);
     alphaBlend(&swr->fb[y * swr->fbPitch + x], color, blendmode, alpha);
 }
 
@@ -173,6 +174,7 @@ static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixe
     if (dw <= 0) return;
     
     int blendmode = swr->blendMode;
+    swrDirtyRow(swr, dy, dx, dx + dw);
     
     if (color == color2)
     {
@@ -221,6 +223,7 @@ static void swrDrawVLineInt(Renderer* renderer, int dx, int dy, int dh, uintpixe
     if (dh <= 0) return;
     
     int blendmode = swr->blendMode;
+    swrDirtyRect(swr, dx, dy, dx + 1, dy + dh);
     
     if (color == color2)
     {
@@ -453,6 +456,7 @@ static void swrOverlayFlushHeld(SWRenderer* swr)
         fill = (uintpixel_t) (0x8000 | ((red >> 8) << 10) | ((green >> 8) << 5) | (blue >> 8));
     }
     
+    swrDirtyRectIn(swr, swr->overlayFb, swr->overlayX, swr->overlayY, swr->overlayX + swr->overlayW, swr->overlayY + swr->overlayH);
     for (int y = 0; y < swr->overlayH; y++)
     {
         uintpixel_t* dstline = &swr->overlayFb[(swr->overlayY + y) * swr->overlayPitch + swr->overlayX];
@@ -598,6 +602,7 @@ static void swrMirrorCompose(SWRenderer* swr, int layers, int step, bool readUnd
     const int fp_prec = 14;
     int cx = swr->mirrorCx, cy = swr->mirrorCy, w = swr->mirrorW, h = swr->mirrorH;
     uintpixel_t under = swr->mirrorUnder;
+    swrDirtyRect(swr, cx - w - 1, cy - h - 1, cx + w + 1, cy + h + 1); // mirrored both ways; a step of 2 can reach one past
     
     for (int y = 0; y < h; y += step)
     {
@@ -1020,6 +1025,7 @@ static void swrDrawSpriteInternal(
             for (int y = 0; y < dh; y++)
             {
                 uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+                swrDirtyRow(swr, dy + y, dx, dx + dw);
                 const uintpixel_t* srcline = &halved.buffer[(sy + y) * halfW + sx];
                 const uint8_t* covline = &coverage[(sy + y) * halfW + sx];
                 // Only the stretch of the row that has anything in it.
@@ -1125,6 +1131,7 @@ static void swrDrawSpriteInternal(
             if (cache) {
                 for (int y = 0; y < dh; ++y) {
                     uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+                    swrDirtyRow(swr, dy + y, dx, dx + dw);
                     const SWButtonPixel* row = cache->pixels + y * dw;
                     for (int x = 0; x < dw; ++x) {
                         if (row[x].covered)
@@ -1148,6 +1155,7 @@ static void swrDrawSpriteInternal(
             int row0 = sy + y * 2, row1 = row0 < bottom ? row0 + 1 : bottom;
             if (row0 > bottom) break;
             uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             for (int x = 0; x < dw; ++x) {
                 int col0 = sx + x * 2, col1 = col0 < right ? col0 + 1 : right;
                 if (col0 > right) break;
@@ -1203,6 +1211,7 @@ static void swrDrawSpriteInternal(
         for (int y = 0; y < dh; y++, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             int row0 = sy + (int)(ys2 >> fp_prec);
             if (row0 > srcBottom) break;
             int row1 = row0 < srcBottom ? row0 + 1 : -1;
@@ -1276,6 +1285,7 @@ static void swrDrawSpriteInternal(
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             const uintpixel_t* srcline;
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
@@ -1338,6 +1348,7 @@ static void swrDrawSpriteInternal(
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             const uintpixel_t* srcline;
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
@@ -1406,6 +1417,7 @@ static void swrDrawSpriteInternal(
             uintpixel_t* dstline;
             const uintpixel_t* srcline;
             dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
@@ -1431,6 +1443,7 @@ static void swrDrawSpriteInternal(
             uintpixel_t* dstline;
             const uintpixel_t* srcline;
             dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
@@ -1580,6 +1593,7 @@ static void swrDrawSpriteRotatedInternal(
     for (int cy = minYc; cy < maxYc; cy++)
     {
         uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
+        swrDirtyRow(swr, cy, minXc, maxXc);
         float cyf = (float) cy;
         
         // Where the rectangle can be on this row.
@@ -1765,6 +1779,7 @@ static void swrDrawTriangleInternal(SWRenderer* swr, int xup, int yup, int xleft
             
             if (y >= 0) {
                 uintpixel_t* line = &swr->fb[y * swr->width];
+                swrDirtyRow(swr, y, x1, x2 + 1);
                 for (int x = x1; x < x2; x++) {
                     alphaBlend(&line[x], color1, blendmode, alpha);
                 }
@@ -1823,6 +1838,7 @@ static void swrDrawTriangleInternal(SWRenderer* swr, int xup, int yup, int xleft
         if (y < 0) continue;
         
         uintpixel_t* line = &swr->fb[y * swr->width];
+        swrDirtyRow(swr, y, x1, x2 + 1);
         
         int e_up   = (xleft - x1) * (yright - y) - (yleft - y) * (xright - x1);
         int e_left = (xright - x1) * (yup - y) - (yright - y) * (xup - x1);
@@ -2095,6 +2111,7 @@ void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2
             swr->clearHeld = true;
             swr->clearHeldColor = result;
         } else if (result != swr->uniformColor) {
+            swrDirtyAll(swr);
             for (int y = 0; y < swr->mainHeight; y++)
                 swrFillPixels(&swr->fb[y * swr->fbPitch], (size_t) swr->mainWidth, result);
         }
@@ -2174,6 +2191,7 @@ void swrFillRectangleColor(Renderer* renderer, float x1, float y1, float x2, flo
         uint32_t weightU = 65535 - weightD;
         
         uintpixel_t *line = &swr->fb[ay * swr->fbPitch + x1i];
+        swrDirtyRow(swr, ay, x1i, x1i + xd + 1);
         uint32_t weightfpx = 0;
         for (int x = 0; x <= xd; x++, weightfpx += incx)
         {
@@ -2627,6 +2645,7 @@ bool swrDrawSpriteTiledRows(SWRenderer* swr, SWTexture* texture, int sx, int sy,
 #else
     if (!swrTiledPassSetUp(swr, texture, sx, sy, sw, sh, firstX, firstY, tileW, tileH, countX, countY, color, alphaf, &swrTiledNow)) return false;
     SWTiledMemo memo = { 0 };
+    swrDirtyRect(swr, 0, swrTiledNow.minY, swr->width, swrTiledNow.maxY);
     for (int y = swrTiledNow.minY; y < swrTiledNow.maxY; y++)
         swrTiledPassRow(&swrTiledNow, y, &swr->fb[y * swr->fbPitch], &memo, NULL, 0, NULL);
     return true;
@@ -2763,6 +2782,7 @@ FORCE_INLINE void swrTiledPassPattern(const SWTiledPass* pass, int y, uintpixel_
 // out. Every pixel comes out as the copies would have left it.
 void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 {
+    swrDirtyAll(swr);
 #if PIXEL_SIZE != 16 || !defined SW_HAS_PREMUL_BLEND || defined SW_DITHERED_BLENDING
     swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
 #else

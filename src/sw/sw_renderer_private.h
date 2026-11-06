@@ -170,6 +170,11 @@ typedef struct
     int tiledHeldCount;
     bool clearHeldForFill;  // SWRenderer_drawRectangle took the held clear for the swrFillRectangle call it is making
     bool fbIsPlatform; // mainFb belongs to the platform (SW_PLATFORM_FRAMEBUFFER), not to us
+    // What is known of the buffer being drawn into (see swrClearMain), or
+    // NULL when nothing is tracked: then every clear is a whole one.
+    struct SWDirtyBuffer* dirty;
+    struct SWDirtyBuffer* dirtyMark; // `dirty` while there is anything left to mark; NULL once all of it is
+    struct SWDirtyBuffer* dirtyBuffers; // SWR_DIRTY_BUFFERS of them, one per platform buffer
     
     // A solid-colour sprite draw that has been held back so that identical
     // draws stacked directly on top of it fold into one blend (see swrOverlayFlush).
@@ -233,6 +238,71 @@ typedef struct
     bool primitiveOverflow;
 }
 SWRenderer;
+
+// Partial clears. The platform hands out its display buffers in turn, and a
+// buffer comes back holding the frame drawn in it a few frames before. On the
+// Pocket a whole-screen clear is memory-bound (13 ms at 640x480), while a
+// battle draws over a fifth of the screen. So each buffer remembers the colour
+// it was last cleared to and which tiles have been written since; a clear to
+// the same colour then rewrites only those tiles. Every write into the main
+// buffer marks what it touches (swrDirtyRow, swrDirtyRect). Anything else that
+// writes into a platform buffer calls swrFramebufferTouched, which forgets what
+// was known, so the next clear is a whole one.
+#define SWR_DIRTY_TILE_W_SHIFT 5            // 32 px tiles across: one bit each, 32 to a row
+#define SWR_DIRTY_TILE_H_SHIFT 4            // 16 px tiles down
+#define SWR_DIRTY_MAX_W 1024
+#define SWR_DIRTY_MAX_ROWS 64               // 1024 px down
+#define SWR_DIRTY_BUFFERS 4
+typedef struct SWDirtyBuffer {
+    const uintpixel_t* fb;  // the buffer this describes (NULL: unused)
+    int width, height;
+    uint32_t generation;    // swrDirtyGeneration when this was last known
+    uint32_t lastUsed;
+    bool known;             // every pixel outside the marked tiles is `color`
+    uintpixel_t color;
+    uint32_t rows[SWR_DIRTY_MAX_ROWS]; // bit c of rows[r]: tile (c, r) may hold something else
+} SWDirtyBuffer;
+
+FORCE_INLINE uint32_t swrDirtyMask(int x0, int x1)
+{
+    int c0 = x0 >> SWR_DIRTY_TILE_W_SHIFT, c1 = (x1 - 1) >> SWR_DIRTY_TILE_W_SHIFT;
+    return (uint32_t) ((2ull << c1) - 1) & ~((1u << c0) - 1);
+}
+
+// Marks pixels [x0, x1) of row y of the target, if the target is the main buffer.
+FORCE_INLINE void swrDirtyRowIn(SWRenderer* swr, const uintpixel_t* target, int y, int x0, int x1)
+{
+    SWDirtyBuffer* d = swr->dirtyMark;
+    if (d == NULL || target != swr->mainFb || y < 0 || y >= d->height) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 > d->width) x1 = d->width;
+    if (x0 >= x1) return;
+    d->rows[y >> SWR_DIRTY_TILE_H_SHIFT] |= swrDirtyMask(x0, x1);
+}
+#define swrDirtyRow(swr, y, x0, x1) swrDirtyRowIn((swr), (swr)->fb, (y), (x0), (x1))
+
+// Marks the rectangle [x0, x1) x [y0, y1) of the target, if it is the main buffer.
+FORCE_INLINE void swrDirtyRectIn(SWRenderer* swr, const uintpixel_t* target, int x0, int y0, int x1, int y1)
+{
+    SWDirtyBuffer* d = swr->dirtyMark;
+    if (d == NULL || target != swr->mainFb) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > d->width) x1 = d->width;
+    if (y1 > d->height) y1 = d->height;
+    if (x0 >= x1 || y0 >= y1) return;
+    // The whole buffer: nothing more to mark until it is cleared again. A
+    // backdrop over the whole screen (as every Deltarune room has) so stops
+    // the sprites over it paying for marks.
+    if (x0 == 0 && y0 == 0 && x1 == d->width && y1 == d->height) swr->dirtyMark = NULL;
+    uint32_t mask = swrDirtyMask(x0, x1);
+    for (int r = y0 >> SWR_DIRTY_TILE_H_SHIFT, last = (y1 - 1) >> SWR_DIRTY_TILE_H_SHIFT; r <= last; r++) d->rows[r] |= mask;
+}
+#define swrDirtyRect(swr, x0, y0, x1, y1) swrDirtyRectIn((swr), (swr)->fb, (x0), (y0), (x1), (y1))
+#define swrDirtyAll(swr) swrDirtyRectIn((swr), (swr)->mainFb, 0, 0, SWR_DIRTY_MAX_W, SWR_DIRTY_MAX_ROWS << SWR_DIRTY_TILE_H_SHIFT)
+
+// Fills the whole main buffer with one colour: only what needs it (see above).
+void swrClearMain(SWRenderer* swr, uintpixel_t color);
 
 // Inlined function definitions included below
 #include "sw_pixel_calc.h"

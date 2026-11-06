@@ -91,6 +91,7 @@ FORCE_INLINE void swrPlotPixel_(Renderer* renderer, int x, int y, uintpixel_t co
     if (x < swr->portX || y < swr->portY) return;
     if (x >= swr->maxX || y >= swr->maxY) return;
     
+    swrDirtyRow(swr, y, x, x + 1);
     alphaBlend(&swr->fb[y * swr->fbPitch + x], color, blendmode, alpha);
 }
 

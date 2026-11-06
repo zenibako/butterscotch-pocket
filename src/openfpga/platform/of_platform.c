@@ -593,7 +593,9 @@ void platformSwapBuffers(void) {
     }
 #endif
     scriptProfileFrame();
-    ofPerfFrame(g_nextFb, g_nextW, g_nextH);
+    /* Words drawn over the picture are not the renderer's: it then clears
+     * the whole of this buffer next time it gets it. */
+    bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);
     ofFocusPresent(g_runner,false);
     /* L's setting, by the name the instruction screen gives the toggle:
      * for a moment after L is pressed, and in debug mode for as long as a
@@ -602,6 +604,7 @@ void platformSwapBuffers(void) {
     bool paused = g_runner != NULL && g_runner->paused;
     if (wasPaused && !paused) showNotice("Resumed");
     wasPaused = paused;
+    bool drawnOver = true;
     if (g_snapshotNotice) {
         drawSnapshotNotice(g_nextFb, g_nextW, g_nextH);
     } else if (g_sleepTestLabel) {
@@ -618,7 +621,10 @@ void platformSwapBuffers(void) {
         ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, g_notice);
     } else if (nowNanos() < g_modeShownUntil || g_debugMode) {
         ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, g_smoothLowres ? "Speed" : "Accuracy");
+    } else {
+        drawnOver = false;
     }
+    if (overlaid || drawnOver) swrFramebufferTouched();
     ofBenchFrame();
 #ifdef OF_PC
     dumpFrameIfRequested(true);
@@ -637,8 +643,10 @@ void platformSwapBuffers(void) {
     if ((uint8_t *) g_nextFb == dst) {
         /* Drawn in place (platformAcquireFramebuffer): nothing to copy. */
     } else if ((size_t) g_modeStride == rowBytes) {
+        swrFramebufferTouched(); /* dst may be a buffer the renderer draws in another time */
         memcpy(dst, g_nextFb, rowBytes * (size_t) g_nextH);
     } else {
+        swrFramebufferTouched();
         for (int y = 0; y < g_nextH; y++)
             memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
     }
@@ -676,6 +684,7 @@ bool ofPlatformShowLogAndHalt(void) {
 
     for (;;) {
         g_nextFb = (uint16_t *) (void *) of_video_surface();
+        swrFramebufferTouched();
         ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
 #ifdef OF_PC
         if (getenv("BS_DUMP_PATH") != NULL) writeFrameDump();
@@ -997,6 +1006,7 @@ static void runMenu(void) {
     if (!wasPaused) audio->vtable->pauseAll(audio);
     logInfo("Menu\n");
     if (!ofMenuRun(&menu, g_nextFb, g_nextW, g_nextH)) logWarn("Menu: no memory for it\n");
+    swrFramebufferTouched(); /* the menu drew into the display's buffers */
     /* The menu drew into the display's buffers, which can include the one
      * the last frame was drawn in; the game's picture is now in the buffer it
      * showed last. A paused game shows that one again (the log screen too). */
@@ -1157,6 +1167,7 @@ void ofPlatformSnapshotNotice(const char *text) {
     if (!g_nextFb || g_nextW <= 0 || g_nextH <= 0 || !g_showingFramebuffer ||
         g_nextW != g_modeW || g_nextH != g_modeH) return;
     drawSnapshotNotice(g_nextFb, g_nextW, g_nextH);
+    swrFramebufferTouched();
     uint8_t *surface = of_video_surface();
     if ((uint8_t *)g_nextFb != surface) {
         for (int y = 0; y < g_nextH; y++)
@@ -1196,6 +1207,8 @@ void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
     g_blockedGameButtons = 0;
     ofGamepadPoll(runner->gamepads, buttons, true);
 #endif
+    /* The display buffers need not hold what was drawn in them before. */
+    swrFramebufferTouched();
     /* Old presentation timing must not cause frame skips after restore. */
     g_debtNanos = 0; g_skipThisFrame = false;
     ofPerfRestartClock();
