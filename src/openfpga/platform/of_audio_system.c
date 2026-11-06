@@ -958,17 +958,20 @@ static void hwMixerInit(OfAudioSystem *ut) {
     ut->hwMixer = true;
 }
 
-static void hwStopVoice(OfAudioSystem *ut, int v) {
-    OfHwVoice *hw = &ut->hw[v];
-    if (hw->running) hwPortStop(hw);
-    memset(hw, 0, sizeof(*hw));
-}
-
 static void hwDropRestore(OfAudioSystem *ut, int v) {
     free(ut->hwRestore[v]);
     ut->hwRestore[v] = NULL;
     ut->hwRestoreCount[v] = 0;
     ut->hwRestoreCarry[v] = false;
+}
+
+/* Also forgets the samples a Memory kept for the voice: they belong to the
+ * sound and position it had before a stop, a new sound or a seek. */
+static void hwStopVoice(OfAudioSystem *ut, int v) {
+    OfHwVoice *hw = &ut->hw[v];
+    if (hw->running) hwPortStop(hw);
+    memset(hw, 0, sizeof(*hw));
+    hwDropRestore(ut, v);
 }
 
 static uint32_t hwBacklog(const OfHwVoice *hw, int32_t position) {
@@ -2022,10 +2025,22 @@ bool ofAudioSnapshot(AudioSystem *audio, uint8_t **data, size_t *size, const cha
     if (ut->hwMixer) {
         ofSnapU32(&w, OF_AUDIO_HW_SNAPSHOT_MAGIC);
         for (int v = 0; v < OF_MAX_VOICES; v++) {
-            uint32_t from = 0, count = ut->voices[v].active ? hwUnplayed(ut, v, &from) : 0;
             const OfHwVoice *hw = &ut->hw[v];
-            bool carry = ut->voices[v].active && hw->running && hw->instanceId == ut->voices[v].instanceId &&
-                hw->haveCarry;
+            bool active = ut->voices[v].active;
+            if (active && !hw->running) {
+                /* Not started again since a Memory was loaded (paused, or
+                 * waiting): keep what that Memory kept. */
+                uint32_t count = ut->hwRestoreCount[v];
+                bool carry = ut->hwRestoreCarry[v];
+                ofSnapU32(&w, count);
+                ofSnapU32(&w, (uint32_t) carry | (uint32_t) (uint16_t) (carry ? ut->hwRestoreCarryValue[v] : 0) << 16);
+                const int16_t *pcm = ut->hwRestore[v];
+                for (uint32_t i = 0; i < count; i += 2)
+                    ofSnapU32(&w, (uint32_t) (uint16_t) pcm[i] | (uint32_t) (uint16_t) pcm[i + 1] << 16);
+                continue;
+            }
+            uint32_t from = 0, count = active ? hwUnplayed(ut, v, &from) : 0;
+            bool carry = active && hw->running && hw->instanceId == ut->voices[v].instanceId && hw->haveCarry;
             ofSnapU32(&w, count);
             ofSnapU32(&w, (uint32_t) carry | (uint32_t) (uint16_t) (carry ? hw->carry : 0) << 16);
             const int16_t *ring = (const int16_t *) hwPortRingWords(ut->hwRings[v]);

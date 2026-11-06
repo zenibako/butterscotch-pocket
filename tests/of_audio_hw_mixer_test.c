@@ -290,17 +290,23 @@ static FakeVoice *fakeForVoice(OfAudioSystem *ut, int v) {
 /* Whether what a voice played after a restore goes on from sample `from` of
  * the track, or the one after it (a restore leaves out the sample being
  * played when the state was made, to keep the ring in whole words). */
-static void checkResumed(const FakeVoice *f, uint32_t from, const int16_t *ref, uint32_t refCount, bool loop) {
-    assert(f && f->heardCount > 2000);
+static bool resumesFrom(const FakeVoice *f, uint32_t from, const int16_t *ref, uint32_t refCount, bool loop,
+    uint32_t count) {
     for (uint32_t start = from; start <= from + 1; start++) {
         bool same = true;
-        for (uint32_t k = 0; k < f->heardCount && same; k++) {
+        for (uint32_t k = 0; k < count && same; k++) {
             uint32_t at = start + k;
             int16_t expected = loop || at < refCount ? ref[at % refCount] : 0;
             same = f->heard[k] == expected;
         }
-        if (same) return;
+        if (same) return true;
     }
+    return false;
+}
+
+static void checkResumed(const FakeVoice *f, uint32_t from, const int16_t *ref, uint32_t refCount, bool loop) {
+    assert(f && f->heardCount > 2000);
+    if (resumesFrom(f, from, ref, refCount, loop, f->heardCount)) return;
     fprintf(stderr, "restore does not continue from sample %u\n", from);
     abort();
 }
@@ -385,6 +391,52 @@ static void testMemoriesContinueTheSamples(void) {
     ofDestroy(&ut->base);
 }
 
+/* Samples a Memory kept wait in the voice until it starts again. */
+static void testPendingRestore(void) {
+    OfAudioSystem *ut = newSystem();
+    int music = play(ut, "long", true);
+    for (int f = 0; f < 40; f++) frame(ut);
+    uint32_t musicAt = fakeForVoice(ut, 0)->heardCount - 1;
+    uint8_t *data = NULL; const char *reason = NULL; size_t size = 0;
+    assert(ofAudioSnapshot(&ut->base, &data, &size, &reason));
+
+    /* Paused straight after a load, then saved again: the second Memory
+     * still has the samples. */
+    void *state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofPauseSound(&ut->base, music);
+    for (int f = 0; f < 3; f++) frame(ut);
+    assert(!fakeForVoice(ut, 0) && ut->hwRestoreCount[0] > 0);
+    state = takeState(ut, ut, &size);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofResumeSound(&ut->base, music);
+    for (int f = 0; f < 15; f++) frame(ut);
+    checkResumed(fakeForVoice(ut, 0), musicAt, refLong, LONG_SAMPLES, true);
+
+    /* Stopped before it starts, and the voice given to another sound. */
+    state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofStopSound(&ut->base, music);
+    play(ut, "short", false);
+    assert(ut->hwRestore[0] == NULL);
+    for (int f = 0; f < 10; f++) frame(ut);
+    const FakeVoice *e = fakeForVoice(ut, 0);
+    assert(e && e->heardCount > 2000);
+    checkHeard(e->heard, e->heardCount, refShort, SHORT_SAMPLES, false);
+    for (int f = 0; f < 30; f++) frame(ut);
+
+    /* Moved before it starts: it plays from the new place, not the kept samples. */
+    state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofSetTrackPosition(&ut->base, music, 1.0f);
+    assert(ut->hwRestore[0] == NULL);
+    for (int f = 0; f < 15; f++) frame(ut);
+    const FakeVoice *m = fakeForVoice(ut, 0);
+    assert(m && m->heardCount > 2000 && !resumesFrom(m, musicAt, refLong, LONG_SAMPLES, true, 256));
+    free(data);
+    ofDestroy(&ut->base);
+}
+
 static void testSoftwareFallback(void) {
     OfAudioSystem *ut;
     fakeAvailable = false;
@@ -425,6 +477,7 @@ int main(int argc, char **argv) {
     testSeekRestartsTheRing();
     testTwoVoicesAndMute();
     testMemoriesContinueTheSamples();
+    testPendingRestore();
     testSoftwareFallback();
     remove("music.bin"); rmdir(dir);
     printf("PASS hardware mixer: decode, wraps, loops, pause, gain, pitch, seek, mute, Memories, fallback\n");
