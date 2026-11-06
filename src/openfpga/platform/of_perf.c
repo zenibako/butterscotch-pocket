@@ -211,9 +211,10 @@ void ofPerfHideOverlays(void) {
     g_logEnabled = false;
 }
 
-/* Log overlay text: Butterscotch's debug font atlas shrunk 3:1 by averaging
- * coverage, which gives a 6x12 cell (OF_LOG_CELL_W, OF_LOG_CELL_H) that still
- * reads at 320x240. */
+/* Fallback log text, for when the game's font is not ready yet (of_font.c):
+ * Butterscotch's debug font atlas shrunk 3:1 by averaging coverage, which
+ * gives a 6x12 cell (OF_LOG_CELL_W, OF_LOG_CELL_H) that still reads at
+ * 320x240. */
 #define OF_LOG_SHRINK 3
 
 static void drawLogChar(uint16_t *fb, int width, int x, int y, char c, uint16_t color) {
@@ -241,37 +242,39 @@ int ofPerfDrawLogText(uint16_t *fb, int width, int height, int x, int y, const c
     return x;
 }
 
-void ofPerfDrawLogScreen(uint16_t *fb, int width, int height) {
-    int rows = height / OF_LOG_CELL_H;
-    if (rows > OF_LOG_LINES - 1) rows = OF_LOG_LINES - 1;
-    int columns = width / OF_LOG_CELL_W;
-
-    for (int i = 0; i < width * height; i++) fb[i] = 0;
-    for (int row = 0; row < rows; row++) {
-        const char *line = ofLogLine(rows - 1 - row);
-        for (int col = 0; col < columns && line[col] != '\0'; col++)
-            drawLogChar(fb, width, col * OF_LOG_CELL_W, row * OF_LOG_CELL_H, line[col], 0x7FFF);
-    }
+/* The log in the game's own font, the one the menu uses (of_font.c), at its
+ * own size: a 320x240 frame fits about 40 to 48 characters a line and a
+ * 640x480 one about twice that. Before the font is ready (a fatal error
+ * while data.win loads) ofFontDraw falls back to the 6x12 cell above. Lines
+ * longer than the frame are cut off at its right edge. */
+static void drawLogLines(uint16_t *fb, int width, int height, int top, int rows) {
+    int line = ofFontLineHeight(1);
+    for (int row = 0; row < rows; row++)
+        ofFontDraw(fb, width, height, 2, top + row * line, ofLogLine(rows - 1 - row), 0x7FFF, 1);
 }
 
-/* The in-game overlay shows fewer lines so most of the scene stays visible. */
-#define OF_LOG_OVERLAY_ROWS 11
+void ofPerfDrawLogScreen(uint16_t *fb, int width, int height) {
+    for (int i = 0; i < width * height; i++) fb[i] = 0;
+    int rows = height / ofFontLineHeight(1);
+    if (rows > OF_LOG_LINES - 1) rows = OF_LOG_LINES - 1;
+    drawLogLines(fb, width, height, 0, rows);
+}
+
+/* The in-game overlay keeps to the bottom part of the frame so most of the
+ * scene stays visible. */
+#define OF_LOG_OVERLAY_SHARE_NUM 11
+#define OF_LOG_OVERLAY_SHARE_DEN 20
 
 static void drawLog(uint16_t *fb, int width, int height) {
-    int rows = OF_LOG_OVERLAY_ROWS;
-    int columns = width / OF_LOG_CELL_W;
-    int top = height - rows * OF_LOG_CELL_H;
-    if (top < 16) return;
+    int line = ofFontLineHeight(1);
+    int rows = height * OF_LOG_OVERLAY_SHARE_NUM / OF_LOG_OVERLAY_SHARE_DEN / line;
+    if (rows > OF_LOG_LINES - 1) rows = OF_LOG_LINES - 1;
+    int top = height - rows * line;
+    if (rows <= 0 || top < 16) return;
 
     /* Darken the area behind the text so it reads over any scene. */
     for (int i = top * width; i < height * width; i++) fb[i] = (uint16_t) ((fb[i] >> 2) & 0x1CE7);
-
-    for (int row = 0; row < rows; row++) {
-        const char *line = ofLogLine(rows - 1 - row);
-        int y = top + row * OF_LOG_CELL_H;
-        for (int col = 0; col < columns && line[col] != '\0'; col++)
-            drawLogChar(fb, width, col * OF_LOG_CELL_W, y, line[col], 0x7FFF);
-    }
+    drawLogLines(fb, width, height, top, rows);
 }
 
 void ofPerfAddSleep(uint64_t nanos) {

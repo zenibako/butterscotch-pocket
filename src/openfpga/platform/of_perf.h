@@ -34,7 +34,7 @@ struct Profiler;
 void ofPerfScriptReport(const struct Profiler *profiler, int frames);
 
 /* Recent log lines for the overlay; age 0 is the newest complete line. */
-#define OF_LOG_LINES 21
+#define OF_LOG_LINES 41 /* a 640x480 log screen shows about 34 */
 #define OF_LOG_LINE_LEN 106
 const char *ofLogLine(int age);
 /* Whether log lines also go to stdout (the OS console). */
@@ -48,13 +48,13 @@ const char *ofLogLoadSummary(void);
 /* The loader's "phases: alloc ..., read ..., parse ..., free ..." totals. */
 const char *ofLogLoadPhases(void);
 
-/* The log overlay's font: a 6x12 cell. */
+/* The fallback log font, before the game's font is ready: a 6x12 cell. */
 #define OF_LOG_CELL_W 6
 #define OF_LOG_CELL_H 12
 /* One line in the log overlay's font; returns the x after it. */
 int ofPerfDrawLogText(uint16_t *fb, int width, int height, int x, int y, const char *text, uint16_t color);
 
-/* Fills the frame with the most recent log lines on black. */
+/* Fills the frame with the most recent log lines on black, in the game's font. */
 void ofPerfDrawLogScreen(uint16_t *fb, int width, int height);
 
 void ofPerfAddSleep(uint64_t nanos);
