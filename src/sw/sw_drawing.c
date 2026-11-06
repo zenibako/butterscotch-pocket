@@ -175,7 +175,7 @@ typedef struct SWColorSpans {
     uint32_t rows[];
 } SWColorSpans;
 
-static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t* buffer, int width, int height, uintpixel_t color)
+MAYBE_UNUSED static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t* buffer, int width, int height, uintpixel_t color)
 {
     SWColorSpans* spans = *slot;
     if (spans != NULL) return spans->color == color && spans->worth ? spans : NULL;
@@ -235,7 +235,7 @@ FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int co
 // tiles it marks itself still hold the colour wherever it left out.
 // Tiles in `keep` already hold what the draw writes there (see SWBaseKey) and
 // are left alone. What is written is marked in `marks` (rows or baseRows).
-static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint32_t keep, uintpixel_t* dstline, const uintpixel_t* srcline,
+MAYBE_UNUSED static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint32_t keep, uintpixel_t* dstline, const uintpixel_t* srcline,
                              const uint32_t* run, const uint32_t* runEnd, int sx, int dx, int dy, int from, int to, bool solid)
 {
     uint32_t wrote = 0;

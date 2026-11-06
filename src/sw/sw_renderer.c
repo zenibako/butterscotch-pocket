@@ -149,7 +149,7 @@ void swrFramebufferTouched(void)
 }
 
 // Picks up what is known of the platform buffer about to be drawn in.
-static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
+MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
 {
     swrBaseFinish(swr, false);
     swr->dirty = swr->dirtyMark = NULL;
