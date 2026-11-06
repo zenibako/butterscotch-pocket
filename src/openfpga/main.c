@@ -124,6 +124,8 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
+        /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */
+        if (strcmp(argv[i], "--sw-mixer") == 0) ofAudioUseSoftwareMixer(true);
         if (strcmp(argv[i], "--mute") == 0) ofAudioSetMode(OF_AUDIO_DISABLED); /* as the menu's audio mode, or Select + Down in debug mode */
         /* Game-script times in the log every 150 frames (see ofPerfScriptReport): which scripts a section's
          * "step" and unexplained "draw" time are. Timing every script call slows the run, so a benchmark

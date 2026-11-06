@@ -582,6 +582,13 @@ read-ahead buffer, short ones are loaded whole on first use and cached. It
 applies pitch and gain, mixes the voices in software and writes the OS's
 output rate.
 
+Where openfpgaOS has the hardware mixer (os25), the voices are played by it
+instead: each is decoded into a ring of its own, and the mixer does the
+resampling, gain and mixing. `--sw-mixer` in `ARGS=` keeps the software mix,
+to compare the two. A Memory keeps what each voice's ring holds but has not
+played yet, so a restore goes on from the next sample. The log says which
+mix is in use ("Audio: mixing in ...").
+
 A short stretch of output is kept queued. It is topped up once per frame
 and also from `platformBusyTick`, which the loaders call between read pieces
 and the renderer calls while drawing; without that a frame longer than the

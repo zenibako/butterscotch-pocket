@@ -72,6 +72,9 @@ done
 "$cc" "${flags[@]}" -I"$SDK_ROOT/src/sdk/include" \
     "$repo/tests/of_audio_silence_test.c" "$repo/src/stb_ds.c" -o "$out/audio-silence"
 "$out/audio-silence"
+"$cc" "${flags[@]}" -I"$SDK_ROOT/src/sdk/include" \
+    "$repo/tests/of_audio_hw_mixer_test.c" "$repo/src/stb_ds.c" -o "$out/audio-hw-mixer"
+"$out/audio-hw-mixer"
 "$cc" "${flags[@]}" -I"$SDK_ROOT/src/sdk/include" -isystem "$SDK_ROOT/src/sdk/pc" \
     -DOF_PC_SDL_SOURCE='"of_sdl2.c"' $(pkg-config --cflags sdl2) \
     "$repo/tests/of_pc_audio_snapshot_test.c" $(pkg-config --libs sdl2) -lm -o "$out/pc-audio"
