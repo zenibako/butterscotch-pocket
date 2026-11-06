@@ -126,7 +126,8 @@ static void makePack(void) {
 }
 
 static OfAudioSystem *newSystem(void) {
-    for (int i = 0; i < 32; i++) { free(fake[i].heard); memset(&fake[i], 0, sizeof(fake[i])); }
+    /* Voices another system still plays are left alone. */
+    for (int i = 0; i < 32; i++) if (!fake[i].active) { free(fake[i].heard); memset(&fake[i], 0, sizeof(fake[i])); }
     for (int i = 0; i < stoppedCount; i++) free(stopped[i].heard);
     stoppedCount = 0;
     OfAudioSystem *ut = calloc(1, sizeof(*ut)); assert(ut);
@@ -281,14 +282,111 @@ static void testTwoVoicesAndMute(void) {
     ofDestroy(&ut->base);
 }
 
-static void testStatesRefusedAndSoftwareFallback(void) {
-    OfAudioSystem *ut = newSystem();
-    play(ut, "long", true);
-    frame(ut); frame(ut);
-    uint8_t *data = NULL; size_t size = 0; const char *reason = NULL;
-    assert(!ofAudioSnapshot(&ut->base, &data, &size, &reason) && reason);
-    ofDestroy(&ut->base);
+static FakeVoice *fakeForVoice(OfAudioSystem *ut, int v) {
+    for (int i = 0; i < 32; i++) if (fake[i].active && fake[i].ring == ut->hwRings[v]) return &fake[i];
+    return NULL;
+}
 
+/* Whether what a voice played after a restore goes on from sample `from` of
+ * the track, or the one after it (a restore leaves out the sample being
+ * played when the state was made, to keep the ring in whole words). */
+static void checkResumed(const FakeVoice *f, uint32_t from, const int16_t *ref, uint32_t refCount, bool loop) {
+    assert(f && f->heardCount > 2000);
+    for (uint32_t start = from; start <= from + 1; start++) {
+        bool same = true;
+        for (uint32_t k = 0; k < f->heardCount && same; k++) {
+            uint32_t at = start + k;
+            int16_t expected = loop || at < refCount ? ref[at % refCount] : 0;
+            same = f->heard[k] == expected;
+        }
+        if (same) return;
+    }
+    fprintf(stderr, "restore does not continue from sample %u\n", from);
+    abort();
+}
+
+static void *takeState(OfAudioSystem *from, OfAudioSystem *into, size_t *size) {
+    uint8_t *data = NULL; const char *reason = NULL;
+    assert(ofAudioSnapshot(&from->base, &data, size, &reason));
+    void *prepared = ofAudioPrepareSnapshot(&into->base, data, *size, &reason);
+    assert(prepared);
+    free(data);
+    return prepared;
+}
+
+static void testMemoriesContinueTheSamples(void) {
+    OfAudioSystem *ut = newSystem();
+    int music = play(ut, "long", true);
+    for (int f = 0; f < 40; f++) frame(ut);
+    int sfx = play(ut, "short", false);
+    for (int f = 0; f < 6; f++) frame(ut);
+    FakeVoice *m = fakeForVoice(ut, 0), *e = fakeForVoice(ut, 1);
+    assert(m && e && ut->voices[1].instanceId == sfx);
+    uint32_t musicAt = m->heardCount - 1, sfxAt = e->heardCount - 1;
+
+    size_t size = 0;
+    void *state = takeState(ut, ut, &size);
+    for (int f = 0; f < 20; f++) frame(ut); /* the game goes on, then the Memory is loaded */
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    assert(!fakeForVoice(ut, 0) && ofIsPlaying(&ut->base, music) && ofIsPlaying(&ut->base, sfx));
+    for (int f = 0; f < 15; f++) frame(ut);
+    checkResumed(fakeForVoice(ut, 0), musicAt, refLong, LONG_SAMPLES, true);
+    checkResumed(fakeForVoice(ut, 1), sfxAt, refShort, SHORT_SAMPLES, false);
+    float position = ofGetTrackPosition(&ut->base, music);
+    assert(fabsf(position - (float) (musicAt + fakeForVoice(ut, 0)->heardCount) / 32000.0f) < 0.0005f);
+    for (int f = 0; f < 40; f++) frame(ut);
+    assert(!ofIsPlaying(&ut->base, sfx));
+
+    /* A state taken while the effect is paused and the track has ended. */
+    ofPauseSound(&ut->base, music);
+    frame(ut);
+    state = takeState(ut, ut, &size);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    for (int f = 0; f < 5; f++) frame(ut);
+    assert(!fakeForVoice(ut, 0)); /* paused: not started until resumed */
+    ofResumeSound(&ut->base, music);
+    for (int f = 0; f < 5; f++) frame(ut);
+    assert(fakeForVoice(ut, 0));
+
+    /* The same state loads into the software mix, which goes on from the decoder. */
+    uint8_t *data = NULL; const char *reason = NULL;
+    assert(ofAudioSnapshot(&ut->base, &data, &size, &reason));
+    ofAudioUseSoftwareMixer(true);
+    OfAudioSystem *software = newSystem(); assert(!software->hwMixer);
+    ofAudioUseSoftwareMixer(false);
+    state = ofAudioPrepareSnapshot(&software->base, data, size, &reason); assert(state);
+    ofAudioApplySnapshot(&software->base, state); ofAudioFreeSnapshot(state);
+    assert(ofIsPlaying(&software->base, music));
+    softwarePairs = 0; frame(software); assert(softwarePairs > 0);
+    ofDestroy(&software->base);
+
+    /* And a software-mix state (no hardware part) loads into the hardware mixer. */
+    ofAudioUseSoftwareMixer(true);
+    software = newSystem();
+    ofAudioUseSoftwareMixer(false);
+    int swMusic = play(software, "long", true);
+    for (int f = 0; f < 5; f++) frame(software);
+    free(data);
+    assert(ofAudioSnapshot(&software->base, &data, &size, &reason));
+    ofDestroy(&software->base);
+    g_audio = ut;
+    state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); free(data);
+    for (int f = 0; f < 5; f++) frame(ut);
+    assert(ofIsPlaying(&ut->base, swMusic) && fakeForVoice(ut, 0));
+
+    /* A hardware part that does not fit the voices is refused. */
+    data = NULL;
+    assert(ofAudioSnapshot(&ut->base, &data, &size, &reason));
+    data[size - 1] ^= 0x40; /* carry flags of the last voice */
+    data[size - 5] = 0x10;  /* a count for a voice with no data after it */
+    assert(!ofAudioPrepareSnapshot(&ut->base, data, size, &reason));
+    free(data);
+    ofDestroy(&ut->base);
+}
+
+static void testSoftwareFallback(void) {
+    OfAudioSystem *ut;
     fakeAvailable = false;
     ut = newSystem(); assert(!ut->hwMixer);
     play(ut, "long", true);
@@ -326,8 +424,9 @@ int main(int argc, char **argv) {
     testGainPitchAndStop();
     testSeekRestartsTheRing();
     testTwoVoicesAndMute();
-    testStatesRefusedAndSoftwareFallback();
+    testMemoriesContinueTheSamples();
+    testSoftwareFallback();
     remove("music.bin"); rmdir(dir);
-    printf("PASS hardware mixer: decode, wraps, loops, pause, gain, pitch, seek, mute, fallback\n");
+    printf("PASS hardware mixer: decode, wraps, loops, pause, gain, pitch, seek, mute, Memories, fallback\n");
     return 0;
 }

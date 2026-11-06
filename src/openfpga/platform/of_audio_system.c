@@ -170,6 +170,15 @@ typedef struct {
     OfHwVoice hw[OF_MAX_VOICES];
     int16_t *hwRings[OF_MAX_VOICES];
     uint64_t hwLastPumpNanos;
+    /* From a Memory: what each voice's ring held but had not played, put
+     * back in front of its decoder when it starts again. */
+    int16_t *hwRestore[OF_MAX_VOICES];
+    uint32_t hwRestoreCount[OF_MAX_VOICES];
+    bool hwRestoreCarry[OF_MAX_VOICES];
+    int16_t hwRestoreCarryValue[OF_MAX_VOICES];
+    /* A Memory made with the software mix restores its queued output through
+     * the OS; voices wait until that has played. */
+    uint64_t hwStartAfterNanos;
 } OfAudioSystem;
 
 /* The file idle hook has no user pointer, so the one instance is global. */
@@ -847,9 +856,10 @@ static uint8_t *cachedSound(OfAudioSystem *ut, int32_t track) {
  * allocated it (hwPortStart). Everything else goes through of_mixer_*.
  *
  * The decoder state in OfVoice is the ring's write side, ahead of what is
- * heard by up to the lead; hwPlayedSample works out what is heard. Memories
- * (save states) are not supported on this path yet, so a state is refused
- * while it is in use; --sw-mixer selects the software mix. */
+ * heard by up to the lead; hwPlayedSample works out what is heard. A Memory
+ * keeps that decoder state and, beside it, what each ring holds but has not
+ * played (see Snapshots), so a restore continues with the very next sample.
+ * --sw-mixer selects the software mix. */
 
 #define OF_HW_RING_SAMPLES 32768u /* per voice; a power of two */
 #define OF_HW_RING_MASK (OF_HW_RING_SAMPLES - 1u)
@@ -952,6 +962,13 @@ static void hwStopVoice(OfAudioSystem *ut, int v) {
     OfHwVoice *hw = &ut->hw[v];
     if (hw->running) hwPortStop(hw);
     memset(hw, 0, sizeof(*hw));
+}
+
+static void hwDropRestore(OfAudioSystem *ut, int v) {
+    free(ut->hwRestore[v]);
+    ut->hwRestore[v] = NULL;
+    ut->hwRestoreCount[v] = 0;
+    ut->hwRestoreCarry[v] = false;
 }
 
 static uint32_t hwBacklog(const OfHwVoice *hw, int32_t position) {
@@ -1135,10 +1152,14 @@ static uint32_t hwPumpVoice(OfAudioSystem *ut, int v, int target, uint32_t elaps
     OfHwVoice *hw = &ut->hw[v];
 
     if (!voice->active || (hw->running && hw->instanceId != voice->instanceId)) hwStopVoice(ut, v);
-    if (!voice->active) return 0;
+    if (!voice->active) {
+        hwDropRestore(ut, v);
+        return 0;
+    }
     if (voiceSkipped(ut, voice)) {
         /* Muted: from here skipVoice moves it on, from what was heard. */
         hwReleaseVoice(ut, v);
+        hwDropRestore(ut, v);
         return 0;
     }
     if (voice->data == NULL) return 0;
@@ -1147,9 +1168,25 @@ static uint32_t hwPumpVoice(OfAudioSystem *ut, int v, int target, uint32_t elaps
 
     if (!hw->running) {
         if (!audible) return 0;
+        if (ut->hwStartAfterNanos != 0) {
+            if (nowNanos() < ut->hwStartAfterNanos) return 0;
+            ut->hwStartAfterNanos = 0;
+        }
         memset(hw, 0, sizeof(*hw));
         OfVoice before = *voice;
-        hwDecode(ut, voice, hw, ring, hwLead(voice, target));
+        uint32_t restored = 0;
+        if (ut->hwRestore[v] != NULL || ut->hwRestoreCarry[v]) {
+            /* The samples a Memory kept, then on from the decoder. */
+            const int16_t *pcm = ut->hwRestore[v];
+            restored = ut->hwRestoreCount[v];
+            for (uint32_t i = 0; i < restored; i += 2) hwPutWord(ring, i, pcm[i], pcm[i + 1]);
+            hw->wptr = restored;
+            hw->haveCarry = ut->hwRestoreCarry[v];
+            hw->carry = ut->hwRestoreCarryValue[v];
+            hwDropRestore(ut, v);
+        }
+        uint32_t lead = hwLead(voice, target);
+        if (restored < lead) hwDecode(ut, voice, hw, ring, (lead - restored) & ~1u);
         if (hw->wptr == 0 && !hw->padded) {
             if (voice->finished) voice->active = false;
             return 0; /* nothing read yet */
@@ -1303,6 +1340,7 @@ static void ofDestroy(AudioSystem *audio) {
     g_audio = NULL;
     for (int v = 0; v < OF_MAX_VOICES; v++) {
         hwStopVoice(ut, v);
+        hwDropRestore(ut, v);
         free(ut->hwRings[v]);
     }
     if (ut->file != NULL) fclose(ut->file);
@@ -1884,7 +1922,36 @@ typedef struct {
     OfAudioMode mode;
     int16_t *pcm;
     uint32_t pcmPairs;
+    /* Hardware mixer only: each voice's unplayed ring samples. */
+    int16_t *hwPcm[OF_MAX_VOICES];
+    uint32_t hwCount[OF_MAX_VOICES];
+    bool hwCarry[OF_MAX_VOICES];
+    int16_t hwCarryValue[OF_MAX_VOICES];
 } OfAudioSnapshot;
+
+/* Follows the software queue in a state made with the hardware mixer; a
+ * state without it (older, or the software mix) has nothing after the queue. */
+#define OF_AUDIO_HW_SNAPSHOT_MAGIC 0x31574855u /* "UHW1" */
+
+/* The samples written to a voice's ring that it has not played yet, oldest
+ * first, made even by leaving out the oldest: it is being played as the
+ * state is taken. Silence after a track's end is left out; the decoder,
+ * which has finished, writes it again. */
+static uint32_t hwUnplayed(const OfAudioSystem *ut, int v, uint32_t *from) {
+    const OfHwVoice *hw = &ut->hw[v];
+    if (!ut->hwMixer || !hw->running || hw->instanceId != ut->voices[v].instanceId) return 0;
+    int32_t position = hwPortPosition(hw);
+    if (position < 0) return 0;
+    uint32_t backlog = hwBacklog(hw, position);
+    if (hw->padded) {
+        uint32_t pad = (hw->wptr - hw->endWptr) & OF_HW_RING_MASK;
+        backlog = backlog > pad ? backlog - pad : 0;
+    }
+    backlog &= ~1u;
+    uint32_t end = hw->padded ? hw->endWptr : hw->wptr;
+    *from = (end - backlog) & OF_HW_RING_MASK;
+    return backlog;
+}
 
 void ofAudioSnapshotLock(bool locked) { g_snapshotLocked = locked; }
 
@@ -1896,11 +1963,6 @@ bool ofAudioSnapshot(AudioSystem *audio, uint8_t **data, size_t *size, const cha
     int freePairs = 0;
     const char *failure = "encoding/allocation";
     int failureVoice = -1;
-    if (ut->hwMixer) {
-        logInfo("State audio capture: not supported with the hardware mixer (--sw-mixer).\n");
-        *reason = "Audio cannot be captured safely";
-        return false;
-    }
     if (ut->queueCapacity > 0) {
         freePairs = of_audio_free();
         if (freePairs < 0 || freePairs > ut->queueCapacity) { failure = "queue capacity"; goto bad; }
@@ -1957,6 +2019,22 @@ bool ofAudioSnapshot(AudioSystem *audio, uint8_t **data, size_t *size, const cha
         uint32_t pair = (uint16_t)ut->snapshotPcm[at] | (uint32_t)(uint16_t)ut->snapshotPcm[at + 1] << 16;
         ofSnapU32(&w, pair);
     }
+    if (ut->hwMixer) {
+        ofSnapU32(&w, OF_AUDIO_HW_SNAPSHOT_MAGIC);
+        for (int v = 0; v < OF_MAX_VOICES; v++) {
+            uint32_t from = 0, count = ut->voices[v].active ? hwUnplayed(ut, v, &from) : 0;
+            const OfHwVoice *hw = &ut->hw[v];
+            bool carry = ut->voices[v].active && hw->running && hw->instanceId == ut->voices[v].instanceId &&
+                hw->haveCarry;
+            ofSnapU32(&w, count);
+            ofSnapU32(&w, (uint32_t) carry | (uint32_t) (uint16_t) (carry ? hw->carry : 0) << 16);
+            const int16_t *ring = (const int16_t *) hwPortRingWords(ut->hwRings[v]);
+            for (uint32_t i = 0; i < count; i += 2) {
+                int16_t s0 = ring[(from + i) & OF_HW_RING_MASK], s1 = ring[(from + i + 1) & OF_HW_RING_MASK];
+                ofSnapU32(&w, (uint32_t) (uint16_t) s0 | (uint32_t) (uint16_t) s1 << 16);
+            }
+        }
+    }
     if (!w.ok) goto bad;
     *data = w.data; *size = w.size; return true;
 bad:
@@ -1976,6 +2054,7 @@ void ofAudioFreeSnapshot(void *ptr) {
     OfAudioSnapshot *p = ptr;
     if (!p) return;
     if (p->sounds) for (uint32_t i = 0; i < p->trackCount; i++) free(p->sounds[i]);
+    for (int v = 0; v < OF_MAX_VOICES; v++) free(p->hwPcm[v]);
     free(p->sounds); free(p->gains); free(p->pcm); free(p);
 }
 
@@ -2071,6 +2150,25 @@ void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t siz
         uint32_t pair = ofSnapGetU32(&r);
         p->pcm[i * 2] = (int16_t)pair; p->pcm[i * 2 + 1] = (int16_t)(pair >> 16);
     }
+    if (r.ok && r.offset < r.size) {
+        if (ofSnapGetU32(&r) != OF_AUDIO_HW_SNAPSHOT_MAGIC) goto bad;
+        for (unsigned v = 0; v < OF_MAX_VOICES; v++) {
+            uint32_t count = ofSnapGetU32(&r), carry = ofSnapGetU32(&r);
+            if (!r.ok || (count & 1) || count > OF_HW_RING_SAMPLES / 2 || count > (r.size - r.offset) / 2 ||
+                (carry & 0xFFFEu) != 0 || ((count || (carry & 1)) && !p->voices[v].active)) goto bad;
+            p->hwCount[v] = count;
+            p->hwCarry[v] = (carry & 1) != 0;
+            p->hwCarryValue[v] = (int16_t) (carry >> 16);
+            if (count) {
+                p->hwPcm[v] = malloc((size_t) count * sizeof(int16_t));
+                if (!p->hwPcm[v]) goto bad;
+                for (uint32_t i = 0; i < count; i += 2) {
+                    uint32_t pair = ofSnapGetU32(&r);
+                    p->hwPcm[v][i] = (int16_t) pair; p->hwPcm[v][i + 1] = (int16_t) (pair >> 16);
+                }
+            }
+        }
+    }
     if (!r.ok || r.offset != r.size) goto bad;
     return p;
 bad:
@@ -2080,7 +2178,18 @@ bad:
 void ofAudioApplySnapshot(AudioSystem *audio, void *ptr) {
     OfAudioSystem *ut = (OfAudioSystem *)audio;
     OfAudioSnapshot *p = ptr;
-    for (int v = 0; v < OF_MAX_VOICES; v++) hwStopVoice(ut, v);
+    for (int v = 0; v < OF_MAX_VOICES; v++) {
+        hwStopVoice(ut, v);
+        hwDropRestore(ut, v);
+        /* The software mix cannot play these; it goes on from the decoder,
+         * a little later in each sound than the state was made. */
+        if (!ut->hwMixer) continue;
+        ut->hwRestore[v] = p->hwPcm[v]; p->hwPcm[v] = NULL;
+        ut->hwRestoreCount[v] = p->hwCount[v];
+        ut->hwRestoreCarry[v] = p->hwCarry[v];
+        ut->hwRestoreCarryValue[v] = p->hwCarryValue[v];
+    }
+    ut->hwStartAfterNanos = 0;
     for (uint32_t i = 0; i < p->trackCount; i++) if (p->sounds[i]) {
         if (ut->cachedSounds[i]) { free(ut->cachedSounds[i]); ut->cachedBytes -= trackBytes(&ut->tracks[i]); }
         ut->cachedSounds[i] = p->sounds[i]; p->sounds[i] = NULL;
@@ -2108,6 +2217,7 @@ void ofAudioApplySnapshot(AudioSystem *audio, void *ptr) {
         int written = of_audio_write(p->pcm, (int)p->pcmPairs);
         if (written > 0 && written <= (int)p->pcmPairs) {
             memcpy(ut->snapshotPcm, p->pcm, (size_t)written * 4); ut->snapshotWritten = (uint64_t)written;
+            if (ut->hwMixer) ut->hwStartAfterNanos = nowNanos() + (uint64_t) written * 1000000000ull / OF_AUDIO_RATE;
         }
     }
 }
