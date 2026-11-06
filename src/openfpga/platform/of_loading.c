@@ -464,19 +464,25 @@ void ofLoadingFail(const char *why, bool logSaved) {
     if (logSaved)
         snprintf(footer, sizeof(footer), "%s",
                  "Quit from the Analogue menu to save the log: the entry's _1.sav file in Saves/butterscotch/common.");
-    /* One font for the whole screen. Choosing the game's may load its texture;
-     * if that fails too and comes back here, the terminal font it is. */
+    /* What went wrong first, kept: choosing the game's font below may load its
+     * texture, and if that fails too it comes back here with a newer error. */
     static bool failing = false;
+    static OfLoadError error;
+    static char detail[160];
     if (failing) {
-        g_gameFont = 0;
+        g_gameFont = 0; /* the terminal font, and the first error */
     } else {
         failing = true;
+        ofLoadingDescribe(&error, ofGame.title, ofGame.dataFiles, ofLogLastError(), why, g_dataLoaded,
+                          logSaved ? footer : NULL);
+        if (error.detail != NULL) {
+            snprintf(detail, sizeof(detail), "%s", error.detail);
+            error.detail = detail;
+        }
+        /* One font for the whole screen. */
         g_gameFont = 0;
         g_gameFont = ofFontReady() ? 1 : 0;
     }
-    OfLoadError error;
-    ofLoadingDescribe(&error, ofGame.title, ofGame.dataFiles, ofLogLastError(), why, g_dataLoaded,
-                      logSaved ? footer : NULL);
     for (;;) {
         bool fresh = false;
         uint16_t *fb = ofPlatformLoadingSurface(&fresh);

@@ -23,7 +23,18 @@ static const char *g_lastError = "";
 const char *ofLogLastError(void) { return g_lastError; }
 void ofLogPrint(const char *format, ...) { (void) format; }
 
-bool ofFontReady(void) { return false; }
+/* With g_fontFails set, asking for the game's font fails the way a texture
+ * load that runs out of memory would: a new error, and the app halting again. */
+static bool g_fontFails = false;
+void ofLoadingFail(const char *why, bool logSaved);
+bool ofFontReady(void) {
+    if (g_fontFails) {
+        g_fontFails = false;
+        g_lastError = "FATAL: calloc(262144) failed at src/sw/sw_texture_lru.c:120";
+        ofLoadingFail("abort() called (see message above)", false);
+    }
+    return false;
+}
 /* ofFontDraw before the game's font is ready: of_perf.c's 6x12 fallback, copied. */
 int ofFontLineHeight(int scale) { (void) scale; return OF_LOG_CELL_H; }
 int ofFontWidth(const char *text, int scale) { (void) scale; return (int) strlen(text) * OF_LOG_CELL_W; }
@@ -225,12 +236,30 @@ static void testScreens(void) {
     }
 }
 
+/* A failure while choosing the failure screen's font keeps the first error on it. */
+static void testFailReentry(void) {
+    static uint16_t expected[OF_LOADING_WIDTH * OF_LOADING_HEIGHT];
+    OfLoadError e;
+    ofLoadingDescribe(&e, ofGame.title, ofGame.dataFiles, "Cannot open data.win", "app exited", false, NULL);
+    ofLoadingDrawError(expected, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, 0);
+
+    g_permille = 0, g_dataLoaded = false;
+    ofLoadingBegin();
+    g_lastError = "Cannot open data.win";
+    g_fontFails = true;
+    ofLoadingFail("app exited", false);
+    assert(!g_fontFails && g_gameFont == 0);
+    assert(memcmp(g_fb, expected, sizeof(expected)) == 0);
+    ofLoadingEnd();
+}
+
 int main(void) {
     testLoad();
     testNoPlan();
     testWrapTrailingSpace();
     testDescribe();
     testScreens();
+    testFailReentry();
     printf("loading screen: passed\n");
     return 0;
 }
