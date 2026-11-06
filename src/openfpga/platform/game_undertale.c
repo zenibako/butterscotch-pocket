@@ -95,6 +95,80 @@ static const OfBenchSection g_sections[] = {
     { "Flowey battle (640x480)", 2600, "battl" },
 };
 
+/* The battle tour ("--bench-battles"): a walk to the first room, then six
+ * battles from across the game, each entered by setting the battle group and
+ * going to room_battle (306) from room_area1 (4), and played for 450 frames
+ * with Z every 40 frames and the heart moving between. HP is kept topped up so
+ * no battle ends in a game over. Late bosses are entered without their story
+ * set up, so they show their opening turns, not a real playthrough. */
+static const char g_tourScript[] =
+    "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z,"
+    "700:R*200,1061:Z,1069:U*20,1101:Z,1109:D*20,1141:Z,1149:L*20,1181:Z,1189:R*20,1221:Z,1229:U*20,1261:Z,"
+    "1269:D*20,1301:Z,1309:L*20,1341:Z,1349:R*20,1381:Z,1389:U*20,1421:Z,1429:D*20,1461:Z,1469:L*20,1501:Z,"
+    "1509:R*20,1541:Z,1549:U*20,1581:Z,1589:D*20,1621:Z,1629:L*20,1661:Z,1669:R*20,1701:Z,1709:U*20,1741:Z,"
+    "1749:D*20,1781:Z,1789:L*20,1821:Z,1829:R*20,1861:Z,1869:U*20,1901:Z,1909:D*20,1941:Z,1949:L*20,1981:Z,"
+    "1989:R*20,2021:Z,2029:U*20,2061:Z,2069:D*20,2101:Z,2109:L*20,2141:Z,2149:R*20,2181:Z,2189:U*20,2221:Z,"
+    "2229:D*20,2261:Z,2269:L*20,2301:Z,2309:R*20,2381:Z,2389:D*20,2421:Z,2429:L*20,2461:Z,2469:R*20,2501:Z,"
+    "2509:U*20,2541:Z,2549:D*20,2581:Z,2589:L*20,2621:Z,2629:R*20,2661:Z,2669:U*20,2701:Z,2709:D*20,2741:Z,"
+    "2749:L*20,2781:Z,2789:R*20,2821:Z,2829:U*20,2861:Z,2869:D*20,2901:Z,2909:L*20,2941:Z,2949:R*20,2981:Z,"
+    "2989:U*20,3021:Z,3029:D*20,3061:Z,3069:L*20,3101:Z,3109:R*20,3141:Z,3149:U*20,3181:Z,3189:D*20,3221:Z,"
+    "3229:L*20,3261:Z,3269:R*20,3301:Z,3309:U*20,3341:Z,3349:D*20,3381:Z,3389:L*20,3421:Z,3429:R*20,3461:Z,"
+    "3469:U*20,3501:Z,3509:D*20,3541:Z,3549:L*20,3581:Z,3589:R*20,3621:Z,3629:U*20,3661:Z,3669:D*20";
+
+static const OfJump g_tourJumps[] = {
+    { 1000, -1, "battlegroup=4,hp=99,maxhp=99" }, /* Froggit */
+    { 1001, 306, NULL }, /* room_battle */
+    { 1101, -1, "hp=99" },
+    { 1201, -1, "hp=99" },
+    { 1301, -1, "hp=99" },
+    { 1401, -1, "hp=99" },
+    { 1449, 4, NULL }, /* out of the last battle */
+    { 1450, -1, "battlegroup=22,hp=99,maxhp=99" }, /* Toriel */
+    { 1451, 306, NULL }, /* room_battle */
+    { 1551, -1, "hp=99" },
+    { 1651, -1, "hp=99" },
+    { 1751, -1, "hp=99" },
+    { 1851, -1, "hp=99" },
+    { 1899, 4, NULL }, /* out of the last battle */
+    { 1900, -1, "battlegroup=27,hp=99,maxhp=99" }, /* Papyrus */
+    { 1901, 306, NULL }, /* room_battle */
+    { 2001, -1, "hp=99" },
+    { 2101, -1, "hp=99" },
+    { 2201, -1, "hp=99" },
+    { 2301, -1, "hp=99" },
+    { 2349, 4, NULL }, /* out of the last battle */
+    { 2350, -1, "battlegroup=47,hp=99,maxhp=99" }, /* Undyne */
+    { 2351, 306, NULL }, /* room_battle */
+    { 2451, -1, "hp=99" },
+    { 2551, -1, "hp=99" },
+    { 2651, -1, "hp=99" },
+    { 2751, -1, "hp=99" },
+    { 2799, 4, NULL }, /* out of the last battle */
+    { 2800, -1, "battlegroup=81,hp=99,maxhp=99" }, /* Mettaton EX */
+    { 2801, 306, NULL }, /* room_battle */
+    { 2901, -1, "hp=99" },
+    { 3001, -1, "hp=99" },
+    { 3101, -1, "hp=99" },
+    { 3201, -1, "hp=99" },
+    { 3249, 4, NULL }, /* out of the last battle */
+    { 3250, -1, "battlegroup=101,hp=99,maxhp=99" }, /* Asgore */
+    { 3251, 306, NULL }, /* room_battle */
+    { 3351, -1, "hp=99" },
+    { 3451, -1, "hp=99" },
+    { 3551, -1, "hp=99" },
+    { 3651, -1, "hp=99" },
+};
+
+static const OfBenchSection g_tourSections[] = {
+    { "boot to the first room", 1000, "boot" },
+    { "Froggit (640x480)", 1448, "frog" },
+    { "Toriel (640x480)", 1898, "tori" },
+    { "Papyrus (640x480)", 2348, "papy" },
+    { "Undyne (640x480)", 2798, "undy" },
+    { "Mettaton EX (640x480)", 3248, "mtex" },
+    { "Asgore (640x480)", 3698, "asgr" },
+};
+
 static void battleUiInstall(Runner *runner) {
     static const char *const sprites[] = {
         "spr_fightbt", "spr_fightbt_ja", "spr_fightbt_hollow", "spr_fightbt_hollow_ja",
@@ -135,6 +209,7 @@ const OfGame ofGame = {
     .installPrompts = installPrompts,
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,
+    .speedFullResBattles = true,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,
@@ -142,6 +217,12 @@ const OfGame ofGame = {
     .benchScript = g_script,
     .benchSections = g_sections,
     .benchSectionCount = (int) (sizeof(g_sections) / sizeof(g_sections[0])),
+    .tourTitle = "Undertale battle tour",
+    .tourScript = g_tourScript,
+    .tourJumps = g_tourJumps,
+    .tourJumpCount = (int) (sizeof(g_tourJumps) / sizeof(g_tourJumps[0])),
+    .tourSections = g_tourSections,
+    .tourSectionCount = (int) (sizeof(g_tourSections) / sizeof(g_tourSections[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,

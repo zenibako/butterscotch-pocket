@@ -141,6 +141,7 @@ int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed) { (void) out; (
 // buffer last known under an older generation is not known any more.
 static uint32_t swrDirtyGeneration;
 static uint32_t swrDirtyUses;
+uint32_t swrDirtyLastTiles;
 
 void swrFramebufferTouched(void)
 {
@@ -230,6 +231,9 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
     }
     d->known = true;
     d->color = color;
+    uint32_t tiles = 0;
+    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) tiles += (uint32_t) __builtin_popcount(d->rows[r] | d->baseRows[r]);
+    swrDirtyLastTiles = tiles;
     memset(d->rows, 0, sizeof(d->rows));
     memset(d->baseRows, 0, sizeof(d->baseRows));
     d->baseValid = false;
