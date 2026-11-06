@@ -14,6 +14,8 @@
 #include "of_diag.h"
 #include "of_perf.h"
 #include "of_bench.h"
+#include "of_loading.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +24,10 @@
 void ofDiagHalt(const char *why) {
     ofLogPrint("[butterscotch] %s -- halted.\n", why);
     /* Keep the log: on the screen there is room for its last lines only. */
-    if (ofLogDump()) ofLogPrint("Log saved; quit from the Analogue menu to keep it.\n");
+    bool saved = ofLogDump();
+    if (saved) ofLogPrint("Log saved; quit from the Analogue menu to keep it.\n");
+    /* Still loading, behind the progress bar: say on it what went wrong. */
+    ofLoadingFail(why, saved);
     ofPlatformShowLogAndHalt();
 
     /* Still on the OS terminal (nothing drawn yet): park there. */
@@ -56,7 +61,7 @@ void ofDiagInstall(void) {
 void ofDiagCheckFile(const char *name) {
     FILE *f = fopen(name, "rb");
     if (f == NULL) {
-        printf("[butterscotch] cannot open %s\n", name);
+        logError("Cannot open %s\n", name);
         exit(1);
     }
     fseek(f, 0, SEEK_END);

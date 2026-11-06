@@ -23,6 +23,7 @@
 #include "of_bench.h"
 #include "of_focus.h"
 #include "of_font.h"
+#include "of_loading.h"
 #include "of_menu.h"
 #include "of_strings.h"
 #include "of_native.h"
@@ -76,6 +77,9 @@ static uint16_t *g_nextFb = NULL;
 static int g_nextW = 0;
 static int g_nextH = 0;
 static bool g_showingFramebuffer = false;
+static bool g_loadingVideo = false; /* the loading screen set the video mode up */
+static bool g_loadingShown = false; /* and has put a frame on screen */
+static void blankDisplayBuffers(void);
 static const char *g_inputScript = NULL;
 static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
@@ -365,8 +369,11 @@ bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless, 
     (void) headless;
     (void) fullscreen;
 
+    /* The loading screen already has the display (of_loading.c). */
+    if (g_loadingVideo) return true;
     /* Stay on the text terminal until the first frame is ready, so load-time
      * log lines (and any early failure) are visible on the device. */
+    blankDisplayBuffers();
     of_video_init();
     of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
     of_video_set_display_mode(OF_DISPLAY_TERMINAL);
@@ -441,10 +448,33 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     return true;
 }
 
+/* Blacks out all three display buffers, as big as the largest mode.
+ *
+ * openfpgaOS (902a8ad) changes the scanout's size and colour mode first and
+ * clears its buffers after, and of_video_init switches from the terminal to
+ * the app's buffers without clearing them at all. Whatever the shown buffer
+ * held is meanwhile read at the new size: an old frame from the last run, or
+ * at 640x480 a 320x240 frame read four times too wide, which looks like
+ * static. Clearing them beforehand leaves only black to show. Also the
+ * renderer's: it draws in place into these buffers. */
+static void blankDisplayBuffers(void) {
+#ifndef OF_PC
+    const uint32_t bytes = (uint32_t) OF_HIRES_W * OF_HIRES_H * sizeof(uint16_t);
+    for (int i = 0; i < 3; i++) {
+        uint8_t *buffer = of_video_buffer_addr(i);
+        if (buffer == NULL) continue;
+        memset(buffer, 0, bytes);
+        of_cache_clean_range(buffer, bytes);
+    }
+    swrFramebufferTouched();
+#endif
+}
+
 /* Switches the display to match the frame about to be presented. */
 static void matchVideoMode(int width, int height) {
     if (width == g_modeW && height == g_modeH) return;
 
+    blankDisplayBuffers();
     of_video_mode_t want = { (uint16_t) width, (uint16_t) height, 0, OF_VIDEO_MODE_RGB555, 0 };
     if (of_video_set_mode(&want) < 0) {
         if (width > OF_SCREEN_W) {
@@ -703,6 +733,7 @@ void platformSwapBuffers(void) {
     if (!g_showingFramebuffer) {
         of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
         g_showingFramebuffer = true;
+        ofLoadingEnd();
     }
 
     matchVideoMode(g_nextW, g_nextH);
@@ -774,6 +805,38 @@ bool ofPlatformShowLogAndHalt(void) {
         of_video_flip();
         of_input_poll();
         usleep(100000);
+    }
+}
+
+/* The loading screen (of_loading.c) draws at 320x240 straight into the
+ * display's buffers until the game's first frame. Each buffer is cleared the
+ * first time it comes round; after that only the bar is drawn over. */
+uint16_t *ofPlatformLoadingSurface(bool *fresh) {
+    if (g_showingFramebuffer) return NULL; /* the game has the screen */
+    if (!g_loadingVideo) {
+        blankDisplayBuffers();
+        of_video_init();
+        of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
+        g_loadingVideo = true;
+    }
+    if (!useLogMode(OF_LOADING_WIDTH, OF_LOADING_HEIGHT)) return NULL;
+    uint16_t *surface = (uint16_t *) (void *) of_video_surface();
+    static uint16_t *seen[4];
+    static int count = 0;
+    *fresh = true;
+    for (int i = 0; i < count; i++)
+        if (seen[i] == surface) *fresh = false;
+    if (*fresh && count < (int) (sizeof(seen) / sizeof(seen[0]))) seen[count++] = surface;
+    swrFramebufferTouched();
+    return surface;
+}
+
+void ofPlatformLoadingFlip(void) {
+    of_video_flip();
+    /* Off the terminal once there is a frame to show instead. */
+    if (!g_loadingShown) {
+        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+        g_loadingShown = true;
     }
 }
 

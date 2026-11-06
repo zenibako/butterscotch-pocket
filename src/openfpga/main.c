@@ -14,6 +14,7 @@
 #include "platform/of_bench.h"
 #include "platform/of_focus.h"
 #include "platform/of_hooks.h"
+#include "platform/of_loading.h"
 #include "platform/of_state_requests.h"
 #include "stb_ds.h"
 
@@ -81,7 +82,6 @@ int main(int argc, char **argv) {
 #endif
     ofDiagInstall();
     ofSavestateStartup();
-    ofDiagCheckFile(OF_DATA_WIN_NAME);
 
     CommandLineArgs args = {0};
     args.exitAtFrame = -1;
@@ -94,7 +94,13 @@ int main(int argc, char **argv) {
     args.lazyAudio = true;
     args.renderer = SOFTWARE;
     args.dataWinPath = OF_DATA_WIN_NAME;
+    /* The game cores show a progress bar while loading; the benchmark entries
+     * (and --debug, or --verbose-load) keep the OS terminal with the load log. */
+    bool verboseLoad = false;
     for (int i = 0; i < argc; i++) {
+        if (strncmp(argv[i], "--bench", 7) == 0 || strncmp(argv[i], "--focus-", 8) == 0 ||
+            strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "--verbose-load") == 0)
+            verboseLoad = true;
         if (ofFocusStart(argv[i])) { args.seed=7; args.hasSeed=true; }
         if (strcmp(argv[i], "--bench-sleep") == 0) {
             args.seed = 7;
@@ -135,6 +141,16 @@ int main(int argc, char **argv) {
          * benchmark and a large n this times everything but the drawing: what a skipped frame costs. */
         if (strcmp(argv[i], "--draw-every") == 0 && i + 1 < argc) ofPlatformSetForcedSkip(atoi(argv[++i]));
     }
+
+#ifndef OF_PC
+    if (!verboseLoad) ofLoadingBegin();
+#else
+    (void) verboseLoad;
+#endif
+    ofDiagCheckFile(OF_DATA_WIN_NAME);
+#ifndef OF_PC
+    ofLoadingPlan(OF_DATA_WIN_NAME);
+#endif
 
 #ifdef OF_PC
     if (getenv("BS_SCRIPT") != NULL) ofPlatformSetInputScript(getenv("BS_SCRIPT"));

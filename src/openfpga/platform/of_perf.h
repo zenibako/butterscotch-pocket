@@ -43,6 +43,8 @@ void ofLogSetConsole(bool enabled);
 bool ofLogDump(void);
 /* printf to the console and the overlay buffer, without a timestamp. */
 void ofLogPrint(const char *format, ...) __attribute__((format(printf, 1, 2)));
+/* The last error logged (without its time), or "". */
+const char *ofLogLastError(void);
 /* "slowest chunks: ..." once data.win has loaded, empty before that. */
 const char *ofLogLoadSummary(void);
 /* The loader's "phases: alloc ..., read ..., parse ..., free ..." totals. */

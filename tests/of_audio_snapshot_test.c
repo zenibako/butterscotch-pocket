@@ -10,6 +10,7 @@ uint64_t nowNanos(void) { return 0; }
 bool ofPerfDetail = false;
 void ofPerfAddLoad(OfLoadKind kind, uint64_t value) { (void)kind; (void)value; }
 void ofPerfPhase(OfPhase phase) { (void)phase; }
+void ofLoadingTick(void) {}
 #include <stdarg.h>
 static char lastInfo[512];
 void logInfo(const char *fmt, ...) {

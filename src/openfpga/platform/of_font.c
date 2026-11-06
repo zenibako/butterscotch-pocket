@@ -168,6 +168,10 @@ static bool ready(void) {
     return copyGlyphs();
 }
 
+bool ofFontReady(void) {
+    return g_runner != NULL && ready();
+}
+
 int ofFontScale(int frameWidth) {
     return frameWidth >= 640 ? 2 : 1;
 }

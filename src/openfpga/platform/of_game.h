@@ -47,6 +47,9 @@ typedef struct {
 #define OF_BENCH_MAX_SECTIONS 8
 
 typedef struct {
+    /* The game's name, and its files on the card, for the loading screen's errors. */
+    const char *title;
+    const char *dataFiles;
     /* Prompts that name keyboard keys, beyond the ones every game shares. */
     const OfStringPatch *strings;
     size_t stringCount;

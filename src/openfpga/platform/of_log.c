@@ -7,6 +7,9 @@
 #include "gettime.h"
 #include "of_hooks.h"
 #include "of_perf.h"
+#ifndef OF_HOST_TOOL
+#include "of_loading.h"
+#endif
 #include "of_save_format.h"
 
 #include <stdarg.h>
@@ -210,6 +213,7 @@ static void trackFrameLoads(const char *format, const char *text, uint64_t now) 
 #else
 static void trackFrameLoads(const char *format, const char *text, uint64_t now) {
     static uint64_t roomStart = 0;
+    ofLoadingNote(format, text);
     if (strncmp(format, "Room changed:", 13) == 0) {
         roomStart = now;
         ofAudioRoomChange();
@@ -262,6 +266,25 @@ void ofLogPrint(const char *format, ...) {
     keepText(text);
 }
 
+/* The last error logged, for the loading screen's error (of_loading.c). An
+ * error can be logged in pieces; a new one starts at the start of a line. */
+static char g_lastError[OF_LOG_LINE_LEN];
+
+const char *ofLogLastError(void) {
+    return g_lastError;
+}
+
+static void keepError(const char *text, bool newError) {
+    if (newError) g_lastError[0] = '\0';
+    size_t len = strlen(g_lastError);
+    size_t room = sizeof(g_lastError) - 1 - len, add = strlen(text);
+    if (add > room) add = room;
+    memcpy(g_lastError + len, text, add);
+    len += add;
+    g_lastError[len] = '\0';
+    while (len > 0 && (g_lastError[len - 1] == '\n' || g_lastError[len - 1] == ' ')) g_lastError[--len] = '\0';
+}
+
 void platformLog(const logType type, const char *format, va_list va) {
     static uint64_t start = 0;
     static bool atLineStart = true;
@@ -290,6 +313,7 @@ void platformLog(const logType type, const char *format, va_list va) {
     vsnprintf(text, sizeof(text), format, va);
     if (g_console) fputs(text, stdout);
     keepText(text);
+    if (type == LOG_TYPE_ERROR) keepError(text, atLineStart);
     trackLoad(format, text, now);
 
     size_t len = strlen(format);
