@@ -137,6 +137,136 @@ int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed) { (void) out; (
 #define SWR_NOTED(what, statement) do { statement; } while (0)
 #endif
 
+// Partial clears (see SWDirtyBuffer). Bumped by swrFramebufferTouched: a
+// buffer last known under an older generation is not known any more.
+static uint32_t swrDirtyGeneration;
+static uint32_t swrDirtyUses;
+uint32_t swrDirtyLastTiles;
+
+void swrFramebufferTouched(void)
+{
+    swrDirtyGeneration++;
+}
+
+// Picks up what is known of the platform buffer about to be drawn in.
+MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
+{
+    swrBaseFinish(swr, false);
+    swr->dirty = swr->dirtyMark = NULL;
+    static int fullClear = -1;
+    if (fullClear < 0) fullClear = getenv("BS_FULL_CLEAR") != NULL;
+    if (fullClear) return;
+    if (width > SWR_DIRTY_MAX_W || height > (SWR_DIRTY_MAX_ROWS << SWR_DIRTY_TILE_H_SHIFT)) return;
+    if (swr->dirtyBuffers == NULL) {
+        swr->dirtyBuffers = (SWDirtyBuffer*) calloc(SWR_DIRTY_BUFFERS, sizeof(SWDirtyBuffer));
+        if (swr->dirtyBuffers == NULL) return;
+    }
+    SWDirtyBuffer* found = NULL;
+    SWDirtyBuffer* oldest = &swr->dirtyBuffers[0];
+    for (int i = 0; i < SWR_DIRTY_BUFFERS; i++) {
+        SWDirtyBuffer* d = &swr->dirtyBuffers[i];
+        // A buffer of another size was drawn in with another layout: what
+        // was known of every buffer is gone.
+        if (d->fb != NULL && (d->width != width || d->height != height)) d->known = false;
+        if (d->fb == fb && d->width == width && d->height == height) found = d;
+        if (d->lastUsed < oldest->lastUsed) oldest = d;
+    }
+    if (found == NULL) {
+        found = oldest;
+        found->fb = fb;
+        found->known = false;
+    }
+    if (found->generation != swrDirtyGeneration) found->known = false;
+    found->width = width;
+    found->height = height;
+    found->generation = swrDirtyGeneration;
+    found->lastUsed = ++swrDirtyUses;
+    swr->dirty = swr->dirtyMark = found;
+}
+
+// BS_CHECK_CLEAR=1 (a desktop check, slow): before each partial clear, every
+// pixel outside the marked tiles must already be the colour, or some write
+// went unmarked; that is logged with where it is, and the run stops.
+static void swrDirtyCheck(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color);
+static void swrDirtyCheckKept(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color) { swrDirtyCheck(d, fb, color); }
+
+static void swrDirtyCheck(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color)
+{
+    for (int y = 0; y < d->height; y++) {
+        uint32_t marked = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT] | d->baseRows[y >> SWR_DIRTY_TILE_H_SHIFT];
+        for (int x = 0; x < d->width; x++) {
+            if (marked & (1u << (x >> SWR_DIRTY_TILE_W_SHIFT))) continue;
+            if (fb[y * d->width + x] != color) {
+                logError("swr: unmarked write at %d,%d in a %dx%d buffer: %04x, cleared to %04x\n", x, y, d->width,
+                         d->height, (unsigned) fb[y * d->width + x], (unsigned) color);
+                abort();
+            }
+        }
+    }
+}
+
+static uint64_t swrFillTiles(SWRenderer* swr, const SWDirtyBuffer* d, const uint32_t* mask, const uint32_t* also, uintpixel_t color);
+
+void swrClearMain(SWRenderer* swr, uintpixel_t color)
+{
+    SWDirtyBuffer* d = swr->dirty;
+    if (d == NULL || d->fb != swr->mainFb || d->width != swr->mainWidth || d->height != swr->mainHeight) {
+        swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
+        return;
+    }
+    static int check = -1;
+    if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
+    static uint32_t partial, whole;
+    static uint64_t written;
+    if (check && (partial + whole) % 600 == 599)
+        logInfo("swr: clears %u partial, %u whole; partial ones wrote %u%% of a screen on average\n", partial, whole,
+                partial ? (unsigned) (written * 100 / ((uint64_t) partial * d->width * d->height)) : 0);
+    if (d->known && d->color == color) {
+        if (check) swrDirtyCheck(d, swr->mainFb, color);
+        partial++;
+        written += swrFillTiles(swr, d, d->rows, d->baseRows, color);
+    } else {
+        whole++;
+        swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
+    }
+    d->known = true;
+    d->color = color;
+    uint32_t tiles = 0;
+    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) tiles += (uint32_t) swrBitCount(d->rows[r] | d->baseRows[r]);
+    swrDirtyLastTiles = tiles;
+    memset(d->rows, 0, sizeof(d->rows));
+    memset(d->baseRows, 0, sizeof(d->baseRows));
+    d->baseValid = false;
+    swr->dirtyMark = d;
+}
+
+// Fills the tiles of the main buffer marked in either mask with the colour; returns the pixels written.
+static uint64_t swrFillTiles(SWRenderer* swr, const SWDirtyBuffer* d, const uint32_t* mask, const uint32_t* also, uintpixel_t color)
+{
+    uint64_t written = 0;
+    {
+        int tileRows = (d->height + (1 << SWR_DIRTY_TILE_H_SHIFT) - 1) >> SWR_DIRTY_TILE_H_SHIFT;
+        for (int r = 0; r < tileRows; r++) {
+            uint32_t bits = mask[r] | (also != NULL ? also[r] : 0);
+            int y0 = r << SWR_DIRTY_TILE_H_SHIFT, y1 = y0 + (1 << SWR_DIRTY_TILE_H_SHIFT);
+            if (y1 > d->height) y1 = d->height;
+            while (bits != 0) {
+                // One run of marked tiles at a time.
+                int c0 = swrLowestBit(bits);
+                int c1 = c0;
+                while (c1 < 32 && (bits & (1u << c1))) c1++;
+                bits &= c1 >= 32 ? 0 : ~((1u << c1) - 1);
+                int x0 = c0 << SWR_DIRTY_TILE_W_SHIFT, x1 = c1 << SWR_DIRTY_TILE_W_SHIFT;
+                if (x1 > d->width) x1 = d->width;
+                for (int y = y0; y < y1; y++)
+                    swrFillPixels(&swr->mainFb[(size_t) y * d->width + x0], (size_t) (x1 - x0), color);
+                written += (uint64_t) (y1 - y0) * (uint64_t) (x1 - x0);
+            }
+        }
+    }
+    return written;
+}
+
 #ifdef SW_PLATFORM_FRAMEBUFFER
 // Optional: lets the platform hand out the buffer each frame is drawn into
 // (typically the display's back buffer) so a finished frame does not have to
@@ -157,6 +287,7 @@ static bool swrAcquirePlatformFramebuffer(SWRenderer* swr, int width, int height
     swr->fbPitch = width;
     swr->width = swr->mainWidth = width;
     swr->height = swr->mainHeight = height;
+    swrDirtyAcquire(swr, fb, width, height);
     return true;
 }
 #endif
@@ -230,6 +361,8 @@ static void SWRenderer_destroy(Renderer* renderer)
     free(swr->hintedGlyphs);
     free(swr->contrastItems);
     free(swr->contrastFonts);
+    free(swr->dirtyBuffers);
+    swr->dirtyBuffers = swr->dirty = swr->dirtyMark = NULL;
     
     if (!swr->fbIsPlatform) free(swr->mainFb);
     swr->fb = swr->mainFb = NULL;
@@ -253,7 +386,7 @@ static void SWRenderer_beginFrame(Renderer* renderer, int32_t gameW, int32_t gam
         bool resized = swr->width != windowW || swr->height != windowH;
         if (swrAcquirePlatformFramebuffer(swr, windowW, windowH)) {
             // clearFrameBuffer ran before this frame's size was known.
-            if (resized) swrFillPixels(swr->fb, (size_t) windowW * windowH, swrConvertPixel(0));
+            if (resized) swrClearMain(swr, swrConvertPixel(0));
             return;
         }
         if (swr->fbIsPlatform) {
@@ -261,6 +394,7 @@ static void SWRenderer_beginFrame(Renderer* renderer, int32_t gameW, int32_t gam
             swr->fbIsPlatform = false;
             swr->fb = swr->mainFb = NULL;
             swr->width = swr->height = 0;
+            swr->dirty = swr->dirtyMark = NULL;
         }
     }
 #endif
@@ -944,7 +1078,7 @@ static void swrFlushPendingClear(SWRenderer* swr)
     if (!swr->pendingClear) return;
     swr->pendingClear = false;
     if (!swr->mainFb) return;
-    swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, swr->pendingClearColor);
+    swrClearMain(swr, swr->pendingClearColor);
 }
 
 // A clear of the whole main buffer is held back as well: a room's tiles
@@ -960,7 +1094,70 @@ void swrClearSettle(SWRenderer* swr)
         SWR_NOTED("  of which: held clear and tiled written", swrTiledHeldWrite(swr, swr->clearHeldColor));
         return;
     }
-    SWR_NOTED("  of which: held clear written", swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, swr->clearHeldColor));
+    SWR_NOTED("  of which: held clear written", swrClearMain(swr, swr->clearHeldColor));
+}
+
+// swrClearSettle for a draw that may be its buffer's first draw (see
+// SWBaseKey; key NULL when it cannot be one). When the clear is still held,
+// nothing else is, and the buffer's recorded first draw is this same one,
+// only the tiles something else touched are cleared, and the draw leaves out
+// the tiles that still hold it (keep). Returns the draw's baseMode; the draw
+// ends it with swrBaseFinish.
+int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key)
+{
+    swrBaseFinish(swr, false); // one that did not end as expected
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_BASE_KEEP") != NULL;
+    SWDirtyBuffer* d = swr->dirty;
+    if (off || key == NULL || !swr->clearHeld || !swr->mainFb || swr->fb != swr->mainFb || swr->tiledHeldCount > 0 ||
+        swrPendingCount > 0 || swrGridHeld() || swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0 ||
+        d == NULL || d->fb != swr->mainFb || d->width != swr->mainWidth || d->height != swr->mainHeight) {
+        swrClearSettle(swr);
+        return 0;
+    }
+    if (d->known && d->color == swr->clearHeldColor && d->baseValid && memcmp(&d->baseKey, key, sizeof(*key)) == 0) {
+        swr->clearHeld = false;
+        static int check = -1;
+        if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
+        static uint32_t kept;
+        if (check) {
+            swrDirtyCheckKept(d, swr->mainFb, d->color);
+            if (++kept % 300 == 1) logInfo("swr: first draw kept %u times\n", kept);
+        }
+        SWR_NOTED("  of which: held clear written", swrFillTiles(swr, d, d->rows, NULL, d->color));
+        for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) {
+            d->keep[r] = d->baseRows[r] & ~d->rows[r];
+            d->baseRows[r] = d->keep[r];
+            d->rows[r] = 0;
+        }
+        swr->dirtyMark = d;
+        swr->baseMode = 2;
+    } else {
+        swrClearSettle(swr);
+        if (swr->dirty != d || !d->known) return 0;
+        memset(d->keep, 0, sizeof(d->keep));
+        d->baseKey = *key;
+        swr->baseMode = 1;
+    }
+    return swr->baseMode;
+}
+
+// Ends the draw swrClearSettleBase began: drawn when it went over just as
+// recorded (every row through the colour's runs), so that it can be kept the
+// next time; otherwise what it wrote counts as anything else's.
+void swrBaseFinish(SWRenderer* swr, bool drawn)
+{
+    if (swr->baseMode == 0) return;
+    swr->baseMode = 0;
+    SWDirtyBuffer* d = swr->dirty;
+    if (d == NULL) return;
+    memset(d->keep, 0, sizeof(d->keep));
+    if (drawn) { d->baseValid = true; return; }
+    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) {
+        d->rows[r] |= d->baseRows[r];
+        d->baseRows[r] = 0;
+    }
+    d->baseValid = false;
 }
 
 static void SWRenderer_clearScreen(Renderer* renderer, uint32_t color, float alpha)
@@ -1012,6 +1209,7 @@ static void SWRenderer_clearScreen(Renderer* renderer, uint32_t color, float alp
         swr->uniformColor = (uintpixel_t) color;
         return;
     }
+    swrDirtyRect(swr, 0, 0, swr->width, swr->height);
     for (int y = 0; y < swr->height; y++) {
         swrFillPixels(&swr->fb[y * swr->fbPitch], (size_t) swr->width, (uintpixel_t) color);
     }
@@ -1264,6 +1462,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.rowBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
+    localSurface.spans = localSurface.halfSpans = NULL;
     localSurface.immutable = false;
     localSurface.halfCoverage = NULL;
     localSurface.solid = localSurface.halfSolid = 0;
@@ -1378,6 +1577,7 @@ static void SWRenderer_surfaceCopy(Renderer* renderer,
         temp1.width = swr->mainWidth;
         temp1.height = swr->mainHeight;
         temp1.buffer = swr->mainFb;
+        swrDirtyAll(swr);
     }
     else if (DestSurfaceID < 0 || (size_t) DestSurfaceID >= swr->surfaceCount || swr->surfaces[DestSurfaceID] == NULL) {
         logError("swr: Cannot resize surface id %d, it's invalid (dest in surfaceCopy)\n", DestSurfaceID);
@@ -2373,6 +2573,7 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
     if (swr->tiledHeldCount > 0) swrClearSettle(swr); // a clear with tiled passes over it is written as it is, not worked in below
     uintpixel_t* target = &swr->fb[swr->portY * swr->fbPitch + swr->portX];
     int width = swr->maxX - swr->portX, height = swr->maxY - swr->portY;
+    swrDirtyRect(swr, swr->portX, swr->portY, swr->maxX, swr->maxY);
     
     // A clear still held goes under the pictures if they are drawn over the
     // whole of what it clears; they then write its colour only in their gaps.
@@ -2759,6 +2960,7 @@ static bool SWRenderer_drawTileLayer(Renderer* renderer, Background* tileset, co
                     {
                         const uintpixel_t* src = &texture->buffer[(sy + (y - dy)) * texture->width + sx + (x0 - dx)];
                         uintpixel_t* dst = &swr->fb[y * swr->fbPitch + x0];
+                        swrDirtyRow(swr, y, x0, x1);
                         if (kind == SWR_TILE_SOLID)
                             memcpy(dst, src, (size_t) width * sizeof(uintpixel_t));
                         else for (int x = 0; x < width; x++) {

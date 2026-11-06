@@ -66,6 +66,10 @@ typedef struct {
     /* Derived battle appearance: selected assets and whether the scene is active. */
     void (*battleUiInstall)(Runner *runner);
     bool (*battleUiActive)(Runner *runner);
+    /* Speed mode may keep battles (battleUiActive) at full resolution instead
+     * of drawing them at half size: the game's own text, at a cost in frames.
+     * Only when asked (ofPlatformSetSpeedFullBattles). */
+    bool speedFullResBattles;
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;
@@ -74,6 +78,13 @@ typedef struct {
     int benchJumpCount;
     const OfBenchSection *benchSections;
     int benchSectionCount;
+    /* A second benchmark ("--bench-battles"), or NULL: the same report over another script. */
+    const char *tourTitle;
+    const char *tourScript;
+    const OfJump *tourJumps;
+    int tourJumpCount;
+    const OfBenchSection *tourSections;
+    int tourSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

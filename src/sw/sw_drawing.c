@@ -15,6 +15,7 @@ FORCE_INLINE void swrPlotPixel_(Renderer* renderer, int x, int y, uintpixel_t co
     if (x < swr->portX || y < swr->portY) return;
     if (x >= swr->maxX || y >= swr->maxY) return;
     
+    swrDirtyRow(swr, y, x, x + 1);
     alphaBlend(&swr->fb[y * swr->fbPitch + x], color, blendmode, alpha);
 }
 
@@ -162,6 +163,116 @@ MAYBE_UNUSED static const uint16_t* swrRowBounds(SWTexture* texture)
     return bounds;
 }
 
+// The runs of a texture's rows that hold opaque texels other than `color`
+// (see SWTexture.spans): row y's runs are runs[rows[y]] up to runs[rows[y + 1]],
+// each start << 16 | end. One whose texels are mostly such runs is not worth
+// keeping (worth false): its draws copy whole rows as before.
+typedef struct SWColorSpans {
+    uint32_t serial;    // one for each made, never 0 (see SWBaseKey)
+    uintpixel_t color;
+    bool worth;
+    uint32_t* runs;
+    uint32_t rows[1]; // height + 1 of them (not a flexible member: old compilers lack those)
+} SWColorSpans;
+
+MAYBE_UNUSED static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t* buffer, int width, int height, uintpixel_t color)
+{
+    SWColorSpans* spans = *slot;
+    if (spans != NULL) return spans->color == color && spans->worth ? spans : NULL;
+    size_t count = 0, covered = 0;
+    for (int y = 0; y < height; y++) {
+        const uintpixel_t* row = &buffer[(size_t) y * width];
+        bool in = false;
+        for (int x = 0; x < width; x++) {
+            bool keep = row[x] != color && swrIsOpaque(row[x]);
+            if (keep && !in) count++;
+            covered += keep;
+            in = keep;
+        }
+    }
+    size_t header = sizeof(SWColorSpans) + ((size_t) height + 1) * sizeof(uint32_t);
+    // Worth it while what is left to copy is at most half the texture.
+    bool worth = covered * 2 <= (size_t) width * height;
+    spans = (SWColorSpans*) malloc(header + (worth ? count : 0) * sizeof(uint32_t));
+    if (spans == NULL) return NULL;
+    static uint32_t serials;
+    spans->serial = ++serials != 0 ? serials : ++serials;
+    spans->color = color;
+    spans->worth = worth;
+    spans->runs = (uint32_t*) ((uint8_t*) spans + header);
+    *slot = spans;
+    if (!worth) return NULL;
+    uint32_t n = 0;
+    for (int ry = 0; ry < height; ry++) {
+        const uintpixel_t* row = &buffer[(size_t) ry * width];
+        spans->rows[ry] = n;
+        for (int x = 0; x < width; ) {
+            if (row[x] == color || !swrIsOpaque(row[x])) { x++; continue; }
+            int end = x + 1;
+            while (end < width && row[end] != color && swrIsOpaque(row[end])) end++;
+            spans->runs[n++] = (uint32_t) x << 16 | (uint32_t) end;
+            x = end;
+        }
+    }
+    spans->rows[height] = n;
+    return spans;
+}
+
+FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
+{
+    if (count < 8) { for (int i = 0; i < count; i++) dst[i] = src[i]; }
+    else memcpy(dst, src, (size_t) count * sizeof(uintpixel_t));
+}
+
+// One row of an untinted 1:1 opaque draw into the main buffer, where tiles
+// that still hold nothing but the clear colour (see SWDirtyBuffer) get only
+// the texel runs of other colours (`run` to `runEnd`, see SWColorSpans; in
+// texture columns, the row starting at column sx), so the texels of that colour
+// are neither read nor written; only the tiles written to are marked. A
+// backdrop that is mostly the clear colour (Undertale's battle grid) then costs
+// little more than its lines. `clean` is the tiles of the tile row that were
+// unmarked when the draw reached it: the draw writes each pixel once, so
+// tiles it marks itself still hold the colour wherever it left out.
+// Tiles in `keep` already hold what the draw writes there (see SWBaseKey) and
+// are left alone. What is written is marked in `marks` (rows or baseRows).
+MAYBE_UNUSED static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint32_t keep, uintpixel_t* dstline, const uintpixel_t* srcline,
+                             const uint32_t* run, const uint32_t* runEnd, int sx, int dx, int dy, int from, int to, bool solid)
+{
+    uint32_t wrote = 0;
+    for (int x = from; x < to; ) {
+        int col = (dx + x) >> SWR_DIRTY_TILE_W_SHIFT;
+        int end = ((col + 1) << SWR_DIRTY_TILE_W_SHIFT) - dx;
+        if (end > to) end = to;
+        uint32_t bit = 1u << col;
+        if (keep & bit) {
+            // Holds it already.
+        } else if (!(clean & bit)) {
+            // Something else may be under this stretch: it all goes over.
+            if (solid) {
+                memcpy(&dstline[x], &srcline[x], (size_t) (end - x) * sizeof(uintpixel_t));
+            } else {
+                for (int i = x; i < end; i++) {
+                    uintpixel_t pixel = srcline[i];
+                    if (swrIsOpaque(pixel)) dstline[i] = pixel;
+                }
+            }
+            wrote |= bit;
+        } else {
+            while (run < runEnd && (int) (*run & 0xFFFF) - sx <= x) run++;
+            for (const uint32_t* r = run; r < runEnd; r++) {
+                int a = (int) (*r >> 16) - sx, b = (int) (*r & 0xFFFF) - sx;
+                if (a >= end) break;
+                if (a < x) a = x;
+                if (b > end) b = end;
+                swrCopyPixels(&dstline[a], &srcline[a], b - a);
+                wrote |= bit;
+            }
+        }
+        x = end;
+    }
+    marks[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
+}
+
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
 {
     SWRenderer *swr = (SWRenderer*) renderer;
@@ -173,6 +284,7 @@ static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixe
     if (dw <= 0) return;
     
     int blendmode = swr->blendMode;
+    swrDirtyRow(swr, dy, dx, dx + dw);
     
     if (color == color2)
     {
@@ -221,6 +333,7 @@ static void swrDrawVLineInt(Renderer* renderer, int dx, int dy, int dh, uintpixe
     if (dh <= 0) return;
     
     int blendmode = swr->blendMode;
+    swrDirtyRect(swr, dx, dy, dx + 1, dy + dh);
     
     if (color == color2)
     {
@@ -453,6 +566,7 @@ static void swrOverlayFlushHeld(SWRenderer* swr)
         fill = (uintpixel_t) (0x8000 | ((red >> 8) << 10) | ((green >> 8) << 5) | (blue >> 8));
     }
     
+    swrDirtyRectIn(swr, swr->overlayFb, swr->overlayX, swr->overlayY, swr->overlayX + swr->overlayW, swr->overlayY + swr->overlayH);
     for (int y = 0; y < swr->overlayH; y++)
     {
         uintpixel_t* dstline = &swr->overlayFb[(swr->overlayY + y) * swr->overlayPitch + swr->overlayX];
@@ -598,6 +712,7 @@ static void swrMirrorCompose(SWRenderer* swr, int layers, int step, bool readUnd
     const int fp_prec = 14;
     int cx = swr->mirrorCx, cy = swr->mirrorCy, w = swr->mirrorW, h = swr->mirrorH;
     uintpixel_t under = swr->mirrorUnder;
+    swrDirtyRect(swr, cx - w - 1, cy - h - 1, cx + w + 1, cy + h + 1); // mirrored both ways; a step of 2 can reach one past
     
     for (int y = 0; y < h; y += step)
     {
@@ -906,6 +1021,7 @@ static void swrDrawSpriteInternal(
 )
 {
     SWRenderer *swr = (SWRenderer*) renderer;
+    MAYBE_UNUSED SWTexture* source = texture; // `texture` may become its half-size copy's stand-in
     SWR_PROBE_STOP(3);
 #ifdef SW_HAS_PREMUL_BLEND
     const SWSpriteCall asked = { dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha };
@@ -1020,6 +1136,7 @@ static void swrDrawSpriteInternal(
             for (int y = 0; y < dh; y++)
             {
                 uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+                swrDirtyRow(swr, dy + y, dx, dx + dw);
                 const uintpixel_t* srcline = &halved.buffer[(sy + y) * halfW + sx];
                 const uint8_t* covline = &coverage[(sy + y) * halfW + sx];
                 // Only the stretch of the row that has anything in it.
@@ -1096,7 +1213,27 @@ static void swrDrawSpriteInternal(
         swrMirrorHold(swr, &asked, dx, dy, dw, dh, flipX, flipY, sx, sy, (int) xstep, (int) ystep, 1 << fp_prec))
         return;
     swr->uniformValid = false;
-    swrClearSettle(swr);
+    {
+        // Possibly the buffer's first draw, to be kept (see SWBaseKey): only an
+        // untinted 1:1 opaque draw of a texture's runs (the opaque path below).
+        SWBaseKey key;
+        bool keyed = false;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+        if (blendmode == bm_normal && alpha > 253 && (tintColor & 0x7FFF) == 0x7FFF && !flipX && xstep == (1 << fp_prec) &&
+            texture->immutable && contrast == SWR_CONTRAST_NONE && !pointSample && swr->fb == swr->mainFb && dx >= 0) {
+            const SWColorSpans* made = texture != source ? source->halfSpans : texture->spans;
+            memset(&key, 0, sizeof(key));
+            key.texture = texture != source ? (const void*) source->halfBuffer : (const void*) texture;
+            key.serial = made != NULL ? made->serial : 0;
+            key.dx = dx; key.dy = dy; key.dw = dw; key.dh = dh;
+            key.sx = sx; key.sy = sy; key.sw = sw; key.sh = sh;
+            key.ystep = ystep; key.flipY = flipY;
+            key.portX = swr->portX; key.portY = swr->portY; key.maxX = swr->maxX; key.maxY = swr->maxY;
+            keyed = true;
+        }
+#endif
+        swrClearSettleBase(swr, keyed ? &key : NULL);
+    }
     if (swrFavorSpeed && alpha <= 8 && blendmode == bm_normal) return; // too faint to miss; see swrFavorSpeed
 #endif
     
@@ -1125,6 +1262,7 @@ static void swrDrawSpriteInternal(
             if (cache) {
                 for (int y = 0; y < dh; ++y) {
                     uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+                    swrDirtyRow(swr, dy + y, dx, dx + dw);
                     const SWButtonPixel* row = cache->pixels + y * dw;
                     for (int x = 0; x < dw; ++x) {
                         if (row[x].covered)
@@ -1148,6 +1286,7 @@ static void swrDrawSpriteInternal(
             int row0 = sy + y * 2, row1 = row0 < bottom ? row0 + 1 : bottom;
             if (row0 > bottom) break;
             uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             for (int x = 0; x < dw; ++x) {
                 int col0 = sx + x * 2, col1 = col0 < right ? col0 + 1 : right;
                 if (col0 > right) break;
@@ -1203,6 +1342,7 @@ static void swrDrawSpriteInternal(
         for (int y = 0; y < dh; y++, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             int row0 = sy + (int)(ys2 >> fp_prec);
             if (row0 > srcBottom) break;
             int row1 = row0 < srcBottom ? row0 + 1 : -1;
@@ -1276,6 +1416,7 @@ static void swrDrawSpriteInternal(
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             const uintpixel_t* srcline;
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
@@ -1334,6 +1475,26 @@ static void swrDrawSpriteInternal(
         if (!solid && untinted && !flipX && xstep == (1 << fp_prec) && dh == sh)
             rowBounds = texture->buffer == texture->halfBuffer ? texture->halfRowBounds : swrRowBounds(texture); // the half-size copy stands in as a texture of its own
         
+        // Onto tiles still holding only the clear colour, texels of that colour are left out (swrCopyOntoClean).
+        static int noCleanSkip = -1;
+        if (noCleanSkip < 0) noCleanSkip = getenv("BS_NO_CLEAN_SKIP") != NULL;
+        SWDirtyBuffer* clear = swr->dirtyMark;
+        const SWColorSpans* spans = NULL;
+        if (noCleanSkip || clear == NULL || !clear->known || swr->fb != swr->mainFb || !untinted || flipX || xstep != (1 << fp_prec)
+            || dx < 0 || dx + dw > clear->width || !texture->immutable)
+            clear = NULL;
+        else {
+            spans = swrColorSpans(texture != source ? &source->halfSpans : &texture->spans,
+                                  texture->buffer, texture->width, texture->height, clear->color);
+            if (spans == NULL) clear = NULL;
+        }
+        int cleanRow = -1;
+        uint32_t clean = 0, keep = 0;
+        // The buffer's first draw (see SWBaseKey) marks baseRows, and stays kept only if every row went through the runs.
+        bool asBase = swr->baseMode != 0 && clear != NULL && clear == swr->dirty;
+        bool baseWhole = asBase;
+        uint32_t* marks = clear == NULL ? NULL : asBase ? clear->baseRows : clear->rows;
+        
         fixedp_t ys2 = iys2;
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
@@ -1343,6 +1504,33 @@ static void swrDrawSpriteInternal(
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
                 srcline = &texture->buffer[(sy + (int)(ys2 >> fp_prec)) * texture->width + sx];
+            
+            if (clear != NULL && dy + y >= 0 && dy + y < clear->height) {
+                int tileRow = (dy + y) >> SWR_DIRTY_TILE_H_SHIFT;
+                if (tileRow != cleanRow) {
+                    // First row of this draw in the tile row: what is clean before the draw touches it.
+                    cleanRow = tileRow;
+                    uint32_t mask = swrDirtyMask(dx, dx + dw);
+                    clean = ~(clear->rows[tileRow] | clear->baseRows[tileRow]) & mask;
+                    keep = swr->baseMode == 2 && asBase ? clear->keep[tileRow] & mask : 0;
+                }
+                if ((clean | keep) != 0) {
+                    int from = 0, to = dw;
+                    if (rowBounds != NULL) {
+                        int row = sy + ys;
+                        from = (int) rowBounds[row * 2] - sx;
+                        to = (int) rowBounds[row * 2 + 1] - sx;
+                        if (from < 0) from = 0;
+                        if (to > dw) to = dw;
+                    }
+                    int srcRow = dh == sh ? sy + ys : sy + (int) (ys2 >> fp_prec);
+                    swrCopyOntoClean(marks, clean, keep, dstline, srcline, &spans->runs[spans->rows[srcRow]], &spans->runs[spans->rows[srcRow + 1]],
+                                     sx, dx, dy + y, from, to, solid);
+                    continue;
+                }
+            }
+            baseWhole = false;
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             
             fixedp_t xs2 = ixs2;
             if (untinted && !flipX && xstep == (1 << fp_prec) && solid)
@@ -1394,6 +1582,10 @@ static void swrDrawSpriteInternal(
                 }
             }
         }
+        if (swr->baseMode != 0) {
+            if (baseWhole && swr->baseMode == 1) clear->baseKey.serial = spans->serial; // the runs may have been made just now
+            swrBaseFinish(swr, baseWhole);
+        }
         return;
     }
 #endif
@@ -1406,6 +1598,7 @@ static void swrDrawSpriteInternal(
             uintpixel_t* dstline;
             const uintpixel_t* srcline;
             dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
@@ -1431,6 +1624,7 @@ static void swrDrawSpriteInternal(
             uintpixel_t* dstline;
             const uintpixel_t* srcline;
             dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
@@ -1580,6 +1774,7 @@ static void swrDrawSpriteRotatedInternal(
     for (int cy = minYc; cy < maxYc; cy++)
     {
         uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
+        swrDirtyRow(swr, cy, minXc, maxXc);
         float cyf = (float) cy;
         
         // Where the rectangle can be on this row.
@@ -1765,6 +1960,7 @@ static void swrDrawTriangleInternal(SWRenderer* swr, int xup, int yup, int xleft
             
             if (y >= 0) {
                 uintpixel_t* line = &swr->fb[y * swr->width];
+                swrDirtyRow(swr, y, x1, x2 + 1);
                 for (int x = x1; x < x2; x++) {
                     alphaBlend(&line[x], color1, blendmode, alpha);
                 }
@@ -1823,6 +2019,7 @@ static void swrDrawTriangleInternal(SWRenderer* swr, int xup, int yup, int xleft
         if (y < 0) continue;
         
         uintpixel_t* line = &swr->fb[y * swr->width];
+        swrDirtyRow(swr, y, x1, x2 + 1);
         
         int e_up   = (xleft - x1) * (yright - y) - (yleft - y) * (xright - x1);
         int e_left = (xright - x1) * (yup - y) - (yright - y) * (xup - x1);
@@ -2095,6 +2292,7 @@ void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2
             swr->clearHeld = true;
             swr->clearHeldColor = result;
         } else if (result != swr->uniformColor) {
+            swrDirtyAll(swr);
             for (int y = 0; y < swr->mainHeight; y++)
                 swrFillPixels(&swr->fb[y * swr->fbPitch], (size_t) swr->mainWidth, result);
         }
@@ -2174,6 +2372,7 @@ void swrFillRectangleColor(Renderer* renderer, float x1, float y1, float x2, flo
         uint32_t weightU = 65535 - weightD;
         
         uintpixel_t *line = &swr->fb[ay * swr->fbPitch + x1i];
+        swrDirtyRow(swr, ay, x1i, x1i + xd + 1);
         uint32_t weightfpx = 0;
         for (int x = 0; x <= xd; x++, weightfpx += incx)
         {
@@ -2627,6 +2826,7 @@ bool swrDrawSpriteTiledRows(SWRenderer* swr, SWTexture* texture, int sx, int sy,
 #else
     if (!swrTiledPassSetUp(swr, texture, sx, sy, sw, sh, firstX, firstY, tileW, tileH, countX, countY, color, alphaf, &swrTiledNow)) return false;
     SWTiledMemo memo = { 0 };
+    swrDirtyRect(swr, 0, swrTiledNow.minY, swr->width, swrTiledNow.maxY);
     for (int y = swrTiledNow.minY; y < swrTiledNow.maxY; y++)
         swrTiledPassRow(&swrTiledNow, y, &swr->fb[y * swr->fbPitch], &memo, NULL, 0, NULL);
     return true;
@@ -2763,6 +2963,7 @@ FORCE_INLINE void swrTiledPassPattern(const SWTiledPass* pass, int y, uintpixel_
 // out. Every pixel comes out as the copies would have left it.
 void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 {
+    swrDirtyAll(swr);
 #if PIXEL_SIZE != 16 || !defined SW_HAS_PREMUL_BLEND || defined SW_DITHERED_BLENDING
     swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
 #else

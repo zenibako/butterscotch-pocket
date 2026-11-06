@@ -114,6 +114,15 @@ int main(int argc, char **argv) {
             if (lowres) ofPlatformSetHiresAllowed(false);
             ofBenchStart();
         }
+        /* --bench-battles (accuracy) and --bench-battles-smooth (speed): the battle tour. */
+        bool tourSmooth = strcmp(argv[i], "--bench-battles-smooth") == 0;
+        if (tourSmooth || strcmp(argv[i], "--bench-battles") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(tourSmooth);
+            if (!ofBenchStartTour()) logWarn("Bench: this game has no battle tour\n");
+        }
+        if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         if (strcmp(argv[i], "--mute") == 0) ofAudioSetMode(OF_AUDIO_DISABLED); /* as the menu's audio mode, or Select + Down in debug mode */
         /* Game-script times in the log every 150 frames (see ofPerfScriptReport): which scripts a section's

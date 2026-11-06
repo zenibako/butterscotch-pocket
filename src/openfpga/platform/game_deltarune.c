@@ -35,6 +35,7 @@ static bool isNumber(RValue value) {
 }
 
 #include "game_deltarune_sentry.h"
+#include "game_deltarune_charbox.h"
 
 /* gml_Object_obj_purplegrass_Draw_0: the floor of the field, and
  * what is behind its battles. About 11,000 operations a frame for:
@@ -534,6 +535,7 @@ static const OfNativeScript g_nativeScripts[] = {
     { "gml_Script_tile_layer_shift", 608, 0x7ba14ffb5cf975f3ull, tileLayerShift },
     { "gml_Script___view_get", 1260, 0xeff822f793176fb9ull, viewGet },
     { "gml_Script_scr_84_get_sprite", 84, 0x4121b98b835bc977ull, get84Sprite },
+    { "gml_Script_scr_charbox", 6068, 0xec4aea6e9712d70aull, charboxScript },
 };
 
 static const OfNativeCode g_natives[] = {
@@ -545,6 +547,7 @@ static const OfNativeCode g_natives[] = {
 static void forgetVm(void) {
     sentryResolved = false;
     writerResolved = 0;
+    charboxResolved = 0;
     g_spriteMapVar = -1;
 }
 

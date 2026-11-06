@@ -35,5 +35,12 @@ typedef struct {
 } SWHintedGlyphAsset;
 void SWRenderer_setHintedGlyphAssets(Renderer* renderer, const SWHintedGlyphAsset* assets, size_t count);
 void SWRenderer_setContrastEnabled(Renderer* renderer, bool enabled);
+// The renderer clears a platform display buffer only where it drew since that
+// buffer's last clear. A platform that writes into one of those buffers itself
+// (an overlay, a menu, a copy) calls this, so the next clear is a whole one.
+void swrFramebufferTouched(void);
+// Tiles (32x16) marked as drawn in the buffer the renderer cleared last, before that clear: a measure of how much of
+// the screen the frame drawn in it touched. 0 when the buffer was not tracked.
+extern uint32_t swrDirtyLastTiles;
 
 #endif//_SW_RENDERER_H

@@ -130,6 +130,10 @@ static void reportSlowFrame(unsigned workMs) {
     }
 }
 
+void ofPerfPeekTotals(OfPerfTotals *out) {
+    *out = g_totals;
+}
+
 void ofPerfTakeTotals(OfPerfTotals *out) {
     if (out != NULL) *out = g_totals;
     memset(&g_totals, 0, sizeof(g_totals));
@@ -318,7 +322,7 @@ void ofPerfDrawMode(uint16_t *fb, int width, int height, const char *label) {
     ofFontDraw(fb, width, height, left + pad, pad, label, 0x7FFF, scale);
 }
 
-void ofPerfFrame(uint16_t *fb, int width, int height) {
+bool ofPerfFrame(uint16_t *fb, int width, int height) {
     /* The frame ends here: whatever follows (overlays, copy, flip) is "out"
      * and is reported with the next frame. */
     ofPerfPhase(OF_PHASE_OUT);
@@ -349,11 +353,12 @@ void ofPerfFrame(uint16_t *fb, int width, int height) {
     ofPerfDetail = g_enabled || g_logEnabled || g_detailAlways || (g_detailEvery > 0 && g_frameNumber % (unsigned) g_detailEvery == 0);
     swrDrawTimed = ofPerfDetail;
 
-    if (fb == NULL) return; /* a skipped frame: counted, nothing to draw on */
+    if (fb == NULL) return false; /* a skipped frame: counted, nothing to draw on */
     if (g_logEnabled) drawLog(fb, width, height);
-    if (!g_enabled || width < 128 || height < 16) return;
+    if (!g_enabled || width < 128 || height < 16) return g_logEnabled;
     int x = drawNumber(fb, width, 2, 2, g_shownAverage);
     x = drawNumber(fb, width, x + 2 * OF_PERF_SCALE, 2, g_shownWork);
     x = drawNumber(fb, width, x + 2 * OF_PERF_SCALE, 2, g_shownPeriod);
     drawNumber(fb, width, x + 2 * OF_PERF_SCALE, 2, g_shownSkipped);
+    return true;
 }

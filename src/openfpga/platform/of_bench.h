@@ -14,6 +14,8 @@
  * compared on the device. Started with "--bench" in the app arguments.
  */
 void ofBenchStart(void);
+/* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle. */
+bool ofBenchStartTour(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
 /* Call once per presented frame. Prints the report and halts at the end. */
@@ -26,6 +28,8 @@ void ofBenchAddFlipTime(uint64_t nanos);
 bool ofPlatformShowLogAndHalt(void);
 void ofPlatformSetHiresAllowed(bool allowed);
 void ofPlatformSetSmoothLowres(bool enabled);
+/* Speed mode keeps battles at full size where the game allows it (speedFullResBattles); off by default. */
+void ofPlatformSetSpeedFullBattles(bool full);
 /* Which way L's speed/accuracy setting is. */
 bool ofPlatformSpeedMode(void);
 void ofSaveFsSetVolatile(bool enabled);

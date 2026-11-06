@@ -408,6 +408,11 @@ static int32_t visibleWidth(Runner *runner) {
  * 640x480, but overworld rooms show a 320x240 view scaled up 2x, so drawing
  * them at 320x240 loses nothing. Battles and menus use all 640x480 with small
  * fonts, and need the full resolution to stay legible. */
+static int g_speedFullBattles = -1; /* -1: not decided yet */
+void ofPlatformSetSpeedFullBattles(bool full) {
+    g_speedFullBattles = full ? 1 : 0;
+}
+
 bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     if (!outW || !outH) return false;
     int32_t shown = visibleWidth(g_runner);
@@ -416,12 +421,21 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
         logInfo("Video: room shows %d px across\n", (int) shown);
         lastShown = shown;
     }
-    bool hires = g_hiresAvailable && !g_smoothLowres && shown > OF_SCREEN_W;
-    swrSmoothMinify = g_smoothLowres;
+    bool battle = g_runner != NULL && ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner);
+    /* Speed mode can keep a battle at full size where the game allows it
+     * (speedFullResBattles), when asked with --speed-full-battles (or
+     * BS_SPEED_FULL_BATTLES=1 on desktop); off by default, since most battles
+     * are still too slow for it. The size then changes only as the battle
+     * starts or ends, under the flash that covers the room change, never in
+     * the middle of one; a battle too heavy for full speed skips frames. */
+    if (g_speedFullBattles < 0) g_speedFullBattles = getenv("BS_SPEED_FULL_BATTLES") != NULL;
+    bool lowres = g_smoothLowres && !(ofGame.speedFullResBattles && battle && g_speedFullBattles);
+    bool hires = g_hiresAvailable && !lowres && shown > OF_SCREEN_W;
+    swrSmoothMinify = lowres;
     swrMirrorFaintAlpha = g_faintOverride >= 0 ? g_faintOverride : g_smoothLowres ? OF_SPEED_FAINT_ALPHA : 0;
     swrFavorSpeed = g_smoothLowres;
     if (g_runner != NULL && g_runner->renderer != NULL && ofGame.battleUiActive != NULL)
-        SWRenderer_setContrastEnabled(g_runner->renderer, g_smoothLowres && ofGame.battleUiActive(g_runner));
+        SWRenderer_setContrastEnabled(g_runner->renderer, lowres && battle);
     *outW = hires ? OF_HIRES_W : OF_SCREEN_W;
     *outH = hires ? OF_HIRES_H : OF_SCREEN_H;
     return true;
@@ -565,6 +579,59 @@ static void dumpFrameIfRequested(bool drawn) {
 }
 #endif
 
+static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript) */
+
+#ifdef OF_PC
+/* BS_FRAME_LOG=<file> (desktop) writes one line per presented frame: frame,
+ * room, width, step/draw/out/audio microseconds, calls per draw kind, and the
+ * 32x16 tiles the renderer had marked as drawn in the buffer it cleared last
+ * (swrDirtyLastTiles), a measure of how much of the screen a frame touches.
+ * BS_OBJECTS=<frame> logs the objects that have instances on that frame. */
+static void frameLog(void) {
+    static FILE *out = NULL;
+    static int state = 0;
+    if (state == 0) {
+        const char *path = getenv("BS_FRAME_LOG");
+        out = path != NULL ? fopen(path, "w") : NULL;
+        state = out != NULL ? 1 : 2;
+    }
+    const char *objects = getenv("BS_OBJECTS");
+    if (objects != NULL && g_runner != NULL && g_scriptFrame == atoi(objects)) {
+        char line[2048] = "";
+        size_t used = 0;
+        int count = (int) arrlen(g_runner->instances);
+        for (int i = 0; i < count; i++) {
+            Instance *inst = g_runner->instances[i];
+            if (inst == NULL || inst->destroyed || inst->objectIndex < 0 || (uint32_t) inst->objectIndex >= g_runner->dataWin->objt.count) continue;
+            const char *name = g_runner->dataWin->objt.objects[inst->objectIndex].name;
+            if (name == NULL || strstr(line, name) != NULL) continue;
+            int n = snprintf(line + used, sizeof(line) - used, "%s ", name);
+            if (n < 0 || (size_t) n >= sizeof(line) - used) break;
+            used += (size_t) n;
+        }
+        logInfo("Objects at %d in %s: %s\n", g_scriptFrame, g_runner->currentRoom ? g_runner->currentRoom->name : "?", line);
+    }
+    if (state != 1 || g_runner == NULL) return;
+    /* Peeks, so a benchmark's sums stay whole; the line is this frame's
+     * share. A benchmark taking the sums starts them over: then the whole
+     * sum is the share. */
+    static OfPerfTotals last;
+    OfPerfTotals now, t;
+    ofPerfPeekTotals(&now);
+    if (now.frames < last.frames) memset(&last, 0, sizeof(last));
+    t = now;
+    for (int k = 0; k < OF_PHASES; k++) t.phaseNanos[k] -= last.phaseNanos[k];
+    for (int k = 0; k < OF_DRAW_KINDS; k++) t.drawCalls[k] -= last.drawCalls[k];
+    last = now;
+    fprintf(out, "%d %s %d %llu %llu %llu %llu", g_scriptFrame, g_runner->currentRoom ? g_runner->currentRoom->name : "?", g_nextW,
+            (unsigned long long) (t.phaseNanos[OF_PHASE_STEP] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_DRAW] / 1000),
+            (unsigned long long) (t.phaseNanos[OF_PHASE_OUT] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_AUDIO] / 1000));
+    for (int k = 0; k < OF_DRAW_KINDS; k++) fprintf(out, " %llu", (unsigned long long) t.drawCalls[k]);
+    fprintf(out, " %u\n", swrDirtyLastTiles);
+    fflush(out);
+}
+#endif
+
 void platformSwapBuffers(void) {
     if (g_nextFb == NULL) return;
     ofPerfDetailAlways(g_debugMode);
@@ -593,7 +660,9 @@ void platformSwapBuffers(void) {
     }
 #endif
     scriptProfileFrame();
-    ofPerfFrame(g_nextFb, g_nextW, g_nextH);
+    /* Words drawn over the picture are not the renderer's: it then clears
+     * the whole of this buffer next time it gets it. */
+    bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);
     ofFocusPresent(g_runner,false);
     /* L's setting, by the name the instruction screen gives the toggle:
      * for a moment after L is pressed, and in debug mode for as long as a
@@ -602,6 +671,7 @@ void platformSwapBuffers(void) {
     bool paused = g_runner != NULL && g_runner->paused;
     if (wasPaused && !paused) showNotice("Resumed");
     wasPaused = paused;
+    bool drawnOver = true;
     if (g_snapshotNotice) {
         drawSnapshotNotice(g_nextFb, g_nextW, g_nextH);
     } else if (g_sleepTestLabel) {
@@ -618,7 +688,13 @@ void platformSwapBuffers(void) {
         ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, g_notice);
     } else if (nowNanos() < g_modeShownUntil || g_debugMode) {
         ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, g_smoothLowres ? "Speed" : "Accuracy");
+    } else {
+        drawnOver = false;
     }
+    if (overlaid || drawnOver) swrFramebufferTouched();
+#ifdef OF_PC
+    frameLog();
+#endif
     ofBenchFrame();
 #ifdef OF_PC
     dumpFrameIfRequested(true);
@@ -637,8 +713,10 @@ void platformSwapBuffers(void) {
     if ((uint8_t *) g_nextFb == dst) {
         /* Drawn in place (platformAcquireFramebuffer): nothing to copy. */
     } else if ((size_t) g_modeStride == rowBytes) {
+        swrFramebufferTouched(); /* dst may be a buffer the renderer draws in another time */
         memcpy(dst, g_nextFb, rowBytes * (size_t) g_nextH);
     } else {
+        swrFramebufferTouched();
         for (int y = 0; y < g_nextH; y++)
             memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
     }
@@ -687,6 +765,7 @@ bool ofPlatformShowLogAndHalt(void) {
 
     for (;;) {
         g_nextFb = (uint16_t *) (void *) of_video_surface();
+        swrFramebufferTouched();
         ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
 #ifdef OF_PC
         if (getenv("BS_DUMP_PATH") != NULL) writeFrameDump();
@@ -748,7 +827,6 @@ static void setGlobals(const char *spec) {
  * presses a key on the given frame and releases it two frames later, or
  * after N frames with "*N".
  * Keys: U D L R (arrows), Z X C, E (Enter). */
-static int g_scriptFrame = 0;
 static void runInputScript(void) {
     int frame = ++g_scriptFrame;
     const char *script = g_inputScript;
@@ -763,8 +841,17 @@ static void runInputScript(void) {
     /* BS_GOTO="<frame>:<room index>" jumps to a room, to reach a scene without playing up to it. The game's own
      * state is whatever it was, so this only suits rooms that set themselves up. */
     const char *jump = getenv("BS_GOTO");
-    if (jump != NULL && g_runner != NULL && frame == atoi(jump) && strchr(jump, ':') != NULL)
-        g_runner->pendingRoom = atoi(strchr(jump, ':') + 1);
+    if (jump != NULL && g_runner != NULL && frame == atoi(jump) && strchr(jump, ':') != NULL) {
+        const char *target = strchr(jump, ':') + 1;
+        int room = atoi(target);
+        if (*target < '0' || *target > '9') { /* a room's name */
+            room = -1;
+            for (uint32_t i = 0; i < g_runner->dataWin->room.count; i++)
+                if (g_runner->dataWin->room.rooms[i].name != NULL && strcmp(g_runner->dataWin->room.rooms[i].name, target) == 0) room = (int) i;
+            if (room < 0) logWarn("BS_GOTO: no room %s\n", target);
+        }
+        if (room >= 0) g_runner->pendingRoom = room;
+    }
     /* BS_SET="<frame>:name=1,other[2]=3" sets numeric globals (or elements of existing global arrays). */
     const char *set = getenv("BS_SET");
     if (set != NULL && g_runner != NULL && frame == atoi(set) && strchr(set, ':') != NULL)
@@ -1008,6 +1095,7 @@ static void runMenu(void) {
     if (!wasPaused) audio->vtable->pauseAll(audio);
     logInfo("Menu\n");
     if (!ofMenuRun(&menu, g_nextFb, g_nextW, g_nextH)) logWarn("Menu: no memory for it\n");
+    swrFramebufferTouched(); /* the menu drew into the display's buffers */
     /* The menu drew into the display's buffers, which can include the one
      * the last frame was drawn in; the game's picture is now in the buffer it
      * showed last. A paused game shows that one again (the log screen too). */
@@ -1168,6 +1256,7 @@ void ofPlatformSnapshotNotice(const char *text) {
     if (!g_nextFb || g_nextW <= 0 || g_nextH <= 0 || !g_showingFramebuffer ||
         g_nextW != g_modeW || g_nextH != g_modeH) return;
     drawSnapshotNotice(g_nextFb, g_nextW, g_nextH);
+    swrFramebufferTouched();
     uint8_t *surface = of_video_surface();
     if ((uint8_t *)g_nextFb != surface) {
         for (int y = 0; y < g_nextH; y++)
@@ -1207,6 +1296,8 @@ void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
     g_blockedGameButtons = 0;
     ofGamepadPoll(runner->gamepads, buttons, true);
 #endif
+    /* The display buffers need not hold what was drawn in them before. */
+    swrFramebufferTouched();
     /* Old presentation timing must not cause frame skips after restore. */
     g_debtNanos = 0; g_skipThisFrame = false;
     ofPerfRestartClock();
