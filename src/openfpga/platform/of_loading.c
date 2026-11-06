@@ -143,16 +143,24 @@ static const uint8_t g_termFont[(OF_TERM_LAST - OF_TERM_FIRST + 1) * 8] = {
     0x76, 0xDC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* ~ */
 };
 
+/* The failure screen settles on one font before drawing (ofLoadingFail): -1
+ * until then, so asking can't load a texture (and fail again) mid-screen. */
+static int g_gameFont = -1;
+
+static bool gameFont(void) {
+    return g_gameFont >= 0 ? g_gameFont != 0 : ofFontReady();
+}
+
 static int lineHeight(void) {
-    return ofFontReady() ? ofFontLineHeight(1) : OF_TERM_LINE;
+    return gameFont() ? ofFontLineHeight(1) : OF_TERM_LINE;
 }
 
 static int textWidth(const char *text) {
-    return ofFontReady() ? ofFontWidth(text, 1) : (int) strlen(text) * 8;
+    return gameFont() ? ofFontWidth(text, 1) : (int) strlen(text) * 8;
 }
 
 static void drawText(uint16_t *fb, int width, int height, int x, int y, const char *text, uint16_t color) {
-    if (ofFontReady()) {
+    if (gameFont()) {
         ofFontDraw(fb, width, height, x, y, text, color, 1);
         return;
     }
@@ -175,6 +183,7 @@ static int drawWrapped(uint16_t *fb, int width, int height, int x, int y, int ri
     char buffer[128];
     while (*text != '\0') {
         while (*text == ' ') text++;
+        if (*text == '\0') break;
         /* The longest run of whole words that fits, or one word cut where it must be. */
         size_t fit = 0, end = 0;
         for (;;) {
@@ -329,6 +338,8 @@ void ofLoadingBegin(void) {
     g_active = true;
     g_dataWeight = OF_GUESS_DATA_WEIGHT;
     g_postWeight = g_dataWeight * OF_POST_SHARE_NUM / OF_POST_SHARE_DEN;
+    /* With no plan, the reads move the bar through the guessed data file. */
+    g_stage = g_dataWeight;
     ofLogSetConsole(false);
     present();
 }
@@ -376,7 +387,10 @@ void ofLoadingPlan(const char *dataWinPath) {
         }
     }
     fclose(file);
-    if (weight == 0) return;
+    if (weight == 0) {
+        g_planCount = 0;
+        return;
+    }
     g_dataWeight = weight;
     g_postWeight = weight * OF_POST_SHARE_NUM / OF_POST_SHARE_DEN;
     /* Until the first chunk: the strings being read, what the data file weighs beyond its chunks. */
@@ -405,6 +419,7 @@ static const struct { const char *format; int at; } g_milestones[] = {
 void ofLoadingNote(const char *format, const char *text) {
     if (!g_active) return;
     if (strncmp(format, "DataWin: %.4s", 13) == 0) {
+        if (g_planCount == 0) return; /* no plan: the guessed stage runs on */
         uint32_t weight = 0;
         /* The next chunk of the plan with this name. */
         for (int i = g_planNext; i < g_planCount; i++) {
@@ -449,13 +464,29 @@ void ofLoadingFail(const char *why, bool logSaved) {
     if (logSaved)
         snprintf(footer, sizeof(footer), "%s",
                  "Quit from the Analogue menu to save the log: the entry's _1.sav file in Saves/butterscotch/common.");
+    /* One font for the whole screen. Choosing the game's may load its texture;
+     * if that fails too and comes back here, the terminal font it is. */
+    static bool failing = false;
+    if (failing) {
+        g_gameFont = 0;
+    } else {
+        failing = true;
+        g_gameFont = 0;
+        g_gameFont = ofFontReady() ? 1 : 0;
+    }
     OfLoadError error;
     ofLoadingDescribe(&error, ofGame.title, ofGame.dataFiles, ofLogLastError(), why, g_dataLoaded,
                       logSaved ? footer : NULL);
     for (;;) {
         bool fresh = false;
         uint16_t *fb = ofPlatformLoadingSurface(&fresh);
-        if (fb == NULL) return; /* the caller falls back to the text terminal */
+        if (fb == NULL) {
+            /* The caller falls back to the text terminal: say it there. */
+            ofLoadingEnd();
+            ofLogPrint("%s\n%s\n", error.title, error.reason);
+            if (error.detail != NULL && error.detail[0] != '\0') ofLogPrint("%s\n", error.detail);
+            return;
+        }
         ofLoadingDrawError(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &error, g_permille);
         ofPlatformLoadingFlip();
 #ifdef OF_PC

@@ -21,6 +21,7 @@ static bool g_console = true;
 void ofLogSetConsole(bool enabled) { g_console = enabled; }
 static const char *g_lastError = "";
 const char *ofLogLastError(void) { return g_lastError; }
+void ofLogPrint(const char *format, ...) { (void) format; }
 
 bool ofFontReady(void) { return false; }
 /* ofFontDraw before the game's font is ready: of_perf.c's 6x12 fallback, copied. */
@@ -159,6 +160,31 @@ static void testLoad(void) {
     assert(!ofLoadingActive() && g_console);
 }
 
+/* Without a plan (a data file it couldn't read ahead), the reads still move the bar, short of the data file's end. */
+static void testNoPlan(void) {
+    g_permille = 0, g_drawnFill = -1, g_done = 0, g_stage = 0, g_stageDone = 0, g_dataLoaded = false;
+    g_planCount = 0, g_planNext = 0;
+    ofLoadingBegin();
+    ofLoadingPlan("of_loading_test_missing.win");
+    for (int i = 0; i < 200; i++) {
+        ofLoadingTick();
+        if (i % 20 == 0) ofLoadingNote("DataWin: %.4s, %u KB%s\n", "DataWin: CODE, 5141 KB\n");
+    }
+    int during = ofLoadingPermille();
+    assert(during > 100 && during < 800);
+    ofLoadingNote("Loaded \"%s\"", "Loaded \"UNDERTALE\"");
+    assert(ofLoadingPermille() == 800);
+    ofLoadingEnd();
+}
+
+/* A line that ends in spaces past the right edge stops at the end of the text. */
+static void testWrapTrailingSpace(void) {
+    int line = lineHeight();
+    assert(drawWrapped(NULL, 0, 0, 0, 0, 3 * 8, "abc ", 0) == line);
+    assert(drawWrapped(NULL, 0, 0, 0, 0, 3 * 8, "abc   ", 0) == line);
+    assert(drawWrapped(NULL, 0, 0, 0, 0, 3 * 8, "abc def ", 0) == 2 * line);
+}
+
 static void testDescribe(void) {
     OfLoadError e;
     ofLoadingDescribe(&e, "Undertale", "data.win, textures.bin and music.bin", "Cannot open data.win", "app exited",
@@ -201,6 +227,8 @@ static void testScreens(void) {
 
 int main(void) {
     testLoad();
+    testNoPlan();
+    testWrapTrailingSpace();
     testDescribe();
     testScreens();
     printf("loading screen: passed\n");
