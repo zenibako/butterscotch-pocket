@@ -38,6 +38,7 @@ PORT_FILES = {
 POCKET_TESTS = {
     "runner_snapshot_test.c", "data_win_room_cache_test.c", "of_snapshot_envelope_test.c",
     "of_save_snapshot_test.c", "of_audio_snapshot_test.c", "of_audio_silence_test.c",
+    "of_audio_hw_mixer_test.c",
     "of_pc_audio_snapshot_test.c", "sw_button_cache_test.c",
 }
 REFERENCE_INPUTS = {

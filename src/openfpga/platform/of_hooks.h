@@ -39,6 +39,8 @@ bool ofAudioHasPackFile(const char *path);
 typedef enum { OF_AUDIO_NORMAL, OF_AUDIO_DISABLED, OF_AUDIO_MUSIC_ONLY, OF_AUDIO_SOUND_ONLY, OF_AUDIO_MODE_COUNT } OfAudioMode;
 void ofAudioSetMode(OfAudioMode mode);
 OfAudioMode ofAudioMode(void);
+/* Mix in software even where openfpgaOS has the hardware mixer; set before the audio system starts. */
+void ofAudioUseSoftwareMixer(bool software);
 void platformLog(const logType type, const char *format, va_list va) __attribute__((format(printf, 2, 0)));
 
 #endif
