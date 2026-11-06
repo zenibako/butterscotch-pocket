@@ -1131,16 +1131,27 @@ static void swrDrawSpriteInternal(
             SWR_PROBE_PATH(1);
             swrOverlayFlush(swr);
             SWR_PROBE_STOP(6);
+            bool plainOpaque = alpha > 253 && (tintColor & 0x7FFF) == 0x7FFF;
+            const SWColorSpans* spans = NULL;
+            // Large backdrops can have thin, partly covered lines with wide
+            // transparent gaps. A half copy with coverage always takes this
+            // branch, so its spans omit zero (no coverage) instead of the clear colour.
+            if (dw >= 128 && plainOpaque && contrast == SWR_CONTRAST_NONE)
+                spans = swrColorSpans(&source->halfSpans, halved.buffer, halfW, halfH, 0);
             uint32_t lastColor = 0xFFFFFFFF;
             uintpixel_t lastTinted = 0;
             for (int y = 0; y < dh; y++)
             {
+                int row = sy + y;
+                uint32_t firstRun = spans != NULL ? spans->rows[row] : 0;
+                uint32_t endRun = spans != NULL ? spans->rows[row + 1] : 1;
+                if (firstRun == endRun) continue;
                 uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
                 swrDirtyRow(swr, dy + y, dx, dx + dw);
-                const uintpixel_t* srcline = &halved.buffer[(sy + y) * halfW + sx];
-                const uint8_t* covline = &coverage[(sy + y) * halfW + sx];
+                const uintpixel_t* srcline = &halved.buffer[row * halfW + sx];
+                const uint8_t* covline = &coverage[row * halfW + sx];
                 // Only the stretch of the row that has anything in it.
-                int from = (int) halved.halfRowBounds[(sy + y) * 2] - sx, to = (int) halved.halfRowBounds[(sy + y) * 2 + 1] - sx;
+                int from = (int) halved.halfRowBounds[row * 2] - sx, to = (int) halved.halfRowBounds[row * 2 + 1] - sx;
                 if (from < 0) from = 0;
                 if (to > dw) to = dw;
                 // Untinted at full opacity, a texel standing for all four of its own is stored as it
@@ -1148,30 +1159,41 @@ static void swrDrawSpriteInternal(
                 // (a sprite's edge) is gone through a pixel at a time. The loop below does the left
                 // side, the copy, then the right side.
                 int copyFrom = to, copyTo = to;
-                if (alpha > 253 && (tintColor & 0x7FFF) == 0x7FFF) {
-                    copyFrom = (int) halved.halfFullBounds[(sy + y) * 2] - sx;
-                    copyTo = (int) halved.halfFullBounds[(sy + y) * 2 + 1] - sx;
+                if (plainOpaque) {
+                    copyFrom = (int) halved.halfFullBounds[row * 2] - sx;
+                    copyTo = (int) halved.halfFullBounds[row * 2 + 1] - sx;
                     if (copyFrom < from) copyFrom = from;
                     if (copyTo > to) copyTo = to;
                     if (copyTo - copyFrom < 4) copyFrom = copyTo = to; // not worth a call
                     else memcpy(&dstline[copyFrom], &srcline[copyFrom], (size_t) (copyTo - copyFrom) * sizeof(uintpixel_t));
                 }
-                for (int x = from; x < to; x++)
+                for (uint32_t i = firstRun; i < endRun; i++)
                 {
-                    if (x == copyFrom) { x = copyTo - 1; continue; }
-                    uint32_t covered = covline[x];
-                    if (covered == 0) continue;
-                    uintpixel_t color = srcline[x];
-                    if (color != lastColor) {
-                        lastTinted = tint(tintColor, color);
-                        lastColor = color;
+                    int start = from, end = to;
+                    if (spans != NULL) {
+                        int left = (int) (spans->runs[i] >> 16) - sx;
+                        int right = (int) (spans->runs[i] & 0xFFFF) - sx;
+                        if (left >= to) break;
+                        if (start < left) start = left;
+                        if (end > right) end = right;
                     }
-                    int coverageAlpha = swrContrastCoverage((int) covered, alpha, contrast);
-                    if (coverageAlpha > 253)
-                        dstline[x] = lastTinted;
-                    else if (coverageAlpha >= 4)
-                        dstline[x] = swrBlendPremultiplied(dstline[x], swrSpreadRedBlue(lastTinted) * coverageAlpha,
-                                                           swrGreen(lastTinted) * coverageAlpha, 256 - coverageAlpha);
+                    for (int x = start; x < end; x++)
+                    {
+                        if (x == copyFrom) { x = copyTo - 1; continue; }
+                        uint32_t covered = covline[x];
+                        if (covered == 0) continue;
+                        uintpixel_t color = srcline[x];
+                        if (color != lastColor) {
+                            lastTinted = tint(tintColor, color);
+                            lastColor = color;
+                        }
+                        int coverageAlpha = swrContrastCoverage((int) covered, alpha, contrast);
+                        if (coverageAlpha > 253)
+                            dstline[x] = lastTinted;
+                        else if (coverageAlpha >= 4)
+                            dstline[x] = swrBlendPremultiplied(dstline[x], swrSpreadRedBlue(lastTinted) * coverageAlpha,
+                                                               swrGreen(lastTinted) * coverageAlpha, 256 - coverageAlpha);
+                    }
                 }
             }
             return;
