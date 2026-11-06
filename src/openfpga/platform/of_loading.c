@@ -336,6 +336,11 @@ static void update(void) {
 
 void ofLoadingBegin(void) {
     g_active = true;
+    g_dataLoaded = false;
+    g_done = g_stageDone = 0;
+    g_permille = 0;
+    g_drawnFill = -1;
+    g_planCount = g_planNext = 0;
     g_dataWeight = OF_GUESS_DATA_WEIGHT;
     g_postWeight = g_dataWeight * OF_POST_SHARE_NUM / OF_POST_SHARE_DEN;
     /* With no plan, the reads move the bar through the guessed data file. */

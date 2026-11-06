@@ -173,9 +173,8 @@ static void testLoad(void) {
 
 /* Without a plan (a data file it couldn't read ahead), the reads still move the bar, short of the data file's end. */
 static void testNoPlan(void) {
-    g_permille = 0, g_drawnFill = -1, g_done = 0, g_stage = 0, g_stageDone = 0, g_dataLoaded = false;
-    g_planCount = 0, g_planNext = 0;
     ofLoadingBegin();
+    assert(ofLoadingPermille() == 0);
     ofLoadingPlan("of_loading_test_missing.win");
     for (int i = 0; i < 200; i++) {
         ofLoadingTick();
@@ -243,7 +242,6 @@ static void testFailReentry(void) {
     ofLoadingDescribe(&e, ofGame.title, ofGame.dataFiles, "Cannot open data.win", "app exited", false, NULL);
     ofLoadingDrawError(expected, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, 0);
 
-    g_permille = 0, g_dataLoaded = false;
     ofLoadingBegin();
     g_lastError = "Cannot open data.win";
     g_fontFails = true;
