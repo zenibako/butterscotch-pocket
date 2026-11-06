@@ -96,77 +96,85 @@ static const OfBenchSection g_sections[] = {
 };
 
 /* The battle tour ("--bench-battles"): a walk to the first room, then six
- * battles from across the game, each entered by setting the battle group and
- * going to room_battle (306) from room_area1 (4), and played for 450 frames
- * with Z every 40 frames and the heart moving between. HP is kept topped up so
- * no battle ends in a game over. Late bosses are entered without their story
- * set up, so they show their opening turns, not a real playthrough. */
+ * battles from across the game, each entered and left the way the game does
+ * it, so its music starts and stops as in play. From a Ruins room (12, with
+ * its music) the player walks a few steps, then the tour does what an
+ * overworld encounter does (global.battlegroup and border set, an
+ * obj_battleblcon made): the "!", the heart and the flash into room_battle.
+ * The battle runs for about 350 frames with Z every 40 frames and the heart
+ * moving between, HP kept topped up so no battle ends in a game over. Then
+ * global.monster[0..2] is cleared, which is the game's own win: "YOU WON",
+ * the battle music stopped, and a confirm press back to the Ruins room with
+ * its music resumed. Each section is one visit, overworld included. Each
+ * visit starts with a jump to the Ruins room, which changes nothing when the
+ * last battle ended in time, but keeps a battle that did not from making the
+ * next encounter inside room_battle (the game would then loop on it). A win
+ * this way never takes a boss's own ending (Toriel's kill path writes
+ * undertale.ini), and global.mercy, which some bosses raise to stop fleeing,
+ * is reset before each encounter. Late bosses are entered without their
+ * story set up, so they show their opening turns, not a real playthrough. */
 static const char g_tourScript[] =
     "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z,"
-    "700:R*200,1061:Z,1069:U*20,1101:Z,1109:D*20,1141:Z,1149:L*20,1181:Z,1189:R*20,1221:Z,1229:U*20,1261:Z,"
-    "1269:D*20,1301:Z,1309:L*20,1341:Z,1349:R*20,1381:Z,1389:U*20,1421:Z,1429:D*20,1461:Z,1469:L*20,1501:Z,"
-    "1509:R*20,1541:Z,1549:U*20,1581:Z,1589:D*20,1621:Z,1629:L*20,1661:Z,1669:R*20,1701:Z,1709:U*20,1741:Z,"
-    "1749:D*20,1781:Z,1789:L*20,1821:Z,1829:R*20,1861:Z,1869:U*20,1901:Z,1909:D*20,1941:Z,1949:L*20,1981:Z,"
-    "1989:R*20,2021:Z,2029:U*20,2061:Z,2069:D*20,2101:Z,2109:L*20,2141:Z,2149:R*20,2181:Z,2189:U*20,2221:Z,"
-    "2229:D*20,2261:Z,2269:L*20,2301:Z,2309:R*20,2381:Z,2389:D*20,2421:Z,2429:L*20,2461:Z,2469:R*20,2501:Z,"
-    "2509:U*20,2541:Z,2549:D*20,2581:Z,2589:L*20,2621:Z,2629:R*20,2661:Z,2669:U*20,2701:Z,2709:D*20,2741:Z,"
-    "2749:L*20,2781:Z,2789:R*20,2821:Z,2829:U*20,2861:Z,2869:D*20,2901:Z,2909:L*20,2941:Z,2949:R*20,2981:Z,"
-    "2989:U*20,3021:Z,3029:D*20,3061:Z,3069:L*20,3101:Z,3109:R*20,3141:Z,3149:U*20,3181:Z,3189:D*20,3221:Z,"
-    "3229:L*20,3261:Z,3269:R*20,3301:Z,3309:U*20,3341:Z,3349:D*20,3381:Z,3389:L*20,3421:Z,3429:R*20,3461:Z,"
-    "3469:U*20,3501:Z,3509:D*20,3541:Z,3549:L*20,3581:Z,3589:R*20,3621:Z,3629:U*20,3661:Z,3669:D*20";
+    "700:R*200,1030:L*20,1060:R*20,1160:Z,1168:U*20,1200:Z,1208:D*20,1240:Z,1248:L*20,1280:Z,1288:R*20,"
+    "1320:Z,1328:U*20,1360:Z,1368:D*20,1400:Z,1408:L*20,1440:Z,1448:R*20,1480:Z,1488:U*20,1530:Z,1545:Z,"
+    "1560:Z,1630:L*20,1660:R*20,1760:Z,1768:U*20,1800:Z,1808:D*20,1840:Z,1848:L*20,1880:Z,1888:R*20,1920:Z,"
+    "1928:U*20,1960:Z,1968:D*20,2000:Z,2008:L*20,2040:Z,2048:R*20,2080:Z,2088:U*20,2130:Z,2145:Z,2160:Z,"
+    "2230:L*20,2260:R*20,2360:Z,2368:U*20,2400:Z,2408:D*20,2440:Z,2448:L*20,2480:Z,2488:R*20,2520:Z,"
+    "2528:U*20,2560:Z,2568:D*20,2600:Z,2608:L*20,2640:Z,2648:R*20,2680:Z,2688:U*20,2730:Z,2745:Z,2760:Z,"
+    "2830:L*20,2860:R*20,2960:Z,2968:U*20,3000:Z,3008:D*20,3040:Z,3048:L*20,3080:Z,3088:R*20,3120:Z,"
+    "3128:U*20,3160:Z,3168:D*20,3200:Z,3208:L*20,3240:Z,3248:R*20,3280:Z,3288:U*20,3330:Z,3345:Z,3360:Z,"
+    "3430:L*20,3460:R*20,3560:Z,3568:U*20,3600:Z,3608:D*20,3640:Z,3648:L*20,3680:Z,3688:R*20,3720:Z,"
+    "3728:U*20,3760:Z,3768:D*20,3800:Z,3808:L*20,3840:Z,3848:R*20,3880:Z,3888:U*20,3930:Z,3945:Z,3960:Z,"
+    "4030:L*20,4060:R*20,4160:Z,4168:U*20,4200:Z,4208:D*20,4240:Z,4248:L*20,4280:Z,4288:R*20,4320:Z,"
+    "4328:U*20,4360:Z,4368:D*20,4400:Z,4408:L*20,4440:Z,4448:R*20,4480:Z,4488:U*20,4530:Z,4545:Z,4560:Z";
 
 static const OfJump g_tourJumps[] = {
-    { 1000, -1, "battlegroup=4,hp=99,maxhp=99" }, /* Froggit */
-    { 1001, 306, NULL }, /* room_battle */
-    { 1101, -1, "hp=99" },
-    { 1201, -1, "hp=99" },
-    { 1301, -1, "hp=99" },
-    { 1401, -1, "hp=99" },
-    { 1449, 4, NULL }, /* out of the last battle */
-    { 1450, -1, "battlegroup=22,hp=99,maxhp=99" }, /* Toriel */
-    { 1451, 306, NULL }, /* room_battle */
-    { 1551, -1, "hp=99" },
-    { 1651, -1, "hp=99" },
-    { 1751, -1, "hp=99" },
-    { 1851, -1, "hp=99" },
-    { 1899, 4, NULL }, /* out of the last battle */
-    { 1900, -1, "battlegroup=27,hp=99,maxhp=99" }, /* Papyrus */
-    { 1901, 306, NULL }, /* room_battle */
-    { 2001, -1, "hp=99" },
-    { 2101, -1, "hp=99" },
-    { 2201, -1, "hp=99" },
-    { 2301, -1, "hp=99" },
-    { 2349, 4, NULL }, /* out of the last battle */
-    { 2350, -1, "battlegroup=47,hp=99,maxhp=99" }, /* Undyne */
-    { 2351, 306, NULL }, /* room_battle */
-    { 2451, -1, "hp=99" },
-    { 2551, -1, "hp=99" },
-    { 2651, -1, "hp=99" },
-    { 2751, -1, "hp=99" },
-    { 2799, 4, NULL }, /* out of the last battle */
-    { 2800, -1, "battlegroup=81,hp=99,maxhp=99" }, /* Mettaton EX */
-    { 2801, 306, NULL }, /* room_battle */
-    { 2901, -1, "hp=99" },
-    { 3001, -1, "hp=99" },
-    { 3101, -1, "hp=99" },
-    { 3201, -1, "hp=99" },
-    { 3249, 4, NULL }, /* out of the last battle */
-    { 3250, -1, "battlegroup=101,hp=99,maxhp=99" }, /* Asgore */
-    { 3251, 306, NULL }, /* room_battle */
-    { 3351, -1, "hp=99" },
-    { 3451, -1, "hp=99" },
-    { 3551, -1, "hp=99" },
-    { 3651, -1, "hp=99" },
+    { 1000, 12, "encounter=0", NULL }, /* the Ruins room */
+    { 1100, -1, "battlegroup=4,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Froggit */
+    { 1250, -1, "hp=99", NULL },
+    { 1350, -1, "hp=99", NULL },
+    { 1450, -1, "hp=99", NULL },
+    { 1500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
+    { 1600, 12, "encounter=0", NULL },
+    { 1700, -1, "battlegroup=22,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Toriel */
+    { 1850, -1, "hp=99", NULL },
+    { 1950, -1, "hp=99", NULL },
+    { 2050, -1, "hp=99", NULL },
+    { 2100, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
+    { 2200, 12, "encounter=0", NULL },
+    { 2300, -1, "battlegroup=27,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Papyrus */
+    { 2450, -1, "hp=99", NULL },
+    { 2550, -1, "hp=99", NULL },
+    { 2650, -1, "hp=99", NULL },
+    { 2700, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
+    { 2800, 12, "encounter=0", NULL },
+    { 2900, -1, "battlegroup=47,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Undyne */
+    { 3050, -1, "hp=99", NULL },
+    { 3150, -1, "hp=99", NULL },
+    { 3250, -1, "hp=99", NULL },
+    { 3300, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
+    { 3400, 12, "encounter=0", NULL },
+    { 3500, -1, "battlegroup=81,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Mettaton EX */
+    { 3650, -1, "hp=99", NULL },
+    { 3750, -1, "hp=99", NULL },
+    { 3850, -1, "hp=99", NULL },
+    { 3900, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
+    { 4000, 12, "encounter=0", NULL },
+    { 4100, -1, "battlegroup=101,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" }, /* Asgore */
+    { 4250, -1, "hp=99", NULL },
+    { 4350, -1, "hp=99", NULL },
+    { 4450, -1, "hp=99", NULL },
+    { 4500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }, /* won */
 };
 
 static const OfBenchSection g_tourSections[] = {
     { "boot to the first room", 1000, "boot" },
-    { "Froggit (640x480)", 1448, "frog" },
-    { "Toriel (640x480)", 1898, "tori" },
-    { "Papyrus (640x480)", 2348, "papy" },
-    { "Undyne (640x480)", 2798, "undy" },
-    { "Mettaton EX (640x480)", 3248, "mtex" },
-    { "Asgore (640x480)", 3698, "asgr" },
+    { "Froggit (640x480)", 1599, "frog" },
+    { "Toriel (640x480)", 2199, "tori" },
+    { "Papyrus (640x480)", 2799, "papy" },
+    { "Undyne (640x480)", 3399, "undy" },
+    { "Mettaton EX (640x480)", 3999, "mtex" },
+    { "Asgore (640x480)", 4599, "asgr" },
 };
 
 static void battleUiInstall(Runner *runner) {

@@ -66,8 +66,11 @@ void swrFreeGlyphHints(SWTexture* texture)
 
 // Includes entry metadata and pixels across all textures/renderers. The ordinary
 // sampler remains available when this optional budget or malloc is exhausted.
+// The side limit admits Undertale's 110x42 FIGHT/ACT/ITEM/MERCY buttons, which
+// otherwise take the per-pixel hybrid sampler on every half-size frame (8.7 ms
+// a frame on the Pocket for about 2.6 draws); each costs some 9 KB here.
 MAYBE_UNUSED static size_t swrButtonCacheBytes;
-enum { SWR_BUTTON_CACHE_BYTES = 32 * 1024 };
+enum { SWR_BUTTON_CACHE_BYTES = 192 * 1024, SWR_BUTTON_CACHE_SIDE = 128 };
 
 const SWButtonCache* swrButtonCache(SWTexture* texture, int sx, int sy, int sw, int sh)
 {
@@ -75,7 +78,7 @@ const SWButtonCache* swrButtonCache(SWTexture* texture, int sx, int sy, int sw, 
     (void) texture; (void) sx; (void) sy; (void) sw; (void) sh;
     return NULL;
 #else
-    if (!texture->immutable || sw <= 0 || sh <= 0 || sw > 32 || sh > 32 ||
+    if (!texture->immutable || sw <= 0 || sh <= 0 || sw > SWR_BUTTON_CACHE_SIDE || sh > SWR_BUTTON_CACHE_SIDE ||
         sx < 0 || sy < 0 || sx > texture->width - sw || sy > texture->height - sh)
         return NULL;
     for (SWButtonCache* cache = texture->buttonCache; cache; cache = cache->next)

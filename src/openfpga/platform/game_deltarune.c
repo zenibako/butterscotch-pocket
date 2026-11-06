@@ -577,10 +577,10 @@ static const char g_script[] =
     "3450:Z,3465:Z,3480:Z,3495:Z,3510:Z,3525:Z,3540:Z,3555:Z,3570:Z,3585:Z";
 
 static const OfJump g_jumps[] = {
-    { DELTARUNE_YARD_FRAME - 1, -1, "plot=60,interact=0" }, /* past the scene that would otherwise start in the yard */
-    { DELTARUNE_YARD_FRAME, 7, NULL },
-    { DELTARUNE_FIELD_FRAME - 1, -1, "darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0" },
-    { DELTARUNE_FIELD_FRAME, 52, NULL },
+    { DELTARUNE_YARD_FRAME - 1, -1, "plot=60,interact=0", NULL }, /* past the scene that would otherwise start in the yard */
+    { DELTARUNE_YARD_FRAME, 7, NULL, NULL },
+    { DELTARUNE_FIELD_FRAME - 1, -1, "darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0", NULL },
+    { DELTARUNE_FIELD_FRAME, 52, NULL, NULL },
 };
 
 static const OfBenchSection g_sections[] = {

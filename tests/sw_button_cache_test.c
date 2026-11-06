@@ -15,6 +15,7 @@ static bool failAllocation;
 static unsigned allocations;
 static struct { void *pointer; size_t bytes; } live[64];
 static size_t liveBytes;
+static size_t cacheBudget(void);
 static void* cacheMalloc(size_t bytes) {
     ++allocations;
     void *pointer = failAllocation ? NULL : malloc(bytes);
@@ -24,7 +25,7 @@ static void* cacheMalloc(size_t bytes) {
         CHECK(i < 64);
         live[i].pointer = pointer; live[i].bytes = bytes;
         liveBytes += bytes;
-        CHECK(liveBytes <= 32 * 1024);
+        CHECK(liveBytes <= cacheBudget());
     }
     return pointer;
 }
@@ -42,6 +43,7 @@ static void cacheFree(void *pointer) {
 #include "../src/sw/sw_texture.c"
 #undef malloc
 #undef free
+static size_t cacheBudget(void) { return SWR_BUTTON_CACHE_BYTES; }
 
 #ifdef SW_HAS_PREMUL_BLEND
 static void verify(const SWButtonCache *cache, SWTexture *texture, int sx, int sy, int w, int h) {
@@ -98,8 +100,14 @@ int main(void) {
     }
     CHECK(swrButtonCache(texture, -1, 0, 4, 4) == NULL);
     CHECK(swrButtonCache(texture, 39, 0, 4, 4) == NULL);
-    CHECK(swrButtonCache(texture, 0, 0, 33, 4) == NULL);
-    CHECK(swrButtonCache(texture, 0, 0, 4, 33) == NULL);
+    SWTexture *wide = swrCreateTextureEx(NULL, SWR_BUTTON_CACHE_SIDE + 2, SWR_BUTTON_CACHE_SIDE + 2, false);
+    wide->immutable = true;
+    for (int i = 0; i < wide->width * wide->height; ++i)
+        wide->buffer[i] = (uintpixel_t) ((i % 3 ? 0x8000 : 0) | ((i * 7919u) & 0x7fff));
+    verify(swrButtonCache(wide, 1, 0, 110, 42), wide, 1, 0, 110, 42); /* Undertale's battle buttons */
+    CHECK(swrButtonCache(wide, 0, 0, SWR_BUTTON_CACHE_SIDE + 1, 4) == NULL);
+    CHECK(swrButtonCache(wide, 0, 0, 4, SWR_BUTTON_CACHE_SIDE + 1) == NULL);
+    swrFreeTexture(wide);
     CHECK(swrButtonCache(texture, 0, -1, 4, 4) == NULL);
     CHECK(swrButtonCache(texture, 0, 39, 4, 4) == NULL);
     CHECK(swrButtonCache(texture, 0, 0, 4, 0) == NULL);
@@ -111,17 +119,20 @@ int main(void) {
     SWTexture *holders[40] = {0};
     unsigned cached = 0;
     for (unsigned i = 0; i < 40; ++i) {
-        holders[i] = swrCreateTextureEx(texture->buffer, 40, 40, false);
+        holders[i] = swrCreateTextureEx(NULL, SWR_BUTTON_CACHE_SIDE, SWR_BUTTON_CACHE_SIDE, false);
         holders[i]->immutable = true;
-        if (swrButtonCache(holders[i], 0, 0, 31, 32)) ++cached;
+        if (swrButtonCache(holders[i], 0, 0, SWR_BUTTON_CACHE_SIDE, SWR_BUTTON_CACHE_SIDE)) ++cached;
     }
     CHECK(cached > 0 && cached < 40);
+    SWTexture *late = swrCreateTextureEx(NULL, SWR_BUTTON_CACHE_SIDE, SWR_BUTTON_CACHE_SIDE, false);
+    late->immutable = true;
     unsigned before = allocations;
-    CHECK(swrButtonCache(texture, 0, 0, 31, 32) == NULL);
+    CHECK(swrButtonCache(late, 0, 0, SWR_BUTTON_CACHE_SIDE, SWR_BUTTON_CACHE_SIDE) == NULL);
     CHECK(allocations == before);
+    swrFreeTexture(late);
     CHECK(texture->buffer == sourceBuffer && !memcmp(original, texture->buffer, sizeof(original)));
     const SWButtonCache *warm = holders[0]->buttonCache;
-    CHECK(warm && swrButtonCache(holders[0], 0, 0, 31, 32) == warm);
+    CHECK(warm && swrButtonCache(holders[0], 0, 0, SWR_BUTTON_CACHE_SIDE, SWR_BUTTON_CACHE_SIDE) == warm);
     CHECK(allocations == before);
     for (unsigned i = 0; i < 40; ++i) swrFreeTexture(holders[i]);
     verify(swrButtonCache(texture, 0, 0, 31, 32), texture, 0, 0, 31, 32);
