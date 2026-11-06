@@ -447,8 +447,8 @@ void ofLoadingFail(const char *why, bool logSaved) {
     if (!g_active) return;
     static char footer[128];
     if (logSaved)
-        snprintf(footer, sizeof(footer), "Quit from the Analogue menu to save the log, %s, in Saves/butterscotch/common.",
-                 OF_LOG_SLOT_FILE);
+        snprintf(footer, sizeof(footer), "%s",
+                 "Quit from the Analogue menu to save the log: the entry's _1.sav file in Saves/butterscotch/common.");
     OfLoadError error;
     ofLoadingDescribe(&error, ofGame.title, ofGame.dataFiles, ofLogLastError(), why, g_dataLoaded,
                       logSaved ? footer : NULL);

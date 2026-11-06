@@ -190,7 +190,7 @@ static void testScreens(void) {
     for (int i = 0; i < 2; i++) {
         OfLoadError e;
         ofLoadingDescribe(&e, "Undertale", "data.win, textures.bin and music.bin", cases[i][1], cases[i][2], false,
-                          "Quit from the Analogue menu to save the log, undertale_1.sav, in Saves/butterscotch/common.");
+                          "Quit from the Analogue menu to save the log: the entry's _1.sav file in Saves/butterscotch/common.");
         ofLoadingDrawError(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, i == 0 ? 0 : 520);
         assert(g_fb[row + barLeft(OF_LOADING_WIDTH)] == OF_RED);
         char name[64];

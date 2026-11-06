@@ -806,12 +806,24 @@ uint16_t *ofPlatformLoadingSurface(bool *fresh) {
 }
 
 void ofPlatformLoadingFlip(void) {
-    of_video_flip();
-    /* Off the terminal once there is a frame to show instead. */
-    if (!g_loadingShown) {
-        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
-        g_loadingShown = true;
+    if (g_loadingShown) {
+        of_video_flip();
+        return;
     }
+    /* Off the terminal once there is a frame to show instead. The display
+     * keeps three buffers, holding whatever the last app (or the last run of
+     * this one) left there: give every one this frame, and wait for each to
+     * be on screen, before the display shows any of them. Otherwise the
+     * switch can show a stale frame or noise for a moment. */
+    uint16_t *frame = (uint16_t *) (void *) of_video_surface();
+    for (int i = 0; i < 3; i++) {
+        of_video_flip();
+        of_video_wait_flip();
+        uint16_t *next = (uint16_t *) (void *) of_video_surface();
+        if (next != frame) memcpy(next, frame, (size_t) OF_LOADING_WIDTH * OF_LOADING_HEIGHT * sizeof(uint16_t));
+    }
+    of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+    g_loadingShown = true;
 }
 
 void *platformGetProcAddress(const char *name) {
