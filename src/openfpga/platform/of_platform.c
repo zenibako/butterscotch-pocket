@@ -821,6 +821,17 @@ static void setGlobals(const char *spec) {
     }
 }
 
+/* An instance of the object with this name, at (0, 0), as the game's own instance_create would make it. */
+static void createObject(const char *name) {
+    for (uint32_t i = 0; i < g_runner->dataWin->objt.count; i++) {
+        const char *objectName = g_runner->dataWin->objt.objects[i].name;
+        if (objectName == NULL || strcmp(objectName, name) != 0) continue;
+        Runner_createInstance(g_runner, 0, 0, (int32_t) i);
+        return;
+    }
+    logWarn("Jump: no object %s\n", name);
+}
+
 /* Scripted input for repeatable runs (the benchmark, and BS_SCRIPT on
  * desktop):
  *   "300:Z,340:D,341:Z,400:R*90"
@@ -834,6 +845,7 @@ static void runInputScript(void) {
         for (int i = 0; i < g_jumpCount; i++) {
             if (g_jumps[i].frame != frame) continue;
             if (g_jumps[i].set != NULL) setGlobals(g_jumps[i].set);
+            if (g_jumps[i].create != NULL) createObject(g_jumps[i].create);
             if (g_jumps[i].room >= 0) g_runner->pendingRoom = g_jumps[i].room;
         }
     }

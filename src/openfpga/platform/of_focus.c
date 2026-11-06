@@ -36,8 +36,8 @@ static const struct {
 };
 static const char *const modes[] = {"normal","no-render","no-audio","core","profile"};
 static const OfJump jumps[] = {
-    {29,-1,"darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0"}, {30,52,NULL},
-    {999,-1,"darkzone=1,char[1]=2,char[2]=3,plot=165,interact=0"}, {1000,TILE_ROOM,NULL}
+    {29,-1,"darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0",NULL}, {30,52,NULL,NULL},
+    {999,-1,"darkzone=1,char[1]=2,char[2]=3,plot=165,interact=0",NULL}, {1000,TILE_ROOM,NULL,NULL}
 };
 static const char script[] = "100:R*300,500:Z,515:Z,530:Z,545:Z,560:Z,575:Z,590:Z,605:Z,620:Z,635:Z,650:Z,"
     "665:Z,680:Z,695:Z,710:Z,725:Z,740:Z,755:Z,770:Z,785:Z,800:Z,1040:D*10,1065:R*150";

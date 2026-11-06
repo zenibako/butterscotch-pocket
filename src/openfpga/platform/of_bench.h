@@ -34,12 +34,14 @@ void ofPlatformSetSpeedFullBattles(bool full);
 bool ofPlatformSpeedMode(void);
 void ofSaveFsSetVolatile(bool enabled);
 void ofPlatformSetInputScript(const char *script);
-/* On `frame` of a scripted run: set the globals in `set` ("name=1,other[2]=3", or NULL) and go to `room`
- * (an index, or -1 to stay). The table must outlive the run. */
+/* On `frame` of a scripted run: set the globals in `set` ("name=1,other[2]=3", or NULL), create an
+ * instance of the object named `create` at (0, 0) (or NULL), and go to `room` (an index, or -1 to stay).
+ * The table must outlive the run. */
 typedef struct {
     int frame;
     int room;
     const char *set;
+    const char *create;
 } OfJump;
 void ofPlatformSetJumps(const OfJump *jumps, int count);
 /* Turns debug mode (overlays and Select-chord hotkeys) on from start-up; see of_platform.c. */
