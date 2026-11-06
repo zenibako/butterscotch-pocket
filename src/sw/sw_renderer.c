@@ -361,6 +361,8 @@ static void SWRenderer_destroy(Renderer* renderer)
     free(swr->hintedGlyphs);
     free(swr->contrastItems);
     free(swr->contrastFonts);
+    free(swr->dirtyBuffers);
+    swr->dirtyBuffers = swr->dirty = swr->dirtyMark = NULL;
     
     if (!swr->fbIsPlatform) free(swr->mainFb);
     swr->fb = swr->mainFb = NULL;
