@@ -108,6 +108,7 @@ extern bool ofPerfDetail;
 void ofPerfDetailEvery(int frames); /* 0: only as above */
 void ofPerfDetailAlways(bool always);
 void ofPerfTakeTotals(OfPerfTotals *out);
+void ofPerfPeekTotals(OfPerfTotals *out); /* the same sum, left running */
 /* Marks the start of a phase; time since the previous mark goes to the
  * phase that was running. */
 void ofPerfPhase(OfPhase phase);

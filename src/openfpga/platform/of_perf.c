@@ -130,6 +130,10 @@ static void reportSlowFrame(unsigned workMs) {
     }
 }
 
+void ofPerfPeekTotals(OfPerfTotals *out) {
+    *out = g_totals;
+}
+
 void ofPerfTakeTotals(OfPerfTotals *out) {
     if (out != NULL) *out = g_totals;
     memset(&g_totals, 0, sizeof(g_totals));

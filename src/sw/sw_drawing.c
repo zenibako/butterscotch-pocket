@@ -203,9 +203,9 @@ MAYBE_UNUSED static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const
     *slot = spans;
     if (!worth) return NULL;
     uint32_t n = 0;
-    for (int y = 0; y < height; y++) {
-        const uintpixel_t* row = &buffer[(size_t) y * width];
-        spans->rows[y] = n;
+    for (int ry = 0; ry < height; ry++) {
+        const uintpixel_t* row = &buffer[(size_t) ry * width];
+        spans->rows[ry] = n;
         for (int x = 0; x < width; ) {
             if (row[x] == color || !swrIsOpaque(row[x])) { x++; continue; }
             int end = x + 1;

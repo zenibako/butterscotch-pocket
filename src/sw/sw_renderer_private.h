@@ -294,7 +294,7 @@ typedef struct SWDirtyBuffer {
 FORCE_INLINE uint32_t swrDirtyMask(int x0, int x1)
 {
     int c0 = x0 >> SWR_DIRTY_TILE_W_SHIFT, c1 = (x1 - 1) >> SWR_DIRTY_TILE_W_SHIFT;
-    return (uint32_t) ((2ull << c1) - 1) & ~((1u << c0) - 1);
+    return (0xFFFFFFFFu >> (31 - c1)) & ~((1u << c0) - 1);
 }
 
 // Marks pixels [x0, x1) of row y of the target, if the target is the main buffer.

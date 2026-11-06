@@ -612,8 +612,17 @@ static void frameLog(void) {
         logInfo("Objects at %d in %s: %s\n", g_scriptFrame, g_runner->currentRoom ? g_runner->currentRoom->name : "?", line);
     }
     if (state != 1 || g_runner == NULL) return;
-    OfPerfTotals t;
-    ofPerfTakeTotals(&t);
+    /* Peeks, so a benchmark's sums stay whole; the line is this frame's
+     * share. A benchmark taking the sums starts them over: then the whole
+     * sum is the share. */
+    static OfPerfTotals last;
+    OfPerfTotals now, t;
+    ofPerfPeekTotals(&now);
+    if (now.frames < last.frames) memset(&last, 0, sizeof(last));
+    t = now;
+    for (int k = 0; k < OF_PHASES; k++) t.phaseNanos[k] -= last.phaseNanos[k];
+    for (int k = 0; k < OF_DRAW_KINDS; k++) t.drawCalls[k] -= last.drawCalls[k];
+    last = now;
     fprintf(out, "%d %s %d %llu %llu %llu %llu", g_scriptFrame, g_runner->currentRoom ? g_runner->currentRoom->name : "?", g_nextW,
             (unsigned long long) (t.phaseNanos[OF_PHASE_STEP] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_DRAW] / 1000),
             (unsigned long long) (t.phaseNanos[OF_PHASE_OUT] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_AUDIO] / 1000));
