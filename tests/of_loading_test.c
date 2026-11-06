@@ -3,7 +3,7 @@
  * Replays an Undertale load as the Pocket logged it (2026-11-06, rc.25) against a data file with the same chunk
  * table, and checks that the bar only grows, follows the clock closely, and fills at the first room. Then checks
  * what the failure screen says for each kind of failure. With OF_LOADING_PREVIEW_DIR set it also writes the
- * screens as PNG files there (the text in the fallback font, as on the device before data.win has loaded). */
+ * screens as PNG files there (the text in the OS terminal font, as on the device before data.win has loaded). */
 #define OF_PC 1
 #define OF_GAME_NAME "undertale"
 #define OF_LOG_SLOT_FILE "undertale_1.sav"
@@ -22,6 +22,7 @@ void ofLogSetConsole(bool enabled) { g_console = enabled; }
 static const char *g_lastError = "";
 const char *ofLogLastError(void) { return g_lastError; }
 
+bool ofFontReady(void) { return false; }
 /* ofFontDraw before the game's font is ready: of_perf.c's 6x12 fallback, copied. */
 int ofFontLineHeight(int scale) { (void) scale; return OF_LOG_CELL_H; }
 int ofFontWidth(const char *text, int scale) { (void) scale; return (int) strlen(text) * OF_LOG_CELL_W; }
@@ -189,7 +190,7 @@ static void testScreens(void) {
     for (int i = 0; i < 2; i++) {
         OfLoadError e;
         ofLoadingDescribe(&e, "Undertale", "data.win, textures.bin and music.bin", cases[i][1], cases[i][2], false,
-                          "Quit from the Analogue menu to save the log as Saves/butterscotch/common/undertale_1.sav.");
+                          "Quit from the Analogue menu to save the log, undertale_1.sav, in Saves/butterscotch/common.");
         ofLoadingDrawError(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, i == 0 ? 0 : 520);
         assert(g_fb[row + barLeft(OF_LOADING_WIDTH)] == OF_RED);
         char name[64];

@@ -13,6 +13,11 @@
 struct Runner;
 void ofFontSetRunner(struct Runner *runner);
 
+/* Whether the game's font is there to draw with (data.win has loaded and
+ * has one); before that the functions below use the log's small font. */
+#include <stdbool.h>
+bool ofFontReady(void);
+
 /* Scale for a frame: 1 at 320x240, 2 at 640x480, so text is the same size on
  * the screen whatever the room's resolution. */
 int ofFontScale(int frameWidth);
