@@ -79,6 +79,7 @@ static int g_nextH = 0;
 static bool g_showingFramebuffer = false;
 static bool g_loadingVideo = false; /* the loading screen set the video mode up */
 static bool g_loadingShown = false; /* and has put a frame on screen */
+static void blankDisplayBuffers(void);
 static const char *g_inputScript = NULL;
 static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
@@ -372,6 +373,7 @@ bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless, 
     if (g_loadingVideo) return true;
     /* Stay on the text terminal until the first frame is ready, so load-time
      * log lines (and any early failure) are visible on the device. */
+    blankDisplayBuffers();
     of_video_init();
     of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
     of_video_set_display_mode(OF_DISPLAY_TERMINAL);
@@ -446,10 +448,33 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     return true;
 }
 
+/* Blacks out all three display buffers, as big as the largest mode.
+ *
+ * openfpgaOS (902a8ad) changes the scanout's size and colour mode first and
+ * clears its buffers after, and of_video_init switches from the terminal to
+ * the app's buffers without clearing them at all. Whatever the shown buffer
+ * held is meanwhile read at the new size: an old frame from the last run, or
+ * at 640x480 a 320x240 frame read four times too wide, which looks like
+ * static. Clearing them beforehand leaves only black to show. Also the
+ * renderer's: it draws in place into these buffers. */
+static void blankDisplayBuffers(void) {
+#ifndef OF_PC
+    const uint32_t bytes = (uint32_t) OF_HIRES_W * OF_HIRES_H * sizeof(uint16_t);
+    for (int i = 0; i < 3; i++) {
+        uint8_t *buffer = of_video_buffer_addr(i);
+        if (buffer == NULL) continue;
+        memset(buffer, 0, bytes);
+        of_cache_clean_range(buffer, bytes);
+    }
+    swrFramebufferTouched();
+#endif
+}
+
 /* Switches the display to match the frame about to be presented. */
 static void matchVideoMode(int width, int height) {
     if (width == g_modeW && height == g_modeH) return;
 
+    blankDisplayBuffers();
     of_video_mode_t want = { (uint16_t) width, (uint16_t) height, 0, OF_VIDEO_MODE_RGB555, 0 };
     if (of_video_set_mode(&want) < 0) {
         if (width > OF_SCREEN_W) {
@@ -789,6 +814,7 @@ bool ofPlatformShowLogAndHalt(void) {
 uint16_t *ofPlatformLoadingSurface(bool *fresh) {
     if (g_showingFramebuffer) return NULL; /* the game has the screen */
     if (!g_loadingVideo) {
+        blankDisplayBuffers();
         of_video_init();
         of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
         g_loadingVideo = true;
@@ -806,24 +832,12 @@ uint16_t *ofPlatformLoadingSurface(bool *fresh) {
 }
 
 void ofPlatformLoadingFlip(void) {
-    if (g_loadingShown) {
-        of_video_flip();
-        return;
+    of_video_flip();
+    /* Off the terminal once there is a frame to show instead. */
+    if (!g_loadingShown) {
+        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+        g_loadingShown = true;
     }
-    /* Off the terminal once there is a frame to show instead. The display
-     * keeps three buffers, holding whatever the last app (or the last run of
-     * this one) left there: give every one this frame, and wait for each to
-     * be on screen, before the display shows any of them. Otherwise the
-     * switch can show a stale frame or noise for a moment. */
-    uint16_t *frame = (uint16_t *) (void *) of_video_surface();
-    for (int i = 0; i < 3; i++) {
-        of_video_flip();
-        of_video_wait_flip();
-        uint16_t *next = (uint16_t *) (void *) of_video_surface();
-        if (next != frame) memcpy(next, frame, (size_t) OF_LOADING_WIDTH * OF_LOADING_HEIGHT * sizeof(uint16_t));
-    }
-    of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
-    g_loadingShown = true;
 }
 
 void *platformGetProcAddress(const char *name) {
