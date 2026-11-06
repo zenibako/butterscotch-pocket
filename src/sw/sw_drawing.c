@@ -163,6 +163,109 @@ MAYBE_UNUSED static const uint16_t* swrRowBounds(SWTexture* texture)
     return bounds;
 }
 
+// The runs of a texture's rows that hold opaque texels other than `color`
+// (see SWTexture.spans): row y's runs are runs[rows[y]] up to runs[rows[y + 1]],
+// each start << 16 | end. One whose texels are mostly such runs is not worth
+// keeping (worth false): its draws copy whole rows as before.
+typedef struct SWColorSpans {
+    uintpixel_t color;
+    bool worth;
+    uint32_t* runs;
+    uint32_t rows[];
+} SWColorSpans;
+
+static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t* buffer, int width, int height, uintpixel_t color)
+{
+    SWColorSpans* spans = *slot;
+    if (spans != NULL) return spans->color == color && spans->worth ? spans : NULL;
+    size_t count = 0, covered = 0;
+    for (int y = 0; y < height; y++) {
+        const uintpixel_t* row = &buffer[(size_t) y * width];
+        bool in = false;
+        for (int x = 0; x < width; x++) {
+            bool keep = row[x] != color && swrIsOpaque(row[x]);
+            if (keep && !in) count++;
+            covered += keep;
+            in = keep;
+        }
+    }
+    size_t header = sizeof(SWColorSpans) + ((size_t) height + 1) * sizeof(uint32_t);
+    // Worth it while what is left to copy is at most half the texture.
+    bool worth = covered * 2 <= (size_t) width * height;
+    spans = (SWColorSpans*) malloc(header + (worth ? count : 0) * sizeof(uint32_t));
+    if (spans == NULL) return NULL;
+    spans->color = color;
+    spans->worth = worth;
+    spans->runs = (uint32_t*) ((uint8_t*) spans + header);
+    *slot = spans;
+    if (!worth) return NULL;
+    uint32_t n = 0;
+    for (int y = 0; y < height; y++) {
+        const uintpixel_t* row = &buffer[(size_t) y * width];
+        spans->rows[y] = n;
+        for (int x = 0; x < width; ) {
+            if (row[x] == color || !swrIsOpaque(row[x])) { x++; continue; }
+            int end = x + 1;
+            while (end < width && row[end] != color && swrIsOpaque(row[end])) end++;
+            spans->runs[n++] = (uint32_t) x << 16 | (uint32_t) end;
+            x = end;
+        }
+    }
+    spans->rows[height] = n;
+    return spans;
+}
+
+FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
+{
+    if (count < 8) { for (int i = 0; i < count; i++) dst[i] = src[i]; }
+    else memcpy(dst, src, (size_t) count * sizeof(uintpixel_t));
+}
+
+// One row of an untinted 1:1 opaque draw into the main buffer, where tiles
+// that still hold nothing but the clear colour (see SWDirtyBuffer) get only
+// the texel runs of other colours (`run` to `runEnd`, see SWColorSpans; in
+// texture columns, the row starting at column sx), so the texels of that colour
+// are neither read nor written; only the tiles written to are marked. A
+// backdrop that is mostly the clear colour (Undertale's battle grid) then costs
+// little more than its lines. `clean` is the tiles of the tile row that were
+// unmarked when the draw reached it: the draw writes each pixel once, so
+// tiles it marks itself still hold the colour wherever it left out.
+static void swrCopyOntoClean(SWDirtyBuffer* d, uint32_t clean, uintpixel_t* dstline, const uintpixel_t* srcline,
+                             const uint32_t* run, const uint32_t* runEnd, int sx, int dx, int dy, int from, int to, bool solid)
+{
+    uint32_t wrote = 0;
+    for (int x = from; x < to; ) {
+        int col = (dx + x) >> SWR_DIRTY_TILE_W_SHIFT;
+        int end = ((col + 1) << SWR_DIRTY_TILE_W_SHIFT) - dx;
+        if (end > to) end = to;
+        uint32_t bit = 1u << col;
+        if (!(clean & bit)) {
+            // Something else may be under this stretch: it all goes over.
+            if (solid) {
+                memcpy(&dstline[x], &srcline[x], (size_t) (end - x) * sizeof(uintpixel_t));
+            } else {
+                for (int i = x; i < end; i++) {
+                    uintpixel_t pixel = srcline[i];
+                    if (swrIsOpaque(pixel)) dstline[i] = pixel;
+                }
+            }
+            wrote |= bit;
+        } else {
+            while (run < runEnd && (int) (*run & 0xFFFF) - sx <= x) run++;
+            for (const uint32_t* r = run; r < runEnd; r++) {
+                int a = (int) (*r >> 16) - sx, b = (int) (*r & 0xFFFF) - sx;
+                if (a >= end) break;
+                if (a < x) a = x;
+                if (b > end) b = end;
+                swrCopyPixels(&dstline[a], &srcline[a], b - a);
+                wrote |= bit;
+            }
+        }
+        x = end;
+    }
+    d->rows[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
+}
+
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
 {
     SWRenderer *swr = (SWRenderer*) renderer;
@@ -911,6 +1014,7 @@ static void swrDrawSpriteInternal(
 )
 {
     SWRenderer *swr = (SWRenderer*) renderer;
+    MAYBE_UNUSED SWTexture* source = texture; // `texture` may become its half-size copy's stand-in
     SWR_PROBE_STOP(3);
 #ifdef SW_HAS_PREMUL_BLEND
     const SWSpriteCall asked = { dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha };
@@ -1344,16 +1448,55 @@ static void swrDrawSpriteInternal(
         if (!solid && untinted && !flipX && xstep == (1 << fp_prec) && dh == sh)
             rowBounds = texture->buffer == texture->halfBuffer ? texture->halfRowBounds : swrRowBounds(texture); // the half-size copy stands in as a texture of its own
         
+        // Onto tiles still holding only the clear colour, texels of that colour are left out (swrCopyOntoClean).
+        static int noCleanSkip = -1;
+        if (noCleanSkip < 0) noCleanSkip = getenv("BS_NO_CLEAN_SKIP") != NULL;
+        SWDirtyBuffer* clear = swr->dirtyMark;
+        const SWColorSpans* spans = NULL;
+        if (noCleanSkip || clear == NULL || !clear->known || swr->fb != swr->mainFb || !untinted || flipX || xstep != (1 << fp_prec)
+            || dx < 0 || dx + dw > clear->width || !texture->immutable)
+            clear = NULL;
+        else {
+            spans = swrColorSpans(texture != source ? &source->halfSpans : &texture->spans,
+                                  texture->buffer, texture->width, texture->height, clear->color);
+            if (spans == NULL) clear = NULL;
+        }
+        int cleanRow = -1;
+        uint32_t clean = 0;
+        
         fixedp_t ys2 = iys2;
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
-            swrDirtyRow(swr, dy + y, dx, dx + dw);
             const uintpixel_t* srcline;
             if (dh == sh)
                 srcline = &texture->buffer[(sy + ys) * texture->width + sx];
             else
                 srcline = &texture->buffer[(sy + (int)(ys2 >> fp_prec)) * texture->width + sx];
+            
+            if (clear != NULL && dy + y >= 0 && dy + y < clear->height) {
+                int tileRow = (dy + y) >> SWR_DIRTY_TILE_H_SHIFT;
+                if (tileRow != cleanRow) {
+                    // First row of this draw in the tile row: what is clean before the draw touches it.
+                    cleanRow = tileRow;
+                    clean = ~clear->rows[tileRow] & swrDirtyMask(dx, dx + dw);
+                }
+                if (clean != 0) {
+                    int from = 0, to = dw;
+                    if (rowBounds != NULL) {
+                        int row = sy + ys;
+                        from = (int) rowBounds[row * 2] - sx;
+                        to = (int) rowBounds[row * 2 + 1] - sx;
+                        if (from < 0) from = 0;
+                        if (to > dw) to = dw;
+                    }
+                    int srcRow = dh == sh ? sy + ys : sy + (int) (ys2 >> fp_prec);
+                    swrCopyOntoClean(clear, clean, dstline, srcline, &spans->runs[spans->rows[srcRow]], &spans->runs[spans->rows[srcRow + 1]],
+                                     sx, dx, dy + y, from, to, solid);
+                    continue;
+                }
+            }
+            swrDirtyRow(swr, dy + y, dx, dx + dw);
             
             fixedp_t xs2 = ixs2;
             if (untinted && !flipX && xstep == (1 << fp_prec) && solid)

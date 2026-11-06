@@ -82,6 +82,12 @@ typedef struct
     uint16_t* rowBounds;
     uint16_t* halfRowBounds;
     uint16_t* halfFullBounds; // per row of the half-size copy, the longest run of texels standing for all four of theirs: [start, end)
+    // For each row, the runs of opaque texels other than spansColor, so that a
+    // draw onto tiles still holding only that colour (see SWDirtyBuffer) reads
+    // and writes just those (swrColorSpans); halfSpans the same for the
+    // half-size copy. Made on first need, for an immutable texture only.
+    struct SWColorSpans* spans;
+    struct SWColorSpans* halfSpans;
 }
 SWTexture;
 

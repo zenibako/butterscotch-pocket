@@ -1375,6 +1375,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.rowBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
+    localSurface.spans = localSurface.halfSpans = NULL;
     localSurface.immutable = false;
     localSurface.halfCoverage = NULL;
     localSurface.solid = localSurface.halfSolid = 0;

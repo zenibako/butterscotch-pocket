@@ -36,6 +36,7 @@ SWTexture* swrCreateTextureEx(const void* srcBuffer, int width, int height, bool
     txt->rowBounds = NULL;
     txt->halfRowBounds = NULL;
     txt->halfFullBounds = NULL;
+    txt->spans = txt->halfSpans = NULL;
     txt->immutable = false;
     txt->halfCoverage = NULL;
     txt->solid = txt->halfSolid = 0;
@@ -137,6 +138,8 @@ void swrFreeTexture(SWTexture* texture)
     swrFreeButtonCache(texture);
     free(texture->halfBuffer); // the coverage, if any, is in the same allocation
     free(texture->rowBounds);
+    free(texture->spans);
+    free(texture->halfSpans);
     free(texture->buffer);
     free(texture);
 }
