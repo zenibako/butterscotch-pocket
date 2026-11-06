@@ -168,6 +168,7 @@ MAYBE_UNUSED static const uint16_t* swrRowBounds(SWTexture* texture)
 // each start << 16 | end. One whose texels are mostly such runs is not worth
 // keeping (worth false): its draws copy whole rows as before.
 typedef struct SWColorSpans {
+    uint32_t serial;    // one for each made, never 0 (see SWBaseKey)
     uintpixel_t color;
     bool worth;
     uint32_t* runs;
@@ -194,6 +195,8 @@ static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t*
     bool worth = covered * 2 <= (size_t) width * height;
     spans = (SWColorSpans*) malloc(header + (worth ? count : 0) * sizeof(uint32_t));
     if (spans == NULL) return NULL;
+    static uint32_t serials;
+    spans->serial = ++serials != 0 ? serials : ++serials;
     spans->color = color;
     spans->worth = worth;
     spans->runs = (uint32_t*) ((uint8_t*) spans + header);
@@ -230,7 +233,9 @@ FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int co
 // little more than its lines. `clean` is the tiles of the tile row that were
 // unmarked when the draw reached it: the draw writes each pixel once, so
 // tiles it marks itself still hold the colour wherever it left out.
-static void swrCopyOntoClean(SWDirtyBuffer* d, uint32_t clean, uintpixel_t* dstline, const uintpixel_t* srcline,
+// Tiles in `keep` already hold what the draw writes there (see SWBaseKey) and
+// are left alone. What is written is marked in `marks` (rows or baseRows).
+static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint32_t keep, uintpixel_t* dstline, const uintpixel_t* srcline,
                              const uint32_t* run, const uint32_t* runEnd, int sx, int dx, int dy, int from, int to, bool solid)
 {
     uint32_t wrote = 0;
@@ -239,7 +244,9 @@ static void swrCopyOntoClean(SWDirtyBuffer* d, uint32_t clean, uintpixel_t* dstl
         int end = ((col + 1) << SWR_DIRTY_TILE_W_SHIFT) - dx;
         if (end > to) end = to;
         uint32_t bit = 1u << col;
-        if (!(clean & bit)) {
+        if (keep & bit) {
+            // Holds it already.
+        } else if (!(clean & bit)) {
             // Something else may be under this stretch: it all goes over.
             if (solid) {
                 memcpy(&dstline[x], &srcline[x], (size_t) (end - x) * sizeof(uintpixel_t));
@@ -263,7 +270,7 @@ static void swrCopyOntoClean(SWDirtyBuffer* d, uint32_t clean, uintpixel_t* dstl
         }
         x = end;
     }
-    d->rows[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
+    marks[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
 }
 
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
@@ -1206,7 +1213,27 @@ static void swrDrawSpriteInternal(
         swrMirrorHold(swr, &asked, dx, dy, dw, dh, flipX, flipY, sx, sy, (int) xstep, (int) ystep, 1 << fp_prec))
         return;
     swr->uniformValid = false;
-    swrClearSettle(swr);
+    {
+        // Possibly the buffer's first draw, to be kept (see SWBaseKey): only an
+        // untinted 1:1 opaque draw of a texture's runs (the opaque path below).
+        SWBaseKey key;
+        bool keyed = false;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+        if (blendmode == bm_normal && alpha > 253 && (tintColor & 0x7FFF) == 0x7FFF && !flipX && xstep == (1 << fp_prec) &&
+            texture->immutable && contrast == SWR_CONTRAST_NONE && !pointSample && swr->fb == swr->mainFb && dx >= 0) {
+            const SWColorSpans* made = texture != source ? source->halfSpans : texture->spans;
+            memset(&key, 0, sizeof(key));
+            key.texture = texture != source ? (const void*) source->halfBuffer : (const void*) texture;
+            key.serial = made != NULL ? made->serial : 0;
+            key.dx = dx; key.dy = dy; key.dw = dw; key.dh = dh;
+            key.sx = sx; key.sy = sy; key.sw = sw; key.sh = sh;
+            key.ystep = ystep; key.flipY = flipY;
+            key.portX = swr->portX; key.portY = swr->portY; key.maxX = swr->maxX; key.maxY = swr->maxY;
+            keyed = true;
+        }
+#endif
+        swrClearSettleBase(swr, keyed ? &key : NULL);
+    }
     if (swrFavorSpeed && alpha <= 8 && blendmode == bm_normal) return; // too faint to miss; see swrFavorSpeed
 #endif
     
@@ -1462,7 +1489,11 @@ static void swrDrawSpriteInternal(
             if (spans == NULL) clear = NULL;
         }
         int cleanRow = -1;
-        uint32_t clean = 0;
+        uint32_t clean = 0, keep = 0;
+        // The buffer's first draw (see SWBaseKey) marks baseRows, and stays kept only if every row went through the runs.
+        bool asBase = swr->baseMode != 0 && clear != NULL && clear == swr->dirty;
+        bool baseWhole = asBase;
+        uint32_t* marks = clear == NULL ? NULL : asBase ? clear->baseRows : clear->rows;
         
         fixedp_t ys2 = iys2;
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
@@ -1479,9 +1510,11 @@ static void swrDrawSpriteInternal(
                 if (tileRow != cleanRow) {
                     // First row of this draw in the tile row: what is clean before the draw touches it.
                     cleanRow = tileRow;
-                    clean = ~clear->rows[tileRow] & swrDirtyMask(dx, dx + dw);
+                    uint32_t mask = swrDirtyMask(dx, dx + dw);
+                    clean = ~(clear->rows[tileRow] | clear->baseRows[tileRow]) & mask;
+                    keep = swr->baseMode == 2 && asBase ? clear->keep[tileRow] & mask : 0;
                 }
-                if (clean != 0) {
+                if ((clean | keep) != 0) {
                     int from = 0, to = dw;
                     if (rowBounds != NULL) {
                         int row = sy + ys;
@@ -1491,11 +1524,12 @@ static void swrDrawSpriteInternal(
                         if (to > dw) to = dw;
                     }
                     int srcRow = dh == sh ? sy + ys : sy + (int) (ys2 >> fp_prec);
-                    swrCopyOntoClean(clear, clean, dstline, srcline, &spans->runs[spans->rows[srcRow]], &spans->runs[spans->rows[srcRow + 1]],
+                    swrCopyOntoClean(marks, clean, keep, dstline, srcline, &spans->runs[spans->rows[srcRow]], &spans->runs[spans->rows[srcRow + 1]],
                                      sx, dx, dy + y, from, to, solid);
                     continue;
                 }
             }
+            baseWhole = false;
             swrDirtyRow(swr, dy + y, dx, dx + dw);
             
             fixedp_t xs2 = ixs2;
@@ -1547,6 +1581,10 @@ static void swrDrawSpriteInternal(
                     dstline[x] = lastTinted;
                 }
             }
+        }
+        if (swr->baseMode != 0) {
+            if (baseWhole && swr->baseMode == 1) clear->baseKey.serial = spans->serial; // the runs may have been made just now
+            swrBaseFinish(swr, baseWhole);
         }
         return;
     }

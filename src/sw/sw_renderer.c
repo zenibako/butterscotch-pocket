@@ -150,6 +150,7 @@ void swrFramebufferTouched(void)
 // Picks up what is known of the platform buffer about to be drawn in.
 static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
 {
+    swrBaseFinish(swr, false);
     swr->dirty = swr->dirtyMark = NULL;
     static int fullClear = -1;
     if (fullClear < 0) fullClear = getenv("BS_FULL_CLEAR") != NULL;
@@ -185,10 +186,13 @@ static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, i
 // BS_CHECK_CLEAR=1 (a desktop check, slow): before each partial clear, every
 // pixel outside the marked tiles must already be the colour, or some write
 // went unmarked; that is logged with where it is, and the run stops.
+static void swrDirtyCheck(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color);
+static void swrDirtyCheckKept(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color) { swrDirtyCheck(d, fb, color); }
+
 static void swrDirtyCheck(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpixel_t color)
 {
     for (int y = 0; y < d->height; y++) {
-        uint32_t marked = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT];
+        uint32_t marked = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT] | d->baseRows[y >> SWR_DIRTY_TILE_H_SHIFT];
         for (int x = 0; x < d->width; x++) {
             if (marked & (1u << (x >> SWR_DIRTY_TILE_W_SHIFT))) continue;
             if (fb[y * d->width + x] != color) {
@@ -199,6 +203,8 @@ static void swrDirtyCheck(const SWDirtyBuffer* d, const uintpixel_t* fb, uintpix
         }
     }
 }
+
+static uint64_t swrFillTiles(SWRenderer* swr, const SWDirtyBuffer* d, const uint32_t* mask, const uint32_t* also, uintpixel_t color);
 
 void swrClearMain(SWRenderer* swr, uintpixel_t color)
 {
@@ -217,9 +223,27 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
     if (d->known && d->color == color) {
         if (check) swrDirtyCheck(d, swr->mainFb, color);
         partial++;
+        written += swrFillTiles(swr, d, d->rows, d->baseRows, color);
+    } else {
+        whole++;
+        swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
+    }
+    d->known = true;
+    d->color = color;
+    memset(d->rows, 0, sizeof(d->rows));
+    memset(d->baseRows, 0, sizeof(d->baseRows));
+    d->baseValid = false;
+    swr->dirtyMark = d;
+}
+
+// Fills the tiles of the main buffer marked in either mask with the colour; returns the pixels written.
+static uint64_t swrFillTiles(SWRenderer* swr, const SWDirtyBuffer* d, const uint32_t* mask, const uint32_t* also, uintpixel_t color)
+{
+    uint64_t written = 0;
+    {
         int tileRows = (d->height + (1 << SWR_DIRTY_TILE_H_SHIFT) - 1) >> SWR_DIRTY_TILE_H_SHIFT;
         for (int r = 0; r < tileRows; r++) {
-            uint32_t bits = d->rows[r];
+            uint32_t bits = mask[r] | (also != NULL ? also[r] : 0);
             int y0 = r << SWR_DIRTY_TILE_H_SHIFT, y1 = y0 + (1 << SWR_DIRTY_TILE_H_SHIFT);
             if (y1 > d->height) y1 = d->height;
             while (bits != 0) {
@@ -235,14 +259,8 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
                 written += (uint64_t) (y1 - y0) * (uint64_t) (x1 - x0);
             }
         }
-    } else {
-        whole++;
-        swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
     }
-    d->known = true;
-    d->color = color;
-    memset(d->rows, 0, sizeof(d->rows));
-    swr->dirtyMark = d;
+    return written;
 }
 
 #ifdef SW_PLATFORM_FRAMEBUFFER
@@ -1071,6 +1089,69 @@ void swrClearSettle(SWRenderer* swr)
         return;
     }
     SWR_NOTED("  of which: held clear written", swrClearMain(swr, swr->clearHeldColor));
+}
+
+// swrClearSettle for a draw that may be its buffer's first draw (see
+// SWBaseKey; key NULL when it cannot be one). When the clear is still held,
+// nothing else is, and the buffer's recorded first draw is this same one,
+// only the tiles something else touched are cleared, and the draw leaves out
+// the tiles that still hold it (keep). Returns the draw's baseMode; the draw
+// ends it with swrBaseFinish.
+int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key)
+{
+    swrBaseFinish(swr, false); // one that did not end as expected
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_BASE_KEEP") != NULL;
+    SWDirtyBuffer* d = swr->dirty;
+    if (off || key == NULL || !swr->clearHeld || !swr->mainFb || swr->fb != swr->mainFb || swr->tiledHeldCount > 0 ||
+        swrPendingCount > 0 || swrGridHeld() || swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0 ||
+        d == NULL || d->fb != swr->mainFb || d->width != swr->mainWidth || d->height != swr->mainHeight) {
+        swrClearSettle(swr);
+        return 0;
+    }
+    if (d->known && d->color == swr->clearHeldColor && d->baseValid && memcmp(&d->baseKey, key, sizeof(*key)) == 0) {
+        swr->clearHeld = false;
+        static int check = -1;
+        if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
+        static uint32_t kept;
+        if (check) {
+            swrDirtyCheckKept(d, swr->mainFb, d->color);
+            if (++kept % 300 == 1) logInfo("swr: first draw kept %u times\n", kept);
+        }
+        SWR_NOTED("  of which: held clear written", swrFillTiles(swr, d, d->rows, NULL, d->color));
+        for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) {
+            d->keep[r] = d->baseRows[r] & ~d->rows[r];
+            d->baseRows[r] = d->keep[r];
+            d->rows[r] = 0;
+        }
+        swr->dirtyMark = d;
+        swr->baseMode = 2;
+    } else {
+        swrClearSettle(swr);
+        if (swr->dirty != d || !d->known) return 0;
+        memset(d->keep, 0, sizeof(d->keep));
+        d->baseKey = *key;
+        swr->baseMode = 1;
+    }
+    return swr->baseMode;
+}
+
+// Ends the draw swrClearSettleBase began: drawn when it went over just as
+// recorded (every row through the colour's runs), so that it can be kept the
+// next time; otherwise what it wrote counts as anything else's.
+void swrBaseFinish(SWRenderer* swr, bool drawn)
+{
+    if (swr->baseMode == 0) return;
+    swr->baseMode = 0;
+    SWDirtyBuffer* d = swr->dirty;
+    if (d == NULL) return;
+    memset(d->keep, 0, sizeof(d->keep));
+    if (drawn) { d->baseValid = true; return; }
+    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) {
+        d->rows[r] |= d->baseRows[r];
+        d->baseRows[r] = 0;
+    }
+    d->baseValid = false;
 }
 
 static void SWRenderer_clearScreen(Renderer* renderer, uint32_t color, float alpha)

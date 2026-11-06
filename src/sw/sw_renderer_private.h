@@ -181,6 +181,7 @@ typedef struct
     struct SWDirtyBuffer* dirty;
     struct SWDirtyBuffer* dirtyMark; // `dirty` while there is anything left to mark; NULL once all of it is
     struct SWDirtyBuffer* dirtyBuffers; // SWR_DIRTY_BUFFERS of them, one per platform buffer
+    uint8_t baseMode; // what the draw being made does with its buffer's backdrop (see SWBaseKey): 0 nothing, 1 records it, 2 redraws it
     
     // A solid-colour sprite draw that has been held back so that identical
     // draws stacked directly on top of it fold into one blend (see swrOverlayFlush).
@@ -259,6 +260,20 @@ SWRenderer;
 #define SWR_DIRTY_MAX_W 1024
 #define SWR_DIRTY_MAX_ROWS 64               // 1024 px down
 #define SWR_DIRTY_BUFFERS 4
+// The first draw after a buffer is cleared, when it is an untinted 1:1 opaque
+// sprite (a battle backdrop): everything that decides what it writes. When
+// the same draw comes first again the next time that buffer is drawn into,
+// the tiles nothing else has touched since still hold exactly what it would
+// write there, so they are neither cleared nor redrawn (swrClearSettleBase).
+typedef struct SWBaseKey {
+    const void* texture;
+    uint32_t serial;        // of the texture's runs (SWColorSpans), so a texture made again at the same address does not match
+    int dx, dy, dw, dh, sx, sy, sw, sh;
+    int32_t ystep;
+    int flipY;
+    int portX, portY, maxX, maxY;
+} SWBaseKey;
+
 typedef struct SWDirtyBuffer {
     const uintpixel_t* fb;  // the buffer this describes (NULL: unused)
     int width, height;
@@ -267,6 +282,13 @@ typedef struct SWDirtyBuffer {
     bool known;             // every pixel outside the marked tiles is `color`
     uintpixel_t color;
     uint32_t rows[SWR_DIRTY_MAX_ROWS]; // bit c of rows[r]: tile (c, r) may hold something else
+    // A recorded first draw (see SWBaseKey): baseRows are the tiles that hold
+    // only it on the colour (not in rows, which is everything else); keep is,
+    // while it is being drawn again, the tiles that already hold it.
+    bool baseValid;
+    SWBaseKey baseKey;
+    uint32_t baseRows[SWR_DIRTY_MAX_ROWS];
+    uint32_t keep[SWR_DIRTY_MAX_ROWS];
 } SWDirtyBuffer;
 
 FORCE_INLINE uint32_t swrDirtyMask(int x0, int x1)
@@ -309,6 +331,8 @@ FORCE_INLINE void swrDirtyRectIn(SWRenderer* swr, const uintpixel_t* target, int
 
 // Fills the whole main buffer with one colour: only what needs it (see above).
 void swrClearMain(SWRenderer* swr, uintpixel_t color);
+int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key);
+void swrBaseFinish(SWRenderer* swr, bool drawn);
 
 // Inlined function definitions included below
 #include "sw_pixel_calc.h"
