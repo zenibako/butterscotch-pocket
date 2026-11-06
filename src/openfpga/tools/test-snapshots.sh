@@ -74,6 +74,8 @@ done
 "$out/audio-silence"
 "$cc" "${flags[@]}" -I"$SDK_ROOT/src/sdk/include" \
     "$repo/tests/of_audio_hw_mixer_test.c" "$repo/src/stb_ds.c" -o "$out/audio-hw-mixer"
+"$cc" "${flags[@]}" -I"$repo/vendor/stb/image" "$repo/tests/of_loading_test.c" -o "$out/loading"
+(cd "$out" && "$out/loading")
 "$out/audio-hw-mixer"
 "$cc" "${flags[@]}" -I"$SDK_ROOT/src/sdk/include" -isystem "$SDK_ROOT/src/sdk/pc" \
     -DOF_PC_SDL_SOURCE='"of_sdl2.c"' $(pkg-config --cflags sdl2) \

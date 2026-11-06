@@ -17,6 +17,7 @@
 #include "audio_system.h"
 #include "gettime.h"
 #include "of_hooks.h"
+#include "of_loading.h"
 #include "of_perf.h"
 #include "log.h"
 #include "stb_ds.h"
@@ -770,6 +771,7 @@ static void pumpOutput(OfAudioSystem *ut) {
  * the draw profiler also call this between pieces of work. Without it a frame longer than the
  * queue is deep (100 ms) leaves a gap in the sound. */
 void platformBusyTick(void) {
+    ofLoadingTick(); /* the loading screen's bar moves with long reads */
     /* A dump follows game time instead of the queue; see updateAudio. */
     if (!g_snapshotLocked && g_audio != NULL && g_audio->file != NULL && g_audio->dump == NULL && !silent(g_audio)) pumpOutput(g_audio);
 }

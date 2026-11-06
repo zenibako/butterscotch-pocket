@@ -23,6 +23,7 @@
 #include "of_bench.h"
 #include "of_focus.h"
 #include "of_font.h"
+#include "of_loading.h"
 #include "of_menu.h"
 #include "of_strings.h"
 #include "of_native.h"
@@ -76,6 +77,8 @@ static uint16_t *g_nextFb = NULL;
 static int g_nextW = 0;
 static int g_nextH = 0;
 static bool g_showingFramebuffer = false;
+static bool g_loadingVideo = false; /* the loading screen set the video mode up */
+static bool g_loadingShown = false; /* and has put a frame on screen */
 static const char *g_inputScript = NULL;
 static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
@@ -365,6 +368,8 @@ bool platformInit(int32_t reqW, int32_t reqH, const char *title, bool headless, 
     (void) headless;
     (void) fullscreen;
 
+    /* The loading screen already has the display (of_loading.c). */
+    if (g_loadingVideo) return true;
     /* Stay on the text terminal until the first frame is ready, so load-time
      * log lines (and any early failure) are visible on the device. */
     of_video_init();
@@ -703,6 +708,7 @@ void platformSwapBuffers(void) {
     if (!g_showingFramebuffer) {
         of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
         g_showingFramebuffer = true;
+        ofLoadingEnd();
     }
 
     matchVideoMode(g_nextW, g_nextH);
@@ -774,6 +780,37 @@ bool ofPlatformShowLogAndHalt(void) {
         of_video_flip();
         of_input_poll();
         usleep(100000);
+    }
+}
+
+/* The loading screen (of_loading.c) draws at 320x240 straight into the
+ * display's buffers until the game's first frame. Each buffer is cleared the
+ * first time it comes round; after that only the bar is drawn over. */
+uint16_t *ofPlatformLoadingSurface(bool *fresh) {
+    if (g_showingFramebuffer) return NULL; /* the game has the screen */
+    if (!g_loadingVideo) {
+        of_video_init();
+        of_video_set_color_mode(OF_VIDEO_MODE_RGB555);
+        g_loadingVideo = true;
+    }
+    if (!useLogMode(OF_LOADING_WIDTH, OF_LOADING_HEIGHT)) return NULL;
+    uint16_t *surface = (uint16_t *) (void *) of_video_surface();
+    static uint16_t *seen[4];
+    static int count = 0;
+    *fresh = true;
+    for (int i = 0; i < count; i++)
+        if (seen[i] == surface) *fresh = false;
+    if (*fresh && count < (int) (sizeof(seen) / sizeof(seen[0]))) seen[count++] = surface;
+    swrFramebufferTouched();
+    return surface;
+}
+
+void ofPlatformLoadingFlip(void) {
+    of_video_flip();
+    /* Off the terminal once there is a frame to show instead. */
+    if (!g_loadingShown) {
+        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+        g_loadingShown = true;
     }
 }
 

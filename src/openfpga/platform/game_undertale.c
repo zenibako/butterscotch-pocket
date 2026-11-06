@@ -206,6 +206,8 @@ static bool battleUiActive(Runner *runner) {
 }
 
 const OfGame ofGame = {
+    .title = "Undertale",
+    .dataFiles = "data.win, textures.bin and music.bin",
     .installPrompts = installPrompts,
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,

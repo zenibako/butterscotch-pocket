@@ -17,6 +17,7 @@ bool ofPerfDetail = false;
 static uint64_t loads[OF_LOAD_KINDS];
 void ofPerfAddLoad(OfLoadKind kind, uint64_t value) { loads[kind] += value; }
 void ofPerfPhase(OfPhase phase) { (void) phase; }
+void ofLoadingTick(void) {}
 bool ofSavestateDeferFileReads(void) { return false; }
 static int softwarePairs;
 void of_audio_init(void) {}
