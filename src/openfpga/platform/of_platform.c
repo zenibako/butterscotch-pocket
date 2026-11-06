@@ -660,6 +660,12 @@ void platformSwapBuffers(void) {
     ofFocusEnd(flipNanos);
 }
 
+/* Switches to a mode the log screen can draw straight into. */
+static bool useLogMode(int width, int height) {
+    matchVideoMode(width, height);
+    return g_modeW == width && g_modeH == height && g_modeStride == width * (int) sizeof(uint16_t);
+}
+
 /* Shows the recent log full-screen and never returns. Used for the benchmark
  * report and for fatal errors: the OS text terminal does not display once the
  * app has switched to its own 16-bit video modes, so the text is drawn into
@@ -668,11 +674,16 @@ void platformSwapBuffers(void) {
 bool ofPlatformShowLogAndHalt(void) {
     if (g_nextFb == NULL || !g_showingFramebuffer) return false;
 
-    matchVideoMode(OF_SCREEN_W, OF_SCREEN_H);
-    if (g_modeW != OF_SCREEN_W || g_modeH != OF_SCREEN_H) return false;
-    if (g_modeStride != OF_SCREEN_W * (int) sizeof(uint16_t)) return false;
-    g_nextW = OF_SCREEN_W;
-    g_nextH = OF_SCREEN_H;
+    /* 640x480 where the core has it: the game's font at its own size fits
+     * about twice the text per line that 320x240 does. */
+    int width = OF_HIRES_W, height = OF_HIRES_H;
+    if (!g_hiresAvailable || !useLogMode(width, height)) {
+        width = OF_SCREEN_W;
+        height = OF_SCREEN_H;
+        if (!useLogMode(width, height)) return false;
+    }
+    g_nextW = width;
+    g_nextH = height;
 
     for (;;) {
         g_nextFb = (uint16_t *) (void *) of_video_surface();
