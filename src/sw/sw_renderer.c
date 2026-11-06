@@ -232,7 +232,7 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
     d->known = true;
     d->color = color;
     uint32_t tiles = 0;
-    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) tiles += (uint32_t) __builtin_popcount(d->rows[r] | d->baseRows[r]);
+    for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) tiles += (uint32_t) swrBitCount(d->rows[r] | d->baseRows[r]);
     swrDirtyLastTiles = tiles;
     memset(d->rows, 0, sizeof(d->rows));
     memset(d->baseRows, 0, sizeof(d->baseRows));
@@ -252,7 +252,7 @@ static uint64_t swrFillTiles(SWRenderer* swr, const SWDirtyBuffer* d, const uint
             if (y1 > d->height) y1 = d->height;
             while (bits != 0) {
                 // One run of marked tiles at a time.
-                int c0 = __builtin_ctz(bits);
+                int c0 = swrLowestBit(bits);
                 int c1 = c0;
                 while (c1 < 32 && (bits & (1u << c1))) c1++;
                 bits &= c1 >= 32 ? 0 : ~((1u << c1) - 1);

@@ -30,6 +30,7 @@ static void drawSnapshotNotice(uint16_t *fb,int w,int h) {
 }
 static uint8_t *of_video_surface(void) { requests++; return surface; }
 static void of_video_flip(void) { flips++; }
+static void swrFramebufferTouched(void) {}
 static void clear(void) { requests=flips=draws=notices=0; g_snapshotNotice=false; g_noticeUntil=0; }
 static void pending(void) { assert(notices==1 && g_snapshotNotice && g_noticeUntil==UINT64_MAX); }
 '''

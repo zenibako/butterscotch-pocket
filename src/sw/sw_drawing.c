@@ -172,7 +172,7 @@ typedef struct SWColorSpans {
     uintpixel_t color;
     bool worth;
     uint32_t* runs;
-    uint32_t rows[];
+    uint32_t rows[1]; // height + 1 of them (not a flexible member: old compilers lack those)
 } SWColorSpans;
 
 MAYBE_UNUSED static const SWColorSpans* swrColorSpans(SWColorSpans** slot, const uintpixel_t* buffer, int width, int height, uintpixel_t color)

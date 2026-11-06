@@ -291,6 +291,27 @@ typedef struct SWDirtyBuffer {
     uint32_t keep[SWR_DIRTY_MAX_ROWS];
 } SWDirtyBuffer;
 
+// Bit counts for the tile masks; the builtins are missing from TinyCC, MSVC and old GCC.
+#if (defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 4)) && !defined(__TINYC__)
+#define swrBitCount(v) __builtin_popcount(v)
+#define swrLowestBit(v) __builtin_ctz(v)
+#else
+FORCE_INLINE int swrBitCount(uint32_t v)
+{
+    int n = 0;
+    while (v != 0) { v &= v - 1; n++; }
+    return n;
+}
+
+// v must not be 0.
+FORCE_INLINE int swrLowestBit(uint32_t v)
+{
+    int n = 0;
+    while (!(v & 1u)) { v >>= 1; n++; }
+    return n;
+}
+#endif
+
 FORCE_INLINE uint32_t swrDirtyMask(int x0, int x1)
 {
     int c0 = x0 >> SWR_DIRTY_TILE_W_SHIFT, c1 = (x1 - 1) >> SWR_DIRTY_TILE_W_SHIFT;
