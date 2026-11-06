@@ -158,7 +158,7 @@ MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb,
     if (fullClear) return;
     if (width > SWR_DIRTY_MAX_W || height > (SWR_DIRTY_MAX_ROWS << SWR_DIRTY_TILE_H_SHIFT)) return;
     if (swr->dirtyBuffers == NULL) {
-        swr->dirtyBuffers = calloc(SWR_DIRTY_BUFFERS, sizeof(SWDirtyBuffer));
+        swr->dirtyBuffers = (SWDirtyBuffer*) calloc(SWR_DIRTY_BUFFERS, sizeof(SWDirtyBuffer));
         if (swr->dirtyBuffers == NULL) return;
     }
     SWDirtyBuffer* found = NULL;
