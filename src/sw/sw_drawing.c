@@ -1746,6 +1746,9 @@ static void swrDrawSpriteRotatedInternal(
     
     float sw_dw = (float) sw / dw;
     float sh_dh = (float) sh / dh;
+    const uintpixel_t* srcPixels = texture->buffer;
+    int srcPitch = texture->width;
+    ptrdiff_t srcOffset = (ptrdiff_t) sy * srcPitch + sx;
     
     int blendmode = swr->blendMode;
 
@@ -1799,8 +1802,6 @@ static void swrDrawSpriteRotatedInternal(
 
     for (int cy = minYc; cy < maxYc; cy++)
     {
-        uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
-        swrDirtyRow(swr, cy, minXc, maxXc);
         float cyf = (float) cy;
         
         // Where the rectangle can be on this row.
@@ -1832,6 +1833,9 @@ static void swrDrawSpriteRotatedInternal(
         if (rowRight + SWR_TURNED_SPARE < (float) maxXc) rowTo = swrCeiling(rowRight + SWR_TURNED_SPARE) + 1;
         if (rowTo > maxXc) rowTo = maxXc;
         if (rowFrom >= rowTo) continue;
+        uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
+        // Only this span can affect the buffer's next partial clear.
+        swrDirtyRow(swr, cy, rowFrom, rowTo);
         
         // Along a row the texel a pixel takes moves by the same amount at
         // every step, so it is followed in whole numbers (sixteen bits below
@@ -1860,8 +1864,7 @@ static void swrDrawSpriteRotatedInternal(
             }
         }
         
-        float cxf = (float) rowFrom;
-        for (int cx = rowFrom; cx < rowTo; cx++, cxf += 1.0f, texX += texStepX, texY += texStepY)
+        for (int cx = rowFrom; cx < rowTo; cx++, texX += texStepX, texY += texStepY)
         {
             int tx, ty;
             // Far enough from every line between texels (the sprite's edges are two of them)?
@@ -1880,7 +1883,7 @@ static void swrDrawSpriteRotatedInternal(
             else
             {
                 // we need to determine the texture-space coordinate of cx/cy
-                float ox = acrossHeld ? acrossKept[cx - minXc] : cxf + 0.5f - pxa;
+                float ox = acrossHeld ? acrossKept[cx - minXc] : (float) cx + 0.5f - pxa;
                 float oy = cyf + 0.5f - pya;
                 
                 // "undo" the rotation
@@ -1906,10 +1909,7 @@ static void swrDrawSpriteRotatedInternal(
                 if (ty >= sh) ty = sh - 1;
             }
             
-            tx += sx;
-            ty += sy;
-            
-            uintpixel_t src = texture->buffer[ty * texture->width + tx];
+            uintpixel_t src = srcPixels[srcOffset + (ptrdiff_t) ty * srcPitch + tx];
 
             if (swrIsOpaque(src))
                 alphaBlend(&dstline[cx], tint(tintColor, src), blendmode, alpha);
