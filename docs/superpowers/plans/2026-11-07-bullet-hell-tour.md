@@ -18,6 +18,7 @@
 - Use seed 7, uncapped frames, volatile saves, and the matched os25/100 MHz runtime from `release/core.lock.json`.
 - Use real Asriel battle setup through `obj_battleblcon` and battlegroup 256. Do not benchmark only menus, dialogue, white transitions, game-over screens, or an opening turn with no projectile workload.
 - Every Asriel measured section requires `room_battle` plus an observed attack object. A failed contract must print `BENCH FAIL` and halt instead of emitting a passing report.
+- Use two complete 150-frame attack turns. Desktop discovery and Asriel's `global.turntimer = 150` establish that shorter natural turns are correct; never pad a section with menus, dialogue, transitions, or game-over frames to reach 300 frames. Setup and later-turn sections may provide context but do not count as attack windows.
 - Keep private game data, captures, logs, packages, and device evidence out of Git and public packages. The local private asset source is `../butterscotch-pr20-fixes/src/openfpga/games/undertale` relative to this worktree.
 - Do not change renderer, VM, audio, openfpgaCore, or openfpgaOS performance behavior in this plan.
 - Desktop checks establish route correctness and deterministic output only. They do not establish Pocket timing, memory limits, SD behavior, or physical device correctness.
@@ -158,7 +159,7 @@ Replenish `hp=99` and `maxhp=99` at fixed 100-frame offsets through the discover
 
 Run the Accuracy desktop route with `BS_FRAME_LOG=src/openfpga/out/bullet-route/frames.log`, `BS_DUMP_EVERY=100`, and `BS_DUMP_DIR=src/openfpga/out/bullet-route/frames`. Exclude frames whose room is not `room_battle` and frames showing menus, dialogue, game-over, or white transitions.
 
-For each remaining 100-frame block, rank the sum of sprite, sprite-part, and rectangle calls in `frames.log`, then inspect the corresponding PPMs. Choose two distinct 300-frame windows with dense projectile rendering and no menu/dialogue/game-over contamination. Set `START`, `MID`, and `END` to each window's three probe frame numbers and run fresh same-seed captures with `BS_OBJECTS="$PROBE_FRAME"` in a loop over those three values; an object need only be observed once during the final section, but all three probes must remain in the intended attack sequence.
+For each remaining 100-frame block, rank the sum of sprite, sprite-part, and rectangle calls in `frames.log`, then inspect the corresponding PPMs. Choose two distinct 150-frame windows with dense projectile rendering and no menu/dialogue/game-over contamination. Set `START`, `MID`, and `END` to each window's three probe frame numbers and run fresh same-seed captures with `BS_OBJECTS="$PROBE_FRAME"` in a loop over those three values; an object need only be observed once during the final section, but all three probes must remain in the intended attack sequence.
 
 Encode the selected windows as separate `OfBenchSection` entries, each with `roomName="room_battle"` and the observed projectile controller/object in `requiredObject`. Keep the Asgore control as a regression comparison, not as evidence about Asriel.
 

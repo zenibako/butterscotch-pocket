@@ -251,6 +251,68 @@ static const OfBenchSection g_tourSections[] = {
     { "Asgore (640x480)", 4599, "asgr", NULL, NULL },
 };
 
+/* Discovery route for the bullet-hell tour. The Asgore visit retains the
+ * battle tour's 600-frame encounter/win structure. Asriel is entered through
+ * the same overworld encounter object; only his HP is replenished, never his
+ * monsters, so his ordinary turn sequence remains in control. */
+static const char g_bulletScript[] =
+    "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z,"
+    "700:R*200,1030:L*20,1060:R*20,1160:Z,1168:U*20,1200:Z,1208:D*20,1240:Z,1248:L*20,1280:Z,1288:R*20,"
+    "1320:Z,1328:U*20,1360:Z,1368:D*20,1400:Z,1408:L*20,1440:Z,1448:R*20,1480:Z,1488:U*20,1530:Z,1545:Z,1560:Z,"
+    "1760:Z,1800:Z,1840:Z,1880:Z,1920:Z,1960:Z,2000:Z,2040:Z,2080:Z,2120:Z,2160:Z,2200:Z,2240:Z,2280:Z,"
+    "2320:Z,2360:Z,2400:Z,2440:Z,2480:Z,2520:Z,2560:Z,2600:Z,2640:Z,2680:Z,2720:Z,2760:Z,2800:Z,2840:Z,"
+    "2880:Z,2920:Z,2960:Z,3000:Z,3040:Z,3080:Z,3120:Z,3160:Z,3200:Z,3240:Z,3280:Z,3320:Z,3360:Z,3400:Z,"
+    "3440:Z,3480:Z,3520:Z,3560:Z,3600:Z,3640:Z,3680:Z,3720:Z,3760:Z,3800:Z,3840:Z,3880:Z,3920:Z,3960:Z,"
+    "4000:Z,4040:Z,4080:Z,4120:Z,4160:Z,4200:Z,4240:Z,4280:Z,4320:Z,4360:Z,4400:Z,4440:Z,4480:Z,4520:Z,4560:Z,"
+    "4600:Z,4640:Z,4680:Z,4720:Z,4760:Z,4800:Z,4840:Z,4880:Z,4920:Z,4960:Z,5000:Z,5040:Z,5080:Z,5120:Z,"
+    "5160:Z,5200:Z,5240:Z,5280:Z,5320:Z,5360:Z,5400:Z,5440:Z,5480:Z,5520:Z,5560:Z,5600:Z,5640:Z,5680:Z,"
+    "5720:Z,5760:Z,5800:Z,5840:Z,5880:Z,5920:Z,5960:Z";
+
+#define BULLET_HP_AT(f) { (f), -1, "hp=99,maxhp=99,bmenucoord[0]=1", NULL },
+#define BULLET_HP_1000(f) \
+    BULLET_HP_AT((f)) BULLET_HP_AT((f) + 100) BULLET_HP_AT((f) + 200) BULLET_HP_AT((f) + 300) \
+    BULLET_HP_AT((f) + 400) BULLET_HP_AT((f) + 500) BULLET_HP_AT((f) + 600) BULLET_HP_AT((f) + 700) \
+    BULLET_HP_AT((f) + 800) BULLET_HP_AT((f) + 900)
+
+static const OfJump g_bulletJumps[] = {
+    { 1000, 12, "encounter=0", NULL },
+    { 1100, -1, "battlegroup=101,border=0,mercy=0,hp=99,maxhp=99,encounter=0", "obj_battleblcon" },
+    { 1250, -1, "hp=99,maxhp=99", NULL },
+    { 1350, -1, "hp=99,maxhp=99", NULL },
+    { 1450, -1, "hp=99,maxhp=99", NULL },
+    { 1500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99,maxhp=99", NULL },
+    { 1600, 12, "encounter=0", NULL },
+    { 1700, -1, "battlegroup=256,border=0,mercy=0,hp=99,maxhp=99,encounter=0,flag[500]=1,flag[501]=0,flag[505]=0,flag[506]=0,flag[507]=0,flag[508]=0", "obj_battleblcon" },
+    BULLET_HP_1000(1800)
+    BULLET_HP_1000(2800)
+    BULLET_HP_1000(3800)
+    BULLET_HP_1000(4800)
+    BULLET_HP_1000(5800)
+    BULLET_HP_1000(6800)
+    BULLET_HP_1000(7800)
+    BULLET_HP_1000(8800)
+    BULLET_HP_1000(9800)
+    BULLET_HP_1000(10800)
+    BULLET_HP_1000(11800)
+    BULLET_HP_1000(12800)
+    BULLET_HP_1000(13800)
+    BULLET_HP_1000(14800)
+    BULLET_HP_1000(15800)
+    BULLET_HP_1000(16800)
+    BULLET_HP_1000(17800)
+    BULLET_HP_1000(18800)
+    BULLET_HP_AT(19800)
+    BULLET_HP_AT(19900)
+};
+#undef BULLET_HP_1000
+#undef BULLET_HP_AT
+
+static const OfBenchSection g_bulletSections[] = {
+    { "boot to the first room", 1000, "boot", NULL, NULL },
+    { "Asgore control (640x480)", 1599, "asgr", "room_battle", NULL },
+    { "Asriel discovery", 19999, "disc", "room_battle", NULL },
+};
+
 static void battleUiInstall(Runner *runner) {
     static const char *const sprites[] = {
         "spr_fightbt", "spr_fightbt_ja", "spr_fightbt_hollow", "spr_fightbt_hollow_ja",
@@ -310,6 +372,12 @@ const OfGame ofGame = {
     .tourJumpCount = (int) (sizeof(g_tourJumps) / sizeof(g_tourJumps[0])),
     .tourSections = g_tourSections,
     .tourSectionCount = (int) (sizeof(g_tourSections) / sizeof(g_tourSections[0])),
+    .bulletTitle = "Undertale bullet-hell tour",
+    .bulletScript = g_bulletScript,
+    .bulletJumps = g_bulletJumps,
+    .bulletJumpCount = (int) (sizeof(g_bulletJumps) / sizeof(g_bulletJumps[0])),
+    .bulletSections = g_bulletSections,
+    .bulletSectionCount = (int) (sizeof(g_bulletSections) / sizeof(g_bulletSections[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,
