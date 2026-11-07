@@ -667,6 +667,30 @@ cost the most. `platform/of_bench.c` has the route and says what each
 table's columns are. Quote numbers from a report together with the commit
 it was built from.
 
+Undertale also has a bullet-hell tour: `--bench-bullet-hell` measures
+Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
+Asgore control is followed by two 150-frame natural attack sections,
+Asriel's Chaos Saber and a green-spear turn from the first Lost Soul. Encounter
+and turn setup are separate report sections, not attack windows; a final
+one-frame capture tail is not an attack either. Each attack section checks
+`room_battle` and its observed projectile controller (`obj_ultimagen` or
+`obj_greenspeargen`), and halts with `BENCH FAIL` instead of issuing a
+passing report when that scene is absent. Asriel is not force-cleared.
+Benchmark saves are volatile: the route neither reads nor writes ordinary
+progress.
+
+On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
+`BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
+`BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,
+`BS_OBJECTS=<frame>` records live objects, `BS_DUMP_FRAME=<frame>` with
+`BS_DUMP_PATH=<file>` captures one image, and `BS_DUMP_EVERY=<n>` with
+`BS_DUMP_DIR=<directory>` captures periodically. `--draw-every 100000`
+checks the no-render path, `--mute` checks disabled audio, and `--scripts`
+enables the script profile. Profile totals are workload rankings, not
+baseline timings. Desktop runs establish route correctness and determinism
+only; they do not prove Pocket timing, memory pressure, SD behavior,
+video-mode behavior or hardware audio behavior.
+
 The boot log stays on screen while loading, and every Butterscotch log line
 is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
