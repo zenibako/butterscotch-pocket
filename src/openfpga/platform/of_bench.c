@@ -5,6 +5,7 @@
 #include "gettime.h"
 #include "of_diag.h"
 #include "of_game.h"
+#include "of_bench_scene.h"
 #include "of_perf.h"
 #include "sw_call_notes.h"
 
@@ -20,6 +21,7 @@ static int g_section = 0;
 static uint64_t g_startNanos = 0;
 static uint64_t g_sectionStart = 0;
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
+static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_flipNanos = 0; /* time inside the display flip this section */
 static unsigned g_sectionFlipMs[OF_BENCH_MAX_SECTIONS];
 static OfPerfTotals g_sectionTotals[OF_BENCH_MAX_SECTIONS];
@@ -46,6 +48,7 @@ static struct {
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
                        const OfBenchSection *sections, int sectionCount, bool tour) {
+    for (int i = 0; i < OF_BENCH_MAX_SECTIONS; ++i) g_sectionSeen[i] = false;
     g_def.title = title;
     g_def.sections = sections;
     g_def.sectionCount = sectionCount;
@@ -69,6 +72,13 @@ bool ofBenchStartTour(void) {
     if (ofGame.tourScript == NULL) return false;
     benchStart(ofGame.tourTitle, ofGame.tourScript, ofGame.tourJumps, ofGame.tourJumpCount,
                ofGame.tourSections, ofGame.tourSectionCount, true);
+    return true;
+}
+
+bool ofBenchStartBulletTour(void) {
+    if (ofGame.bulletScript == NULL) return false;
+    benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
+               ofGame.bulletSections, ofGame.bulletSectionCount, true);
     return true;
 }
 
@@ -199,9 +209,11 @@ void ofBenchAddFlipTime(uint64_t nanos) {
     if (g_running) g_flipNanos += nanos;
 }
 
-void ofBenchFrame(void) {
+void ofBenchFrame(Runner *runner) {
     if (!g_running) return;
 
+    const OfBenchSection *section = &g_def.sections[g_section];
+    if (ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
     uint64_t now = nowNanos();
     if (g_frame == 0) {
         g_firstFrameMs = (unsigned) ((now - g_startNanos) / 1000000u);
@@ -211,8 +223,12 @@ void ofBenchFrame(void) {
         swrCallNotesTake(NULL, 0, NULL);
     }
     g_frame++;
-    if (g_frame < g_def.sections[g_section].lastFrame) return;
+    if (g_frame < section->lastFrame) return;
 
+    if ((section->roomName != NULL || section->requiredObject != NULL) && !g_sectionSeen[g_section]) {
+        ofLogPrint("BENCH FAIL %s: required scene not observed\n", section->name);
+        ofDiagHalt("benchmark scene check failed");
+    }
     g_sectionMs[g_section] = (unsigned) ((now - g_sectionStart) / 1000000u);
     g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
     ofPerfTakeTotals(&g_sectionTotals[g_section]);

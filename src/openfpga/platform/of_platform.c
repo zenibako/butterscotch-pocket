@@ -670,7 +670,7 @@ void platformSwapBuffers(void) {
         scriptProfileFrame();
         ofPerfFrame(NULL, 0, 0);
         ofFocusPresent(g_runner,true);
-        ofBenchFrame();
+        ofBenchFrame(g_runner);
 #ifdef OF_PC
         dumpFrameIfRequested(false);
 #endif
@@ -725,7 +725,7 @@ void platformSwapBuffers(void) {
 #ifdef OF_PC
     frameLog();
 #endif
-    ofBenchFrame();
+    ofBenchFrame(g_runner);
 #ifdef OF_PC
     dumpFrameIfRequested(true);
 #endif

@@ -91,7 +91,7 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
 BS_PHYSICS_SRCS = $(BS_SRC)/physics/physics.c $(BS_SRC)/physics/disabled/physics_disabled.c
 
 SRCS = main.c platform/game_$(GAME).c platform/of_platform.c platform/of_diag.c platform/of_log.c \
-       platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c \
+       platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c platform/of_bench_scene.c \
        platform/of_strings.c platform/of_buttons.c platform/of_gamepad.c platform/of_save_fs.c platform/of_native.c platform/of_focus.c platform/of_focus_stats.c \
        platform/of_font.c platform/debug_font.c platform/of_loading.c platform/of_menu.c platform/of_state_requests.c \
        platform/of_snapshot_envelope.c \
@@ -435,6 +435,11 @@ orange-particle-fixture: $(PC_OBJS)
 .PHONY: background-lookup-fixture
 background-lookup-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -finstrument-functions -fno-inline-functions tests/background-lookup.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/vm.o $(filter %/src/vm.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_background_lookup_fixture
+
+# Asset-free benchmark room and live-object scene contract checks.
+.PHONY: bench-scene-fixture
+bench-scene-fixture:
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/bench-scene.c platform/of_bench_scene.c $(BS_SRC)/stb_ds.c $(PC_EXTRA_CFLAGS) -o $(PC_BIN)_bench_scene_fixture
 
 # Asset-free same-frame wall/flip accounting and frame distribution checks.
 .PHONY: focus-stats-fixture

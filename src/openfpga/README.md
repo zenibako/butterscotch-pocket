@@ -114,6 +114,7 @@ make font-sampling-fixture   # checks doubled fonts and unchanged fallback filte
 make menu-fixture            # checks menu help, scrolling and navigation without game data
 make battle-contrast-fixture # checks shared speech, battle labels and buttons
 make solid-fill-fixture      # builds exact RGB555 fill/blending and boundary checks
+make bench-scene-fixture     # builds asset-free benchmark room/live-object checks
 make spatial-grid-fixture    # builds asset-free grid recovery/update checks
 make layer-lookup-fixture    # checks layer lookup order, mutation and repeated work
 make vm-call-args-fixture    # checks argument bounds, ownership and nested calls

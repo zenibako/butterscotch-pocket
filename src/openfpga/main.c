@@ -128,6 +128,14 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(tourSmooth);
             if (!ofBenchStartTour()) logWarn("Bench: this game has no battle tour\n");
         }
+        /* --bench-bullet-hell (accuracy) and --bench-bullet-hell-smooth (speed): the bullet tour. */
+        bool bulletSmooth = strcmp(argv[i], "--bench-bullet-hell-smooth") == 0;
+        if (bulletSmooth || strcmp(argv[i], "--bench-bullet-hell") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(bulletSmooth);
+            if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
+        }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */

@@ -163,10 +163,10 @@ static const char g_script[] =
 
 /* Sections end on these frames; they follow the script above. */
 static const OfBenchSection g_sections[] = {
-    { "intro, menu, naming", 650, "intro" },
-    { "first room 320x240", 1220, "room" },
-    { "Flowey talk 320x240", 2060, "talk" },
-    { "Flowey battle (640x480)", 2600, "battl" },
+    { "intro, menu, naming", 650, "intro", NULL, NULL },
+    { "first room 320x240", 1220, "room", NULL, NULL },
+    { "Flowey talk 320x240", 2060, "talk", NULL, NULL },
+    { "Flowey battle (640x480)", 2600, "battl", NULL, NULL },
 };
 
 /* The battle tour ("--bench-battles"): a walk to the first room, then six
@@ -242,13 +242,13 @@ static const OfJump g_tourJumps[] = {
 };
 
 static const OfBenchSection g_tourSections[] = {
-    { "boot to the first room", 1000, "boot" },
-    { "Froggit (640x480)", 1599, "frog" },
-    { "Toriel (640x480)", 2199, "tori" },
-    { "Papyrus (640x480)", 2799, "papy" },
-    { "Undyne (640x480)", 3399, "undy" },
-    { "Mettaton EX (640x480)", 3999, "mtex" },
-    { "Asgore (640x480)", 4599, "asgr" },
+    { "boot to the first room", 1000, "boot", NULL, NULL },
+    { "Froggit (640x480)", 1599, "frog", NULL, NULL },
+    { "Toriel (640x480)", 2199, "tori", NULL, NULL },
+    { "Papyrus (640x480)", 2799, "papy", NULL, NULL },
+    { "Undyne (640x480)", 3399, "undy", NULL, NULL },
+    { "Mettaton EX (640x480)", 3999, "mtex", NULL, NULL },
+    { "Asgore (640x480)", 4599, "asgr", NULL, NULL },
 };
 
 static void battleUiInstall(Runner *runner) {

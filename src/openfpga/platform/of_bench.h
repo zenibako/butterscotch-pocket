@@ -16,10 +16,13 @@
 void ofBenchStart(void);
 /* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle. */
 bool ofBenchStartTour(void);
+/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
+bool ofBenchStartBulletTour(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
 /* Call once per presented frame. Prints the report and halts at the end. */
-void ofBenchFrame(void);
+typedef struct Runner Runner;
+void ofBenchFrame(Runner *runner);
 
 /* Time spent inside the display flip, reported separately from the rest. */
 void ofBenchAddFlipTime(uint64_t nanos);

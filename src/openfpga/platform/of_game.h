@@ -42,6 +42,9 @@ typedef struct {
     const char *name;
     int lastFrame;
     const char *tag; /* five letters at most, for the breakdown table */
+    /* Optional scene contract; NULL means no requirement. */
+    const char *roomName;
+    const char *requiredObject;
 } OfBenchSection;
 
 #define OF_BENCH_MAX_SECTIONS 8
@@ -88,6 +91,13 @@ typedef struct {
     int tourJumpCount;
     const OfBenchSection *tourSections;
     int tourSectionCount;
+    /* A third benchmark ("--bench-bullet-hell"), or NULL: the same report over another script. */
+    const char *bulletTitle;
+    const char *bulletScript;
+    const OfJump *bulletJumps;
+    int bulletJumpCount;
+    const OfBenchSection *bulletSections;
+    int bulletSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;
