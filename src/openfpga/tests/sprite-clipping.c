@@ -66,6 +66,10 @@ static bool checkDraw(SWRenderer* reference, SWRenderer* clipped, SWTexture* tex
     return true;
 }
 
+/**
+ * Verify that cached runs honor both clip edges and blend partial coverage
+ * over the existing background while leaving transparent gaps untouched.
+ */
 static bool checkSparseHalfDraw(void)
 {
     enum { WIDTH = 144, HEIGHT = 3, LEFT = 7, RIGHT = 142 };
@@ -114,6 +118,7 @@ static bool checkSparseHalfDraw(void)
     return ok;
 }
 
+/** Run the clipped sprite matrix and the sparse half-size coverage regression. */
 int main(void)
 {
     SWRenderer reference, clipped;

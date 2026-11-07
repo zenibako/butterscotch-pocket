@@ -1014,6 +1014,10 @@ static int swrContrastCoverage(int covered, int alpha, int contrast)
 }
 #endif
 
+/**
+ * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
+ * A cached half-size texture can supply the coverage of each sampled pixel.
+ */
 static void swrDrawSpriteInternal(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
