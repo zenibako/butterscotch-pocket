@@ -333,6 +333,18 @@ FORCE_INLINE void swrBlendSolidRow(uintpixel_t* line, size_t count, uint32_t src
 #elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 7))
     line = (uintpixel_t*) __builtin_assume_aligned(line, 4);
 #endif
+    if (dstalpha == 128 && (srcRedBlue | srcGreen) == 0) {
+        // Half black halves each channel. Mask out bits shifted across
+        // channel boundaries and restore the compositor's opaque result.
+        while (count >= 2) {
+            uint32_t under;
+            memcpy(&under, line, sizeof(under));
+            uint32_t darkened = ((under >> 1) & 0x3def3defu) | 0x80008000u;
+            if (darkened != under) memcpy(line, &darkened, sizeof(darkened));
+            line += 2;
+            count -= 2;
+        }
+    }
     if (count >= 2) {
         // Each channel occupies a separate 16-bit lane; its product plus
         // premultiplied source is at most 31 * 256, so lanes cannot carry.
