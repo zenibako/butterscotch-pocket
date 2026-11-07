@@ -426,6 +426,11 @@ tile-shift-fixture: $(PC_OBJS)
 forest-sentry-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -finstrument-functions -fno-inline-functions tests/forest-sentry.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/vm.o $(filter %/src/vm.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_forest_sentry_fixture
 
+# Real-asset oracle for the Undertale particle Step native. Pass data.win to the fixture.
+.PHONY: orange-particle-fixture
+orange-particle-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/orange-particle.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_orange_particle_fixture
+
 # Real-asset oracle for live background lookup and its guarded native path.
 .PHONY: background-lookup-fixture
 background-lookup-fixture: $(PC_OBJS)
