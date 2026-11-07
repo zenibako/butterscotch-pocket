@@ -11,6 +11,7 @@
 #include "log.h"
 #include "of_state_requests.h"
 #include "stb_ds.h"
+#include "vm_builtins.h"
 
 /* Prompts beyond the ones of_strings.c renames for every game. */
 static const OfStringPatch g_strings[] = {
@@ -68,6 +69,79 @@ static void installPrompts(Runner *runner) {
                                      252, 0xb8d5cacb73e73f07ull, drawPressButton);
     logInfo("Buttons: attack prompt %s\n", installed ? "installed" : "left unchanged (different code)");
 }
+
+enum { PARTICLE_GOAL, PARTICLE_SIZE, PARTICLE_PHASE, PARTICLE_DIVISOR, PARTICLE_X_WAVE, PARTICLE_Y_WAVE, PARTICLE_FIELD_COUNT };
+static int32_t particleVars[PARTICLE_FIELD_COUNT];
+static bool particleVarsResolved;
+
+static void forgetNativeVm(void) {
+    particleVarsResolved = false;
+}
+
+static void setParticleReal(Instance *self, int32_t id, GMLReal number) {
+    RValue value = RValue_makeReal(number);
+    value.gmlStackType = GML_TYPE_VARIABLE; /* arithmetic result stored by pop.v.v */
+    Instance_setSelfVar(self, id, value);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool orangeParticleStep(VMContext *ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance *self = ctx->currentCallFrame->self;
+    if (self == NULL || self->objectIndex == STRUCT_OBJECT_INDEX || ctx->runner == NULL) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    if (!isfinite(epsilon) || epsilon < 0 || !isfinite(self->imageAlpha) ||
+        !isfinite(self->x) || !isfinite(self->y)) return false;
+    GMLReal alpha = (GMLReal)self->imageAlpha - (GMLReal)0.01;
+    /* The interpreter handles the last step, including the destroy event
+     * and the instructions that still run after it. */
+    if ((GMLReal)(float)alpha - (GMLReal)0.01 < -epsilon) return false;
+
+    if (!particleVarsResolved) {
+        static const char *const names[PARTICLE_FIELD_COUNT] = { "goalsize", "size", "siner", "gg", "rr", "vv" };
+        for (int i = 0; i < PARTICLE_FIELD_COUNT; i++) particleVars[i] = VM_getOrAllocateVarID(ctx, names[i]);
+        particleVarsResolved = true;
+    }
+    GMLReal values[PARTICLE_FIELD_COUNT];
+    for (int i = 0; i < PARTICLE_FIELD_COUNT; i++) {
+        RValue value = Instance_getSelfVar(self, particleVars[i]);
+        if (value.type != RVALUE_REAL || !isfinite(value.real)) return false;
+        values[i] = value.real;
+    }
+    if (values[PARTICLE_DIVISOR] == 0) return false;
+    GMLReal phase = values[PARTICLE_PHASE] + (GMLReal)1;
+    GMLReal angle = phase / values[PARTICLE_DIVISOR];
+    if (!isfinite(angle)) return false;
+
+    /* Compare the rounded opcode results with the runner's GML epsilon.
+     * The second test sees the size after the first update. */
+    GMLReal goal = values[PARTICLE_GOAL], size = values[PARTICLE_SIZE];
+    if (goal - (size + (GMLReal)0.1) > epsilon) {
+        size += (GMLReal)0.03;
+        setParticleReal(self, particleVars[PARTICLE_SIZE], size);
+    }
+    if (goal - (size - (GMLReal)0.1) < -epsilon) {
+        size -= (GMLReal)0.03;
+        setParticleReal(self, particleVars[PARTICLE_SIZE], size);
+    }
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_XSCALE, "image_xscale", RValue_makeReal(size), -1);
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_YSCALE, "image_yscale", RValue_makeReal(size), -1);
+    self->imageAlpha = (float)alpha;
+    setParticleReal(self, particleVars[PARTICLE_PHASE], phase);
+    GMLReal dx = GMLReal_sin(angle) * values[PARTICLE_X_WAVE];
+    GMLReal dy = GMLReal_cos(angle) * values[PARTICLE_Y_WAVE];
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_X, "x", RValue_makeReal((GMLReal)self->x + dx), -1);
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_Y, "y", RValue_makeReal((GMLReal)self->y + dy), -1);
+    return true;
+}
+
+static const OfNativeCode g_natives[] = {
+    { "gml_Object_obj_orangeparticle_Step_0", 392, 0x85cd9b4f052c0694ull, orangeParticleStep },
+};
 
 /* Save states (of_state_requests.c) are taken anywhere the runner can store
  * exactly (Runner_snapshotCheck refuses the rest): the overworld, the game's
@@ -217,6 +291,9 @@ const OfGame ofGame = {
     .title = "Undertale",
     .dataFiles = "data.win, textures.bin and music.bin",
     .installPrompts = installPrompts,
+    .natives = g_natives,
+    .nativeCount = sizeof(g_natives) / sizeof(g_natives[0]),
+    .nativesForgetVm = forgetNativeVm,
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,
     .speedFullResBattles = true,
