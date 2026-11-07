@@ -66,6 +66,59 @@ static bool checkDraw(SWRenderer* reference, SWRenderer* clipped, SWTexture* tex
     return true;
 }
 
+/**
+ * Verify that cached runs honor both clip edges and blend partial coverage
+ * over the existing background while leaving transparent gaps untouched.
+ */
+static bool checkSparseHalfDraw(void)
+{
+    enum { WIDTH = 144, HEIGHT = 3, LEFT = 7, RIGHT = 142 };
+    const uintpixel_t under = 0xfc00, ink = 0x83e0, halfInk = 0xbde0;
+    uintpixel_t pixels[WIDTH * HEIGHT * 4] = { 0 };
+    SWTexture texture = { 0 };
+    texture.buffer = pixels;
+    texture.width = WIDTH * 2;
+    texture.height = HEIGHT * 2;
+    texture.immutable = true;
+    for (int x = 0; x < WIDTH; x++) {
+        if ((x >= 5 && x < 14) || x >= 139) {
+            pixels[x * 2] = pixels[x * 2 + 1] = ink;
+            pixels[WIDTH * 2 + x * 2] = pixels[WIDTH * 2 + x * 2 + 1] = ink;
+        }
+    }
+    pixels[80] = pixels[81] = ink; // a half-covered pixel between the two clipped runs
+    SWRenderer renderer;
+    setup(&renderer, WIDTH);
+    renderer.portX = renderer.viewX = LEFT;
+    renderer.portW = RIGHT - LEFT;
+    renderer.maxX = RIGHT;
+    swrFillPixels(renderer.fb, WIDTH * WIDTH, under);
+    swrFavorSpeed = swrSmoothMinify = true;
+    swrDrawSprite((Renderer*) &renderer, 0, 0, WIDTH, HEIGHT, &texture,
+                  0, 0, texture.width, texture.height, 0xffffff, 1.0f);
+    swrOverlayFlush(&renderer);
+    bool ok = texture.halfSpans != NULL;
+    if (!ok) fprintf(stderr, "FAIL: sparse half-size sprite did not cache its runs\n");
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < WIDTH; x++) {
+            uintpixel_t expected = under;
+            if (y == 0 && x >= LEFT && x < RIGHT) {
+                if (x < 14 || x >= 139) expected = ink;
+                else if (x == 40) expected = halfInk;
+            }
+            if (renderer.fb[y * WIDTH + x] != expected) {
+                fprintf(stderr, "FAIL: sparse half-size sprite pixel %d,%d\n", x, y);
+                ok = false;
+            }
+        }
+    }
+    free(texture.halfSpans);
+    free(texture.halfBuffer);
+    free(renderer.fb);
+    return ok;
+}
+
+/** Run the clipped sprite matrix and the sparse half-size coverage regression. */
 int main(void)
 {
     SWRenderer reference, clipped;
@@ -107,6 +160,8 @@ int main(void)
     free(clipped.fb);
     free(texture.rowBounds);
     free(texture.buffer);
+    if (!checkSparseHalfDraw()) return 1;
     printf("PASS: %u clipped sprite cases match the unclipped crop\n", checked);
+    puts("PASS: clipped sparse half-size sprite matches expected coverage");
     return 0;
 }
