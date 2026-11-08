@@ -6,6 +6,43 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkBoxSampleSpan(void)
+{
+    enum { UNIT = 1 << 14, WIDTH = 96 };
+    const uint16_t bounds[] = { 4, 25, 18, 52, 0, 0 };
+    for (int a = 0; a < 3; ++a) {
+        for (int rows = 1; rows <= 2; ++rows) {
+            int b = rows == 2 && a < 2 ? a + 1 : -1;
+            for (int left = 0; left < 54; left += 3) {
+                for (int right = left; right < 55; right += 5) {
+                    for (int step = 25000; step < 50000; step += 4223) {
+                        int from = 0, to = WIDTH;
+                        swrBoxSampleSpan(bounds, a, b, left, right, step, UNIT, &from, &to);
+                        for (int x = 0; x < WIDTH; ++x) {
+                            int col = left + x * step / UNIT;
+                            bool touched = false;
+                            for (int k = 0; k < 2; ++k) {
+                                int row = k == 0 ? a : b;
+                                if (row < 0) continue;
+                                for (int tap = col; tap <= col + 1 && tap <= right; ++tap)
+                                    touched |= tap >= bounds[2 * row] && tap < bounds[2 * row + 1];
+                            }
+                            if (touched && (x < from || x >= to)) {
+                                fprintf(stderr, "FAIL: box sample excluded opaque tap at %d\n", x);
+                                exit(1);
+                            }
+                            ++checks;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    int from = 0, to = WIDTH;
+    swrBoxSampleSpan(bounds, 0, 1, 2, 95, UNIT * 2, UNIT, &from, &to);
+    if (from != 1 || to != 25) exit(1);
+}
+
 static void checkTranslatedRotation(void)
 {
     enum { WIDTH = 64, HEIGHT = 56, SRC_W = 47, SRC_H = 33 };
@@ -42,7 +79,7 @@ static void checkTranslatedRotation(void)
                                  0x808080, 1.0f, 37.0f, 10.5f, 8.0f);
             swr.fb = expected;
             swrDrawSpriteRotatedInternal(&swr.base, x, y, width, 16, &texture, 1, 1, 45, 31,
-                                         swrConvertPixel(0x808080), 256, 37.0f, 10.5f, 8.0f);
+                                         swrConvertPixel(0x808080), 256, 37.0f, 10.5f, 8.0f, NULL);
             if (memcmp(actual, expected, sizeof(actual)) || texture.rotatedRasters == NULL ||
                 texture.rotatedRasters->count != flip + 1) {
                 fprintf(stderr, "FAIL: translated raster flip=%d placement=%u\n", flip, i);
@@ -62,6 +99,42 @@ static void checkTranslatedRotation(void)
     }
     swrFreeRotatedRasters(&texture);
     if (texture.rotatedRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
+}
+
+static void checkStationaryVine(void)
+{
+    enum { WIDTH = 112, HEIGHT = 96, SRC_W = 513, SRC_H = 35 };
+    uintpixel_t source[SRC_W * SRC_H], actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
+    for (int i = 0; i < SRC_W * SRC_H; ++i)
+        source[i] = i % 9 < 3 ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
+    SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
+    SWRenderer swr = {0};
+    swr.fbPitch = WIDTH;
+    swr.scaleX = swr.scaleY = 1.0f;
+    swr.blendMode = bm_normal;
+    swr.portH = swr.maxY = HEIGHT;
+    for (int frame = 0; frame < 4; ++frame) {
+        swr.frameCounter = (uint32_t) frame;
+        swr.portX = swr.viewX = frame < 2 ? 0 : 15;
+        swr.maxX = WIDTH;
+        swr.portW = WIDTH - swr.portX;
+        for (int i = 0; i < WIDTH * HEIGHT; ++i)
+            actual[i] = expected[i] = (uintpixel_t) (0x8000 | ((i * 7919) & 0x7fff));
+        swr.fb = swr.mainFb = actual;
+        swrDrawSpriteRotated(&swr.base, -10, 70, 256, 17, &texture, 1, 1, 511, 33,
+                             0xffffff, 1.0f, 37.2f, 6.5f, 5.5f);
+        swr.fb = expected;
+        swrDrawSpriteRotatedInternal(&swr.base, -10, 70, 256, 17, &texture, 1, 1, 511, 33,
+                                     swrConvertPixel(0xffffff), 256, 37.2f, 6.5f, 5.5f, NULL);
+        if (memcmp(actual, expected, sizeof(actual)) || texture.stationaryRasters == NULL ||
+            texture.stationaryRasters->count != 1 + frame / 2) {
+            fprintf(stderr, "FAIL: stationary vine frame=%d\n", frame);
+            exit(1);
+        }
+        checks += WIDTH * HEIGHT;
+    }
+    swrFreeRotatedRasters(&texture);
+    if (texture.stationaryRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
 }
 
 static void checkHalfTint(void)
@@ -182,7 +255,9 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkBoxSampleSpan();
     checkTranslatedRotation();
+    checkStationaryVine();
     checkHalfTint();
     checkDoubledSprite();
     checkHalfBlend();
