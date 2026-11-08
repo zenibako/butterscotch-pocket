@@ -679,6 +679,30 @@ passing report when that scene is absent. Asriel is not force-cleared.
 Benchmark saves are volatile: the route neither reads nor writes ordinary
 progress.
 
+`tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
+core, leaving the gameplay core and its ordinary saves untouched. Its six
+entries and exact arguments are:
+
+| Entry | Arguments |
+|---|---|
+| Bullet Hell - Accuracy | `--bench-bullet-hell` |
+| Bullet Hell - Speed | `--bench-bullet-hell-smooth` |
+| Bullet Hell - No Render | `--bench-bullet-hell --draw-every 100000` |
+| Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
+| Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
+| Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+
+The package contains the benchmark ELF, matched os25 runtime and launch
+metadata, but no game data or save files. Install the Undertale data separately;
+slots 4–7 retain the ordinary asset filenames while the ELF, OS config and all
+ten save slots use the isolated `bs_bullet` prefix. The report is
+`Saves/butterscotch/common/bs_bullet_1.sav`. Quit through the Analogue menu
+after every entry to flush save RAM, then preserve that report before launching
+another entry. No Render, No Audio and Core Only are counterfactual attribution
+modes, not predictions whose savings can be added together. Profile
+instrumentation changes timing; its script totals are workload rankings, not
+baseline timings.
+
 On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
 `BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
 `BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,

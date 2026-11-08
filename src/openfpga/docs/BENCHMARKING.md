@@ -39,11 +39,40 @@ MHz matrix inventories evidence; this project need not evaluate all four cells.
 Variant labels do not determine clock or cache sizes.
 
 Prefer a separate benchmark core beside gameplay, with isolated settings,
-progress, result slots and Memories identity. The current focused package adds
-diagnostic launch entries under the gameplay core; it is not a dedicated core.
-Preserve its existing save isolation. Match relevant production paths and record
-instrumentation, renderer, audio and pacing differences. Do not overwrite shared
-runtime/assets while constructing side-by-side packages.
+progress, result slots and Memories identity. The additive bullet-hell package
+uses `zenibako.BsBullet`, `bs_bullet.elf`, `bs_bullet_os.bin` and isolated
+`bs_bullet_0.sav` through `bs_bullet_9.sav`; it preserves asset slots 4–7 and
+leaves the gameplay core and saves unchanged. The current focused package adds
+diagnostic launch entries under the gameplay core instead; preserve its existing
+save isolation. Match relevant production paths and record instrumentation,
+renderer, audio and pacing differences. Do not overwrite shared runtime/assets
+while constructing side-by-side packages.
+
+Build the diagnostic ELF from the clean committed source with the matched SDK,
+then pass that exact ELF and an explicit test version to the additive packager:
+
+```sh
+python3 src/openfpga/tools/mkbullet.py \
+  --elf src/openfpga/out/bullet-build/.obj/bs_bullet/app.elf \
+  --version "$VERSION_WITHOUT_V" \
+  --output "../artifacts/bullet-hell-$(git rev-parse --short HEAD)/bullet-hell.zip"
+```
+
+The ZIP contains no game data or saves. Its six unique entries are:
+
+| Entry | Exact `ARGS=` value |
+| --- | --- |
+| Bullet Hell - Accuracy | `--bench-bullet-hell` |
+| Bullet Hell - Speed | `--bench-bullet-hell-smooth` |
+| Bullet Hell - No Render | `--bench-bullet-hell --draw-every 100000` |
+| Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
+| Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
+| Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+
+Start with repeated paired Accuracy and Speed runs on the same Pocket. Add No
+Render, No Audio, Core Only and Profile only when attribution is needed. Record
+the actual ELF, version, flags and package hash privately with the collected
+reports; do not publish this diagnostic package as a stable release.
 
 Prepare a version-1 platform definition using the harness's `PLATFORMS.md` shape.
 Declare the actual CPU/ISA/issue/cache/features and OS/SDK source identities.
@@ -79,10 +108,13 @@ optional `deployment` describes package/core/save identities. Use the harness's
 metadata schema rather than inventing missing measurements or identities.
 
 Finish sampling before screenshots or report writes. Quit through the Analogue
-menu after each focused mode to flush save RAM, then mount the card. Standard
-logs are `Saves/butterscotch/common/undertale_1.sav` or `deltarune_1.sav`;
-focused tiles reports accumulate in `deltarune_tiles_1.sav`. Preserve the original
-NUL-padded file; text ends at the first NUL. Old/duplicate reports can remain.
+menu after each focused or bullet-hell mode to flush save RAM, then mount the
+card. Standard logs are `Saves/butterscotch/common/undertale_1.sav` or
+`deltarune_1.sav`; focused tiles reports accumulate in `deltarune_tiles_1.sav`.
+Each bullet-hell entry reports to `bs_bullet_1.sav` in that same directory:
+preserve and rename the file after its Analogue-menu quit and before launching
+the next entry. Preserve the original NUL-padded file; text ends at the first
+NUL. Old/duplicate reports can remain.
 Inspect the chosen file and explicitly select the intended complete block:
 
 ```sh
@@ -95,10 +127,11 @@ python3 -m benchmarks verify build/benchmarks/RUN_ID
 
 Use the printed bundle path in place of `RUN_ID`. Bind each import to its known
 matching variant and clock; the device's numeric core variant does not identify
-os20/os25. Import each focused mode separately with its actual metadata and the
-route's seed 7, seven windows and completion markers. A complete `FOCUS FAIL`
-report can be imported and remains failed evidence. Keep incomplete raw reports
-privately too; the collector refuses incomplete imports. Standard logs lack an
+os20/os25. Import each focused or bullet-hell mode separately with its actual
+metadata, seed 7, route-specific section/window roster and completion markers. A
+complete `FOCUS FAIL` report can be imported and remains failed evidence. Keep
+incomplete raw reports privately too; the collector refuses incomplete imports.
+Standard logs lack an
 embedded source commit and independent correctness oracle; their build
 attribution remains declared.
 
@@ -134,8 +167,13 @@ legacy unbound comparisons remain provisional.
 
 Preserve literal units and every source limitation. Multiple changed factors
 are a combined experiment; different-ELF configurations cannot isolate a CPU,
-cache, clock, OS or compiler effect. Overlapping counters and counterfactual
-no-render/no-audio modes are not additive. Select the best eligible tested
+cache, clock, OS or compiler effect. Bullet-hell No Render skips ordinary frame
+presentation except at the configured draw interval, No Audio disables audio
+work, and Core Only combines those counterfactuals rather than isolating a pure
+CPU/VM measurement: their overlapping savings are not additive, and none
+predicts an ordinary gameplay configuration by subtraction. Profile adds script
+instrumentation and changes timing; use its counters for workload attribution
+and rankings, never as baseline frame times. Select the best eligible tested
 configuration against this project's targets and observed variability, or report
 a tie/insufficient evidence. One candidate shows suitability, not superiority
 over untested profiles. There is no automatic ranking command.
