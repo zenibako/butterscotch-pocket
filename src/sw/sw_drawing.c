@@ -1158,6 +1158,25 @@ static void swrDrawSpriteInternal(
                 int from = (int) halved.halfRowBounds[row * 2] - sx, to = (int) halved.halfRowBounds[row * 2 + 1] - sx;
                 if (from < 0) from = 0;
                 if (to > dw) to = dw;
+                if (alpha == 128 && contrast == SWR_CONTRAST_NONE) {
+                    for (int x = from; x < to; x++) {
+                        uint32_t covered = covline[x];
+                        if (covered == 0) continue;
+                        uintpixel_t color = srcline[x];
+                        if (color != lastColor) {
+                            lastTinted = tint(tintColor, color);
+                            lastColor = color;
+                        }
+                        if (covered == 4) {
+                            dstline[x] = swrBlendHalf(dstline[x], lastTinted);
+                        } else {
+                            uint32_t coverageAlpha = covered << 5;
+                            dstline[x] = swrBlendPremultiplied(dstline[x], swrSpreadRedBlue(lastTinted) * coverageAlpha,
+                                                               swrGreen(lastTinted) * coverageAlpha, 256 - coverageAlpha);
+                        }
+                    }
+                    continue;
+                }
                 // Untinted at full opacity, a texel standing for all four of its own is stored as it
                 // is: the row's longest run of those is copied, and only what is left on either side
                 // (a sprite's edge) is gone through a pixel at a time. The loop below does the left
@@ -1436,6 +1455,7 @@ static void swrDrawSpriteInternal(
         uint32_t dstalpha = 256 - alpha;
         uint32_t lastPixel = 0xFFFFFFFF;
         uint32_t srcRedBlue = 0, srcGreen = 0;
+        uintpixel_t lastTinted = 0;
         SWR_PROBE_PATH(4);
         
         fixedp_t ys2 = iys2;
@@ -1459,6 +1479,18 @@ static void swrDrawSpriteInternal(
                 if (from < 0) from = 0;
                 if (to > dw) to = dw;
                 xs2 += (fixedp_t) from * oxs2;
+            }
+            if (alpha == 128 && swrFavorSpeed) {
+                for (int x = from; x < to; x++, xs2 += oxs2) {
+                    uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
+                    if (!swrIsOpaque(pixel)) continue;
+                    if (pixel != lastPixel) {
+                        lastTinted = tint(tintColor, pixel);
+                        lastPixel = pixel;
+                    }
+                    dstline[x] = swrBlendHalf(dstline[x], lastTinted);
+                }
+                continue;
             }
             for (int x = from; x < to; x++, xs2 += oxs2)
             {

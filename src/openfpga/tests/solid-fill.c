@@ -6,6 +6,23 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkHalfBlend(void)
+{
+    // The packed average must never carry across channels or use the opacity bit.
+    for (unsigned i = 0; i < 65536; i++) {
+        for (unsigned c = 0; c < 32; c++) {
+            uintpixel_t src = (uintpixel_t) (0x8000u | (c << 10) | ((31u - c) << 5) | c);
+            uintpixel_t expected = (uintpixel_t) i;
+            alphaBlend(&expected, src, bm_normal, 128);
+            if (swrBlendHalf((uintpixel_t) i, src) != expected) {
+                fprintf(stderr, "FAIL: half blend dst=%x src=%x\n", i, (unsigned) src);
+                exit(1);
+            }
+            ++checks;
+        }
+    }
+}
+
 static void checkRow(int offset, int width, int alpha, uintpixel_t color, unsigned first)
 {
     enum { COUNT = 260 };
@@ -62,6 +79,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkHalfBlend();
     negativeControl = argc > 1;
     if (negativeControl) checkRow(1, 1, 133, 0x8000, 0);
     static const uintpixel_t colors[] = {0, 0x8000, 0xffff, 0xfc00, 0x83e0, 0x801f, 0x1234};

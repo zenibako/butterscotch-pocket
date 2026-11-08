@@ -314,6 +314,13 @@ FORCE_INLINE uintpixel_t swrBlendPremultiplied(uintpixel_t dcolor, uint32_t srcR
     return (uintpixel_t)(0x8000 | ((redBlue >> 6) & 0x7C00) | ((green & 0x1F) << 5) | (redBlue & 0x1F));
 }
 
+// Floor the average of each RGB555 channel independently. Mask the low
+// bit of each channel and the opacity bit before the packed right shift.
+FORCE_INLINE uintpixel_t swrBlendHalf(uintpixel_t dst, uintpixel_t src)
+{
+    return (uintpixel_t) (((dst & src) + (((dst ^ src) & 0x7bdeu) >> 1)) | 0x8000u);
+}
+
 // A constant translucent fill reads and writes pairs on a 32-bit bus. The
 // scalar ends keep unaligned rows and odd surface pitches within their bounds.
 // memcpy permits word access without aliasing uintpixel_t storage as uint32_t.
