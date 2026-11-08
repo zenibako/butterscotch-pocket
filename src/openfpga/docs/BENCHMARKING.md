@@ -50,8 +50,9 @@ while constructing side-by-side packages.
 
 Build the diagnostic ELF from clean committed source with the matched SDK and
 `GAME=undertale APP=bs_bullet SAVESTATES=1 FOCUS_BENCH=0` using the `elf`
-target. The packager checks that the RISC-V ELF uses the benchmark's save and
-log slot names. Pass that ELF and an explicit test version:
+target. Set `OF_BUILD_NOTE=<version>-<short-commit>` to identify each A/B build
+in returned report titles. The packager checks that the RISC-V ELF uses the
+benchmark's save and log slot names. Pass that ELF and an explicit test version.
 
 ```sh
 python3 src/openfpga/tools/mkbullet.py \
@@ -136,9 +137,12 @@ card. Standard logs are `Saves/butterscotch/common/undertale_1.sav` or
 `deltarune_1.sav`; focused tiles reports accumulate in `deltarune_tiles_1.sav`.
 Each bullet-hell entry reports to `bs_bullet_1.sav` in that same directory:
 preserve and rename the file after its Analogue-menu quit and before launching
-the next entry. Preserve the original NUL-padded file; text ends at the first
-NUL. Old/duplicate reports can remain.
-Inspect the chosen file and explicitly select the intended complete block:
+the next entry. Preserve the original NUL-padded file. Use the local
+[log history check](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md#reading-the-log-off-the-card)
+to identify complete report blocks and exact copies across files.
+
+For formats recognized by the shared collector, inspect the chosen file and
+explicitly select the intended complete block.
 
 ```sh
 python3 -m benchmarks inspect "$LOG"
@@ -150,13 +154,13 @@ python3 -m benchmarks verify build/benchmarks/RUN_ID
 
 Use the printed bundle path in place of `RUN_ID`. Bind each import to its known
 matching variant and clock; the device's numeric core variant does not identify
-os20/os25. Import each focused or bullet-hell mode separately with its actual
-metadata, seed 7, route-specific section/window roster and completion markers. A
-complete `FOCUS FAIL` report can be imported and remains failed evidence. Keep
-incomplete raw reports privately too; the collector refuses incomplete imports.
-Standard logs lack an
-embedded source commit and independent correctness oracle; their build
-attribution remains declared.
+os20/os25. Import each supported mode separately with its actual metadata,
+seed 7, route-specific section/window roster and completion markers. Use the
+local history check for report titles the collector does not recognize.
+A complete `FOCUS FAIL` report can be imported and remains failed evidence.
+Keep incomplete raw reports privately too. Use actual package provenance for
+build attribution. A legacy report without a build label needs independent
+provenance.
 
 Keep raw logs, profiles, metadata, screenshots, bundles and selection notes
 private under the harness's ignored `build/`; never add game inputs, progress,

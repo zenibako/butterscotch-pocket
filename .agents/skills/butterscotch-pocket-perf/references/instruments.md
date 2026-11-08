@@ -77,9 +77,11 @@ cold: 4K 1091, 64K 1102, 1M 1115
 same 64K region again: 13441
 ```
 
-"work" excludes the display flip. The report does not identify the build,
-so ask which build a screenshot came from if it matters, and remember the
-user may be one build behind what you last produced.
+"work" excludes the display flip. For an A/B build, set
+`OF_BUILD_NOTE=<version>-<short-commit>` when compiling the ELF. Check that the
+label is embedded in the packaged ELF and record the ZIP and ELF hashes.
+Match the returned title against that record before attributing a timing delta
+to an optimization. Older titles may have no label or only compiler flags.
 
 Variants: `--bench-smooth` (320x240 with smoothing), `--bench-lowres`
 (320x240, point sampled). Edit `platform/of_bench.c` to add a measurement;

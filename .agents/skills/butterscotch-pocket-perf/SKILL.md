@@ -42,13 +42,21 @@ python3 -c 'import sys; sys.stdout.buffer.write(open(sys.argv[1], "rb").read().s
 For focused tiles measurements, select `deltarune_tiles_1.sav` instead; follow
 [focused benchmarks](references/focused-benchmarks.md) for that workflow.
 
-Check the first line (`Butterscotch log, <game>`) and the timestamps: the
-file can retain earlier reports or a previous tail, so an old one can be
-mistaken for a new run. Text ends at the first NUL; do not strip padding and
-concatenate later bytes. Use the shared collector's `inspect` and explicitly
-select the intended completed report. Standard reports lack a source commit;
-attach actual build metadata. Read the ms-per-frame and calls-per-frame tables
-before theorising about where a section's time goes.
+For a returned benchmark save, run this read-only history check from the
+checkout root. Pass any earlier originals available for comparison.
+
+```sh
+python3 src/openfpga/tools/inspect_bench_save.py "$LATEST_SAV" "$EARLIER_SAV"
+```
+
+The helper reads through the first NUL, counts incomplete blocks separately,
+and prints one row per byte-identical complete report. Each row shows its
+history status, copy count, short SHA-256 and title. `seen earlier` is retained
+evidence. `unseen` means the supplied earlier files lacked that exact block,
+so match its title, mode and build to the intended run before using it.
+Leave an unlabeled report's build unknown unless independent provenance
+establishes it. Read the frame and draw tables of the selected report before
+interpreting the cost. Use the shared collector for formats it recognizes.
 
 ## Speed and accuracy
 

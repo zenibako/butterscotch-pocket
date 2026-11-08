@@ -44,6 +44,7 @@ device):
 | `BS_DISASM=name` | print that code entry's bytecode at start (`*` for all, about a million lines) |
 | `BS_DUMP_EVERY=n`, `BS_DUMP_DIR=d` | also write every nth frame to `d/f<frame>.ppm` on the way to `BS_DUMP_FRAME` |
 | `BS_NOFLIP=1` | never present to the window; without it a run is capped at the display's 60 fps even with `BS_UNCAPPED` |
+| `BS_FRAME_LOG=frames.log` | per-frame rows with frame index, room, width, then step, draw, out and audio in microseconds |
 | `BS_RECORD=f.json` | write every key press and release, by frame, when the run ends (Butterscotch's `--record-inputs`) |
 | `BS_PLAYBACK=f.json` | replay a recording (`--playback-inputs`). With `BS_RECORD` as well it replays, then records what follows, so a recording can be extended |
 | `BS_PROFILE=n` | log the heaviest game scripts every n frames; the report the menu's "Show script times in log" gives on the device (see the perf skill) |
@@ -55,6 +56,18 @@ device):
 | `BS_SET="frame:name=1,arr[2]=3"` | set numeric globals (or elements of existing global arrays) on that frame |
 
 From `src/openfpga/games/undertale/`, `../../undertale_pc --bench` runs the
-built-in benchmark; desktop numbers are
-meaningless for speed, but it exercises the whole scripted path and the
-final report screen.
+built-in benchmark and exercises the scripted path and final report screen.
+
+For a desktop A/B, run the same benchmark arguments on both binaries in
+separate disposable working directories containing links to the same game
+assets. Set `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BS_NOFLIP=1`. For
+output checks, use `BS_DUMP_EVERY` and compare the captured frame names and
+bytes. With `BS_SKIP=2`, capture every frame in the unskipped reference so
+the runs share frame numbers.
+
+For throughput checks, disable captures and use `BS_FRAME_LOG`. Alternate
+baseline/candidate order between pairs, discard the warm-up pair and check
+the expected frame count and room before comparing each measured section.
+Average draw time over the measured frames of each run and report the
+median paired change per mode. Keep desktop throughput separate from
+Pocket timings.
