@@ -680,6 +680,13 @@ and exits with a failure status on desktop. Asriel is not force-cleared.
 Benchmark saves are volatile: the route neither reads nor writes ordinary
 progress.
 
+For a shorter Asriel run, `--bench-chaos-saber` enters the Asriel battle
+directly and measures one 150-frame Chaos Saber turn after 82 setup frames.
+`--bench-chaos-saber-smooth` runs the same route in Speed mode. The `saber`
+row covers the turn from wind-up through its final active frame. The report
+checks that the attack controller is still live and the player has HP at
+that boundary, then halts. This run skips the standalone post-run probes.
+
 The Photoshop Flowey tour uses Undertale v1.08's `room_floweyx` checkpoints
 at `fplot=3` and `fplot=7`. It reports 160 frames of phase 2 vine pressure
 (`vines`) and 160 frames of phase 6 eye shots (`eyes`), with room entry and
@@ -699,6 +706,8 @@ core. Its launch entries and exact arguments are:
 | Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
 | Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
 | Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Chaos Saber - Accuracy | `--bench-chaos-saber` |
+| Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
 | Flowey - Accuracy | `--bench-flowey` |
 | Flowey - Speed | `--bench-flowey-smooth` |
 | Flowey - No Render | `--bench-flowey --draw-every 100000` |

@@ -100,6 +100,13 @@ typedef struct {
     int bulletJumpCount;
     const OfBenchSection *bulletSections;
     int bulletSectionCount;
+    /* Optional short Asriel encounter. */
+    const char *saberTitle;
+    const char *saberScript;
+    const OfJump *saberJumps;
+    int saberJumpCount;
+    const OfBenchSection *saberSections;
+    int saberSectionCount;
     /* Optional Photoshop Flowey checkpoint tour. */
     const char *floweyTitle;
     const char *floweyScript;

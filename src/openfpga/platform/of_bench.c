@@ -44,6 +44,7 @@ static struct {
     const OfBenchSection *sections;
     int sectionCount;
     bool tour;
+    bool runProbes;
 } g_def;
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
@@ -53,6 +54,7 @@ static void benchStart(const char *title, const char *script, const OfJump *jump
     g_def.sections = sections;
     g_def.sectionCount = sectionCount;
     g_def.tour = tour;
+    g_def.runProbes = true;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
@@ -79,6 +81,14 @@ bool ofBenchStartBulletTour(void) {
     if (ofGame.bulletScript == NULL) return false;
     benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
                ofGame.bulletSections, ofGame.bulletSectionCount, true);
+    return true;
+}
+
+bool ofBenchStartChaosSaber(void) {
+    if (ofGame.saberScript == NULL) return false;
+    benchStart(ofGame.saberTitle, ofGame.saberScript, ofGame.saberJumps, ofGame.saberJumpCount,
+               ofGame.saberSections, ofGame.saberSectionCount, true);
+    g_def.runProbes = false;
     return true;
 }
 
@@ -290,9 +300,9 @@ void ofBenchFrame(Runner *runner) {
     }
     ofLogPrint("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
     ofLogPrint("work = total minus display flip\n");
-    ioReport();
-    asyncReport();
-    {
+    if (g_def.runProbes) {
+        ioReport();
+        asyncReport();
         unsigned clock, draw, drawUntimed, audioFree;
         ofPlatformCallCosts(&clock, &draw, &drawUntimed, &audioFree);
         ofLogPrint("call costs, us: clock %u.%02u, skipped sprite draw %u.%02u (%u.%02u without its timing), audio queue %u.%02u\n",
@@ -369,7 +379,7 @@ void ofBenchFrame(Runner *runner) {
             ofLogPrint(" %3u.%u %3u.%u %s\n", tenths / 10, tenths % 10, callTenths / 10, callTenths % 10, draw->what);
         }
     }
-    {
+    if (g_def.runProbes) {
         /* What a direct read costs by what read came just before it (ofPlatformReadCosts), ms. */
         unsigned tenths[OF_READ_COSTS];
         ofPlatformReadCosts(tenths);
@@ -378,11 +388,8 @@ void ofBenchFrame(Runner *runner) {
                    MS(OF_READ_TEX_TEX), MS(OF_READ_MUSIC_TEX), MS(OF_READ_TEX_MUSIC), MS(OF_READ_MUSIC_MUSIC), MS(OF_READ_IDLE_TEX),
                    MS(OF_READ_FILE_TEX));
         #undef MS
-    }
-    /* One more measurement, after the report so far is safely in the file: it
-     * draws outside a frame, and a report must not be lost to it. */
-    ofLogDump();
-    {
+        /* Save the report so far before probing outside a frame. */
+        ofLogDump();
         /* A sprite draw cut short at each stage in turn (sw_call_notes.h), microseconds a call:
          * what it has cost by the renderer's door, with its texture found, on entering the
          * drawing code, clipped, set up, with held layers let out, and whole. */

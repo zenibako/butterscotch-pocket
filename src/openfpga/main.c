@@ -136,6 +136,13 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(bulletSmooth);
             if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
         }
+        bool saberSmooth = strcmp(argv[i], "--bench-chaos-saber-smooth") == 0;
+        if (saberSmooth || strcmp(argv[i], "--bench-chaos-saber") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(saberSmooth);
+            if (!ofBenchStartChaosSaber()) logWarn("Bench: this game has no Chaos Saber benchmark\n");
+        }
         bool floweySmooth = strcmp(argv[i], "--bench-flowey-smooth") == 0;
         if (floweySmooth || strcmp(argv[i], "--bench-flowey") == 0) {
             args.seed = 7;

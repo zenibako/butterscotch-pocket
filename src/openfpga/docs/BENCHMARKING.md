@@ -60,8 +60,8 @@ python3 src/openfpga/tools/mkbullet.py \
   --output "../artifacts/bullet-hell-$(git rev-parse --short HEAD)/bullet-hell.zip"
 ```
 
-The ZIP contains no game data or saves. It has entries for both the Asriel
-bullet-hell tour and the Photoshop Flowey checkpoint tour:
+The ZIP contains no game data or saves. It has entries for the full bullet-hell
+tour, the short Chaos Saber benchmark and the Photoshop Flowey checkpoint tour:
 
 | Entry | Exact `ARGS=` value |
 | --- | --- |
@@ -71,12 +71,20 @@ bullet-hell tour and the Photoshop Flowey checkpoint tour:
 | Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
 | Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
 | Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Chaos Saber - Accuracy | `--bench-chaos-saber` |
+| Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
 | Flowey - Accuracy | `--bench-flowey` |
 | Flowey - Speed | `--bench-flowey-smooth` |
 | Flowey - No Render | `--bench-flowey --draw-every 100000` |
 | Flowey - No Audio | `--bench-flowey --mute` |
 | Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
 | Flowey - Profile | `--bench-flowey --scripts` |
+
+For the short Chaos Saber benchmark, compare the 150-frame `saber` rows
+in Accuracy and Speed. Both use the same direct Asriel entry and 82-frame
+setup. Use a separate baseline from the full tour, which enters via Asgore
+and consumes a different sequence of random numbers. The short benchmark
+skips the standalone SD and renderer probes.
 
 For Flowey, compare the 160-frame `vines` and `eyes` rows. Both are natural
 attack windows in `room_floweyx`, reached via its phase 2 and phase 6

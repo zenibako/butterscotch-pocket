@@ -269,6 +269,9 @@ static const char g_bulletScript[] =
     "4600:Z,4640:Z,4680:Z,4720:Z,4760:Z,4800:Z,4840:Z,4880:Z,4920:Z,4960:Z,5000:Z,5040:Z,5080:Z,5120:Z,"
     "5160:Z,5200:Z,5240:Z,5280:Z,5320:Z,5360:Z,5400:Z,5440:Z,5480:Z,5520:Z,5560:Z,5600:Z";
 
+#define ASRIEL_ENCOUNTER_GLOBALS \
+    "battlegroup=256,border=0,mercy=0,hp=99,maxhp=99,encounter=0," \
+    "flag[500]=1,flag[501]=0,flag[505]=0,flag[506]=0,flag[507]=0,flag[508]=0"
 #define BULLET_HP_AT(f) { (f), -1, "hp=99,maxhp=99,bmenucoord[0]=1", NULL },
 #define BULLET_HP_1000(f) \
     BULLET_HP_AT((f)) BULLET_HP_AT((f) + 100) BULLET_HP_AT((f) + 200) BULLET_HP_AT((f) + 300) \
@@ -283,7 +286,7 @@ static const OfJump g_bulletJumps[] = {
     { 1450, -1, "hp=99,maxhp=99", NULL },
     { 1500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99,maxhp=99", NULL },
     { 1600, 12, "encounter=0", NULL },
-    { 1700, -1, "battlegroup=256,border=0,mercy=0,hp=99,maxhp=99,encounter=0,flag[500]=1,flag[501]=0,flag[505]=0,flag[506]=0,flag[507]=0,flag[508]=0", "obj_battleblcon" },
+    { 1700, -1, ASRIEL_ENCOUNTER_GLOBALS, "obj_battleblcon" },
     BULLET_HP_1000(1800)
     BULLET_HP_1000(2800)
     BULLET_HP_1000(3800)
@@ -311,6 +314,33 @@ static const OfBenchSection g_bulletSections[] = {
     { "benchmark capture tail", 5631, "tail", "room_battle", NULL, NULL },
 };
 
+/* Undertale v1.08: enter room_battle after the initial room has initialized.
+ * Confirm through the opening menus, then let the natural turn play out. */
+static const char g_saberScript[] =
+    "4:Z,8:Z,12:Z,16:Z,20:Z,24:Z,28:Z,32:Z,36:Z,40:Z,44:Z,"
+    "48:Z,52:Z,56:Z,60:Z,64:Z,68:Z,72:Z,76:Z,80:Z,84:Z";
+
+static const OfJump g_saberJumps[] = {
+    { 2, 306, ASRIEL_ENCOUNTER_GLOBALS, NULL },
+};
+#undef ASRIEL_ENCOUNTER_GLOBALS
+
+static GMLReal benchGlobal(const Runner *runner, const char *name) {
+    VMContext *vm = runner->vmContext;
+    int32_t id = VM_getOrAllocateVarID(vm, name);
+    return RValue_toReal(Instance_getSelfVar(vm->globalScopeInstance, id));
+}
+
+static bool saberTurnEnds(const Runner *runner) {
+    /* The final attack frame enters Draw with one tick left. */
+    return benchGlobal(runner, "turntimer") == 0 && benchGlobal(runner, "hp") > 0;
+}
+
+static const OfBenchSection g_saberSections[] = {
+    { "Asriel encounter setup", 82, "aset", "room_battle", "obj_asrielfinal", NULL },
+    { "Asriel Chaos Saber", 232, "saber", "room_battle", "obj_ultimagen", saberTurnEnds },
+};
+
 /* Undertale v1.08: room_floweyx's controller loads phase fplot - 1.
  * Let each checkpoint finish its setup, then measure the native attacks
  * for equal windows that end before the stationary player dies. */
@@ -323,11 +353,7 @@ static const OfJump g_floweyJumps[] = {
 };
 
 static bool floweyPhaseActive(const Runner *runner, GMLReal phase) {
-    VMContext *vm = runner->vmContext;
-    Instance *globals = vm->globalScopeInstance;
-    RValue actualPhase = Instance_getSelfVar(globals, VM_getOrAllocateVarID(vm, "battlephase"));
-    RValue health = Instance_getSelfVar(globals, VM_getOrAllocateVarID(vm, "my_hp"));
-    return RValue_toReal(actualPhase) == phase && RValue_toReal(health) > 0;
+    return benchGlobal(runner, "battlephase") == phase && benchGlobal(runner, "my_hp") > 0;
 }
 
 static bool floweyVinesActive(const Runner *runner) {
@@ -410,6 +436,12 @@ const OfGame ofGame = {
     .bulletJumpCount = (int) (sizeof(g_bulletJumps) / sizeof(g_bulletJumps[0])),
     .bulletSections = g_bulletSections,
     .bulletSectionCount = (int) (sizeof(g_bulletSections) / sizeof(g_bulletSections[0])),
+    .saberTitle = "Undertale Chaos Saber",
+    .saberScript = g_saberScript,
+    .saberJumps = g_saberJumps,
+    .saberJumpCount = (int) (sizeof(g_saberJumps) / sizeof(g_saberJumps[0])),
+    .saberSections = g_saberSections,
+    .saberSectionCount = (int) (sizeof(g_saberSections) / sizeof(g_saberSections[0])),
     .floweyTitle = "Undertale Photoshop Flowey",
     .floweyScript = g_floweyScript,
     .floweyJumps = g_floweyJumps,
