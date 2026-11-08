@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import struct
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,8 @@ CORE = DIST / 'Cores/zenibako.Butterscotch'
 INSTANCE = DIST / 'Assets/butterscotch/zenibako.Butterscotch/Undertale.json'
 CORE_FILES = ('audio.json', 'core.json', 'data.json', 'icon.bin', 'info.txt',
               'input.json', 'interact.json', 'variants.json', 'video.json')
+# ELF32 little-endian executable header with e_machine = RISC-V (243).
+ELF_HEADER = struct.pack('<16sHHI28x', b'\x7fELF\x01\x01\x01', 2, 243, 1)
 MODES = (
     ('Accuracy', 'accuracy', '--bench-bullet-hell'),
     ('Speed', 'speed', '--bench-bullet-hell-smooth'),
@@ -35,7 +38,7 @@ class BulletPackageTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.elf = self.root / 'app.elf'
-        self.payload = b'\x7fELFbullet-hell fixture'
+        self.payload = ELF_HEADER + b'bs_bullet_0.sav\0bs_bullet_1.sav\0'
         self.elf.write_bytes(self.payload)
         self.output = self.root / 'bullet.zip'
 
@@ -123,6 +126,18 @@ class BulletPackageTest(unittest.TestCase):
         # Catches packaging an invalid program or leaving a new ZIP after rejection.
         self.elf.write_bytes(b'not an ELF')
         with self.assertRaises(ValueError):
+            self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_ordinary_undertale_elf(self):
+        self.elf.write_bytes(ELF_HEADER + b'undertale_0.sav\0undertale_1.sav\0')
+        with self.assertRaisesRegex(ValueError, 'APP=bs_bullet'):
+            self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_elf_for_the_wrong_architecture(self):
+        self.elf.write_bytes(self.payload[:18] + b'\x28\0' + self.payload[20:])
+        with self.assertRaisesRegex(ValueError, 'RISC-V'):
             self.package()
         self.assertFalse(self.output.exists())
 

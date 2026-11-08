@@ -672,10 +672,11 @@ Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
 Asgore control is followed by two 150-frame natural attack sections,
 Asriel's Chaos Saber and a green-spear turn from the first Lost Soul. Encounter
 and turn setup are separate report sections, not attack windows; a final
-one-frame capture tail is not an attack either. Each attack section checks
+one-frame capture tail is not an attack either. The Asgore control checks
+for `obj_asgoreb` in `room_battle`. Each attack section checks
 `room_battle` and its observed projectile controller (`obj_ultimagen` or
-`obj_greenspeargen`), and halts with `BENCH FAIL` instead of issuing a
-passing report when that scene is absent. Asriel is not force-cleared.
+`obj_greenspeargen`). A missing scene logs `BENCH FAIL`, halts on the Pocket,
+and exits with a failure status on desktop. Asriel is not force-cleared.
 Benchmark saves are volatile: the route neither reads nor writes ordinary
 progress.
 

@@ -26,8 +26,11 @@ CORE_FILES = ('audio.json', 'core.json', 'data.json', 'icon.bin', 'info.txt',
 
 def package(elf: Path, output: Path, version: str) -> None:
     payload = elf.read_bytes()
-    if not payload.startswith(b'\x7fELF'):
-        raise ValueError('benchmark input must be an ELF')
+    if len(payload) < 52 or payload[:6] != b'\x7fELF\x01\x01' or payload[18:20] != b'\xf3\x00':
+        raise ValueError('benchmark input must be a little-endian 32-bit RISC-V ELF')
+    # Renaming the ELF does not change the filenames it opens at runtime.
+    if b'\0bs_bullet_0.sav\0' not in payload or b'\0bs_bullet_1.sav\0' not in payload:
+        raise ValueError('benchmark ELF must use the bs_bullet save and log slots (build with APP=bs_bullet)')
     if output.exists():
         raise FileExistsError(output)
 

@@ -48,8 +48,10 @@ save isolation. Match relevant production paths and record instrumentation,
 renderer, audio and pacing differences. Do not overwrite shared runtime/assets
 while constructing side-by-side packages.
 
-Build the diagnostic ELF from the clean committed source with the matched SDK,
-then pass that exact ELF and an explicit test version to the additive packager:
+Build the diagnostic ELF from clean committed source with the matched SDK and
+`GAME=undertale APP=bs_bullet SAVESTATES=1 FOCUS_BENCH=0` using the `elf`
+target. The packager checks that the RISC-V ELF uses the benchmark's save and
+log slot names. Pass that ELF and an explicit test version:
 
 ```sh
 python3 src/openfpga/tools/mkbullet.py \

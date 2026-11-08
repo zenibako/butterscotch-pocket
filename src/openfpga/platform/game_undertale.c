@@ -302,7 +302,7 @@ static const OfJump g_bulletJumps[] = {
 
 static const OfBenchSection g_bulletSections[] = {
     { "boot to the first room", 1000, "boot", NULL, NULL },
-    { "Asgore control (640x480)", 1600, "asgr", "room_battle", NULL },
+    { "Asgore control (640x480)", 1600, "asgr", "room_battle", "obj_asgoreb" },
     { "Asriel encounter setup", 1920, "aset", "room_battle", NULL },
     { "Asriel Chaos Saber", 2070, "saber", "room_battle", "obj_ultimagen" },
     { "Lost Soul transition", 5480, "trans", "room_battle", NULL },

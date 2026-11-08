@@ -213,7 +213,7 @@ void ofBenchFrame(Runner *runner) {
     if (!g_running) return;
 
     const OfBenchSection *section = &g_def.sections[g_section];
-    if (ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
+    if (!g_sectionSeen[g_section] && ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
     uint64_t now = nowNanos();
     if (g_frame == 0) {
         g_firstFrameMs = (unsigned) ((now - g_startNanos) / 1000000u);
@@ -227,7 +227,12 @@ void ofBenchFrame(Runner *runner) {
 
     if ((section->roomName != NULL || section->requiredObject != NULL) && !g_sectionSeen[g_section]) {
         ofLogPrint("BENCH FAIL %s: required scene not observed\n", section->name);
+#ifdef OF_PC
+        ofLogDump();
+        exit(EXIT_FAILURE);
+#else
         ofDiagHalt("benchmark scene check failed");
+#endif
     }
     g_sectionMs[g_section] = (unsigned) ((now - g_sectionStart) / 1000000u);
     g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
