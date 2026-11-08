@@ -6,6 +6,53 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkBackdropRows(void)
+{
+    enum { WIDTH = 112, HEIGHT = 140, SRC_W = 171, SRC_H = 275 };
+    static uintpixel_t actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
+    SWTexture* texture = swrCreateTextureEx(NULL, SRC_W + 2, SRC_H + 2, false);
+    texture->immutable = true;
+    for (int y = 0; y < SRC_H + 2; ++y) {
+        for (int x = 0; x < SRC_W + 2; ++x) {
+            if (x >= y % 9 && (x > 70 || (x + 2 * y) % 11 != 0))
+                texture->buffer[y * (SRC_W + 2) + x] = (uintpixel_t) (0x8000 | ((x * 37 + y * 571) & 0x7fff));
+        }
+    }
+    SWTexture* referenceTexture = swrCopyTexture(texture);
+    SWRenderer batch = {0};
+    batch.fb = batch.mainFb = actual;
+    batch.fbPitch = WIDTH;
+    batch.portW = batch.maxX = WIDTH;
+    batch.portH = batch.maxY = HEIGHT;
+    batch.blendMode = bm_normal;
+    SWRenderer reference = batch;
+    reference.fb = reference.mainFb = expected;
+    swrFavorSpeed = swrSmoothMinify = true;
+    const int placements[][4] = {
+        {2, 3, 86, 129}, {38, 24, 86, 135}, {38, -8, 86, 130},
+        {-3, 1, 86, 134}, {1, 2, 84, 134},
+    };
+    const void* cache = NULL;
+    for (int i = 0; i < (int) (sizeof(placements) / sizeof(placements[0])); ++i) {
+        int dx = placements[i][0], dy = placements[i][1], dw = placements[i][2], dh = placements[i][3];
+        for (int n = 0; n < WIDTH * HEIGHT; ++n)
+            actual[n] = expected[n] = (uintpixel_t) (0x8000 | ((n * 7919) & 0x7fff));
+        swrDrawSpriteInternal(&batch.base, dx, dy, dw, dh, texture, 1, 1, SRC_W, SRC_H,
+                              0xffff, 256, false, SWR_CONTRAST_NONE);
+        swrDrawSpriteInternal(&reference.base, dx, dy, dw, dh, referenceTexture, 1, 1, SRC_W, SRC_H,
+                              0xffff, 256, false, SWR_CONTRAST_NONE);
+        if (i == 0) cache = texture->boxRows;
+        if (cache == NULL || texture->boxRows != cache || memcmp(actual, expected, sizeof(actual))) {
+            fprintf(stderr, "FAIL: backdrop box row draw %d\n", i);
+            exit(1);
+        }
+        checks += WIDTH * HEIGHT;
+    }
+    swrFavorSpeed = swrSmoothMinify = false;
+    swrFreeTexture(referenceTexture);
+    swrFreeTexture(texture);
+}
+
 static void checkPipeLayers(void)
 {
     enum { WIDTH = 200, HEIGHT = 156, SRC_W = 190, SRC_H = 181 };
@@ -345,6 +392,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkBackdropRows();
     checkPipeLayers();
     checkBoxSampleSpan();
     checkPointSampleSpan();

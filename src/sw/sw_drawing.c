@@ -284,6 +284,112 @@ FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int co
     else memcpy(dst, src, (size_t) count * sizeof(uintpixel_t));
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+enum { SWR_BOX_UNIT = 1 << 14, SWR_BOX_CACHE_BYTES = 256 * 1024 };
+
+typedef struct {
+    uint16_t from, to, solidFrom, solidTo;
+} SWBoxRow;
+
+typedef struct SWBoxRows {
+    int sx, step, width;
+    size_t bytes;
+    SWBoxRow* rows;
+    uintpixel_t* colors;
+    uint8_t* coverage;
+} SWBoxRows;
+
+static size_t swrBoxCacheBytes;
+
+// Flowey's arm and three backdrop vines change height while keeping the
+// same horizontal sampling. Store filtered rows indexed by the upper tap.
+static const SWBoxRows* swrBackdropBoxRows(SWTexture* texture, int sw, int sh, int sx, int step)
+{
+    bool backdrop = (sw == 171 && sh == 275) || (sw == 297 && sh == 150) ||
+                    (sw == 298 && (sh == 102 || sh == 131));
+    if (!backdrop || !texture->immutable || texture->width > sw + 2 || texture->height > sh + 2)
+        return NULL;
+    SWBoxRows* cache = texture->boxRows;
+    if (cache != NULL) return cache->sx == sx && cache->step == step ? cache : NULL;
+
+    int width = swrFirstSampleAtColumn(texture->width - 1 - sx, step, SWR_BOX_UNIT);
+    int height = texture->height - 1;
+    if (width <= 0 || height <= 0) return NULL;
+    size_t texels = (size_t) width * height;
+    size_t header = sizeof(*cache) + (size_t) height * sizeof(SWBoxRow);
+    size_t bytes = header + texels * (sizeof(uintpixel_t) + sizeof(uint8_t));
+    if (bytes > SWR_BOX_CACHE_BYTES - swrBoxCacheBytes) return NULL;
+    cache = malloc(bytes);
+    if (cache == NULL) return NULL;
+    cache->sx = sx;
+    cache->step = step;
+    cache->width = width;
+    cache->bytes = bytes;
+    cache->rows = (SWBoxRow*) (cache + 1);
+    cache->colors = (uintpixel_t*) ((uint8_t*) cache + header);
+    cache->coverage = (uint8_t*) (cache->colors + texels);
+
+    for (int y = 0; y < height; ++y) {
+        const uintpixel_t* upper = texture->buffer + y * texture->width + sx;
+        const uintpixel_t* lower = upper + texture->width;
+        uintpixel_t* colors = cache->colors + y * width;
+        uint8_t* coverage = cache->coverage + y * width;
+        int from = 0, to = 0, solidFrom = 0, solidTo = 0, start = 0;
+        for (int x = 0, sample = 0; x < width; ++x, sample += step) {
+            int col = sample >> 14;
+            int covered = swrAverageBox(upper[col], upper[col + 1], lower[col], lower[col + 1], &colors[x]);
+            coverage[x] = (uint8_t) covered;
+            if (covered != 0) {
+                if (to == 0) from = x;
+                to = x + 1;
+            }
+            if (covered != 4) start = x + 1;
+            else if (x + 1 - start > solidTo - solidFrom) {
+                solidFrom = start;
+                solidTo = x + 1;
+            }
+        }
+        cache->rows[y] = (SWBoxRow) { (uint16_t) from, (uint16_t) to, (uint16_t) solidFrom, (uint16_t) solidTo };
+    }
+    swrBoxCacheBytes += bytes;
+    texture->boxRows = cache;
+    return cache;
+}
+
+static void swrBlitBoxRow(const SWBoxRows* cache, int row, int limit, uintpixel_t* dst)
+{
+    const SWBoxRow* bounds = &cache->rows[row];
+    const uintpixel_t* colors = cache->colors + row * cache->width;
+    const uint8_t* coverage = cache->coverage + row * cache->width;
+    int to = swrMin(limit, bounds->to);
+    int solidTo = swrMin(to, bounds->solidTo);
+    int solidFrom = swrMin(solidTo, bounds->solidFrom);
+    swrCopyPixels(dst + solidFrom, colors + solidFrom, solidTo - solidFrom);
+    for (int x = bounds->from; x < to; ++x) {
+        if (x == solidFrom && solidFrom < solidTo) { x = solidTo - 1; continue; }
+        int covered = coverage[x];
+        if (covered == 4) dst[x] = colors[x];
+        else if (covered != 0) {
+            int alpha = covered << 6;
+            dst[x] = swrBlendPremultiplied(dst[x], swrSpreadRedBlue(colors[x]) * alpha,
+                                           swrGreen(colors[x]) * alpha, 256 - alpha);
+        }
+    }
+}
+#endif
+
+void swrFreeBoxRows(SWTexture* texture)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    if (texture->boxRows == NULL) return;
+    swrBoxCacheBytes -= texture->boxRows->bytes;
+    free(texture->boxRows);
+    texture->boxRows = NULL;
+#else
+    (void) texture;
+#endif
+}
+
 // One row of an untinted 1:1 opaque draw into the main buffer, where tiles
 // that still hold nothing but the clear colour (see SWDirtyBuffer) get only
 // the texel runs of other colours (`run` to `runEnd`, see SWColorSpans; in
@@ -1515,6 +1621,12 @@ static void swrDrawSpriteInternal(
         xstep > (3 << (fp_prec - 1)) && ystep > (3 << (fp_prec - 1)) && alpha >= 4)
     {
         int srcRight = sx + sw - 1, srcBottom = sy + sh - 1;
+        const SWBoxRows* cached = NULL;
+        if (swrFavorSpeed && !fromHalf && swr->fb == swr->mainFb && alpha == 256 &&
+            (tintColor & 0x7fff) == 0x7fff && contrast == SWR_CONTRAST_NONE)
+            cached = swrBackdropBoxRows(texture, osw, osh, sx, xstep);
+        // The clipped right/bottom edge may lack taps present in the cache.
+        int interior = cached == NULL ? 0 : swrMin(dw, swrFirstSampleAtColumn(srcRight - sx, xstep, SWR_BOX_UNIT));
         const uint16_t* bounds = NULL;
         if (!fromHalf && dw >= 32 && texture->width <= 512 && texture->height <= 512)
             bounds = swrRowBounds(texture);
@@ -1534,8 +1646,12 @@ static void swrDrawSpriteInternal(
             const uintpixel_t* src1 = row1 >= 0 ? &texture->buffer[row1 * texture->width] : NULL;
             
             int from = 0, to = dw;
-            if (bounds != NULL)
+            if (interior > 0 && row1 >= 0) {
+                swrBlitBoxRow(cached, row0, interior, dstline);
+                from = interior;
+            } else if (bounds != NULL) {
                 swrBoxSampleSpan(bounds, row0, row1, sx, srcRight, xstep, 1 << fp_prec, &from, &to);
+            }
             fixedp_t xs2 = ixs2 + from * oxs2;
             for (int x = from; x < to; x++, xs2 += oxs2)
             {

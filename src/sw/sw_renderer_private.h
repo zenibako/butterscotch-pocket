@@ -83,6 +83,7 @@ typedef struct
     // immutable texture only (swrRowBounds); the half-size copy's are made
     // with it and live in its allocation.
     uint16_t* rowBounds;
+    struct SWBoxRows* boxRows;
     uint16_t* pipeSolidBounds; // longest fully opaque point and 2x2 runs per row
     uint16_t* halfRowBounds;
     uint16_t* halfFullBounds; // per row of the half-size copy, the longest run of texels standing for all four of theirs: [start, end)
@@ -97,6 +98,7 @@ SWTexture;
 
 const SWButtonCache* swrButtonCache(SWTexture* texture, int sx, int sy, int sw, int sh);
 void swrFreeButtonCache(SWTexture* texture);
+void swrFreeBoxRows(SWTexture* texture);
 
 typedef struct
 {

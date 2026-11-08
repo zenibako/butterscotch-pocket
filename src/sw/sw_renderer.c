@@ -1461,6 +1461,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.glyphHints = NULL;
     localSurface.buttonCache = NULL;
     localSurface.rowBounds = NULL;
+    localSurface.boxRows = NULL;
     localSurface.pipeSolidBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
