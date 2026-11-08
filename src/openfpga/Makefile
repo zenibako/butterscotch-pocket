@@ -160,7 +160,9 @@ BS_WARN = -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function \
 # undrawn battle frame, within run-to-run variation).
 # UT_OPT is the name it had until 2026-10-13. rename-ut: keep
 OF_OPT ?= $(UT_OPT)
-CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(OF_OPT) -DOF_BUILD_NOTE='"$(OF_OPT)"'
+# Override the report title suffix without changing compiler options.
+OF_BUILD_NOTE ?= $(OF_OPT)
+CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(OF_OPT) -DOF_BUILD_NOTE='"$(OF_BUILD_NOTE)"'
 LDFLAGS += $(OF_OPT)
 
 # Data files bundled into the per-target deliverable (override per core).
@@ -180,7 +182,7 @@ MISTER_ASSETS ?= $(wildcard $(G)data.win) $(GAME_PACKS)
 # compiled code and save filenames, so they must invalidate the same objects.
 # (Before sdk.mk, which looks at what is
 # in them; PC_OBJ_DIR is only set this early when a sub-make passes it.)
-HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID)'; } | cksum | cut -d' ' -f1)
+HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID) $(OF_BUILD_NOTE)'; } | cksum | cut -d' ' -f1)
 $(foreach d,$(OBJ_DIR) $(or $(PC_OBJ_DIR),$(ROOT)/.obj/$(APP)-pc),$(shell [ "$$(cat $(d)/.headers 2>/dev/null)" = "$(HEADER_SUM)" ] || { rm -rf $(d); mkdir -p $(d); echo $(HEADER_SUM) > $(d)/.headers; }))
 
 # Declare default target before sdk.mk's rules

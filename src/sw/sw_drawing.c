@@ -1014,6 +1014,37 @@ static int swrContrastCoverage(int covered, int alpha, int contrast)
 }
 #endif
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+// The clipped width and destination stride are even and the destination is
+// word-aligned. A transparent texel leaves both destination rows untouched.
+static void swrCopyDoubledSprite(uintpixel_t* dst, int dstPitch, const uintpixel_t* src, int srcPitch,
+                                 int width, int height, bool flipX)
+{
+    int columns = width / 2;
+    int start = flipX ? columns - 1 : 0;
+    int step = flipX ? -1 : 1;
+    for (int y = 0; y < height; y += 2) {
+        uintpixel_t* top = dst + y * dstPitch;
+        // Reuse the last row for an odd clipped height.
+        uintpixel_t* bottom = top + (y + 1 < height ? dstPitch : 0);
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+#endif
+#endif
+        const uintpixel_t* row = src + (y / 2) * srcPitch;
+        for (int x = 0, col = start; x < width; x += 2, col += step) {
+            uintpixel_t texel = row[col];
+            if (!swrIsOpaque(texel)) continue;
+            uint32_t pair = ((uint32_t) texel << 16) | texel;
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        }
+    }
+}
+#endif
+
 /**
  * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
  * A cached half-size texture can supply the coverage of each sampled pixel.
@@ -1518,6 +1549,14 @@ static void swrDrawSpriteInternal(
     if (blendmode == bm_normal && alpha > 253)
     {
         bool untinted = (tintColor & 0x7FFF) == 0x7FFF;
+        if (untinted && texture->immutable && !flipY && xstep == (1 << (fp_prec - 1)) && ystep == xstep &&
+            !((dx | dw | swr->fbPitch) & 1) && !((uintptr_t) swr->fb & 3)) {
+            SWR_PROBE_PATH(texture->solid == 1 ? 2 : 3);
+            swrDirtyRect(swr, dx, dy, dx + dw, dy + dh);
+            swrCopyDoubledSprite(swr->fb + dy * swr->fbPitch + dx, swr->fbPitch,
+                                 texture->buffer + sy * texture->width + sx, texture->width, dw, dh, flipX);
+            return;
+        }
         uint32_t lastPixel = 0xFFFFFFFF;
         uintpixel_t lastTinted = 0;
         

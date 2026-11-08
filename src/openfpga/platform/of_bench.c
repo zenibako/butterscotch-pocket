@@ -266,7 +266,7 @@ void ofBenchFrame(Runner *runner) {
     g_running = false;
     swrCallNotes = false;
     ofPerfDetailEvery(0);
-    /* A build with optimisation flags of its own (OF_OPT) says so in the title. */
+    /* The title can identify the build or its optimisation flags. */
     const char *note = "";
 #ifdef OF_BUILD_NOTE
     note = OF_BUILD_NOTE;

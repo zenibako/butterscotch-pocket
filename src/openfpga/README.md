@@ -126,6 +126,10 @@ make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
 make copy       # copy the core to a mounted Pocket SD card
 ```
 
+Pass `OF_BUILD_NOTE=<label>` to `make` to identify an experimental build in
+benchmark report titles. The label defaults to the extra compiler flags in
+`OF_OPT`.
+
 The collision fixture is `./<game>_pc_collision_work_fixture`. Build with one
 explicit `WADS=16` or `WADS=17`; add `PC_EXTRA_CFLAGS=-DOF_COLLISION_WORK_PROFILE`
 to also check sort, comparison, target-length and bounding-box counters. Use a

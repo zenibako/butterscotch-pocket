@@ -6,6 +6,39 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkDoubledSprite(void)
+{
+    enum { SRC_PITCH = 9, DST_PITCH = 20, ROWS = 10 };
+    uintpixel_t source[SRC_PITCH * ROWS];
+    _Alignas(uint32_t) uintpixel_t actual[DST_PITCH * ROWS];
+    uintpixel_t expected[DST_PITCH * ROWS];
+    for (int i = 0; i < SRC_PITCH * ROWS; i++)
+        source[i] = (uintpixel_t) ((i % 3 ? 0x8000 : 0) | ((i * 491) & 0x7fff));
+
+    for (int width = 2; width <= 16; width += 2) {
+        for (int height = 1; height <= 8; height++) {
+            for (int flip = 0; flip < 2; flip++) {
+                for (int i = 0; i < DST_PITCH * ROWS; i++)
+                    actual[i] = expected[i] = (uintpixel_t) (i * 7919);
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        int col = flip ? width - 1 - x : x;
+                        uintpixel_t texel = source[(1 + y / 2) * SRC_PITCH + 1 + col / 2];
+                        if (swrIsOpaque(texel)) expected[(1 + y) * DST_PITCH + 2 + x] = texel;
+                    }
+                }
+                swrCopyDoubledSprite(actual + DST_PITCH + 2, DST_PITCH, source + SRC_PITCH + 1,
+                                     SRC_PITCH, width, height, flip != 0);
+                if (memcmp(actual, expected, sizeof(actual))) {
+                    fprintf(stderr, "FAIL: doubled sprite width=%d height=%d flip=%d\n", width, height, flip);
+                    exit(1);
+                }
+                checks += DST_PITCH * ROWS;
+            }
+        }
+    }
+}
+
 static void checkHalfBlend(void)
 {
     // The packed average must never carry across channels or use the opacity bit.
@@ -79,6 +112,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkDoubledSprite();
     checkHalfBlend();
     negativeControl = argc > 1;
     if (negativeControl) checkRow(1, 1, 133, 0x8000, 0);
