@@ -8,6 +8,7 @@ enum {
 };
 
 bool swrSwitchToSurface(Renderer* renderer, int32_t targetSurfaceId, bool restoreOldView);
+void swrFreeRotatedRasters(SWTexture* texture);
 // When true, sprites drawn at roughly half size are box-filtered instead of point-sampled.
 extern bool swrSmoothMinify;
 // Frame skipping: while true, nothing is drawn to the screen. The game's Draw

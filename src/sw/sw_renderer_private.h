@@ -65,6 +65,7 @@ typedef struct
     // change (immutable: one loaded from the game's data, not a surface).
     SWGlyphHintCache* glyphHints; // freed with the immutable source texture
     SWButtonCache* buttonCache;
+    struct SWRotatedRasterCache* rotatedRasters;
     uintpixel_t* halfBuffer;
     uint8_t* halfCoverage;  // how many of its four texels each copied one stands for, 0..4; NULL when every one is 0 or 4
     bool immutable;

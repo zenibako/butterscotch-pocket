@@ -3143,6 +3143,167 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 #endif
 }
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+// Scope the cache to Flowey's 45x31 pipe footprint. Bound total residency and
+// the number of cold builds a source can trigger in one frame.
+enum { SWR_RASTER_W = 45, SWR_RASTER_H = 31, SWR_RASTER_SLOTS = 64,
+       SWR_RASTER_BYTES = 192 * 1024, SWR_RASTER_BUILDS = 8 };
+typedef struct {
+    int sx, sy, dw, dh;
+    float angle, px, py;
+    uint32_t tint;
+} SWRasterKey;
+typedef struct { int16_t x, y; uint16_t count, offset; } SWRasterSpan;
+typedef struct {
+    SWRasterKey key;
+    size_t bytes;
+    int count;
+    SWRasterSpan spans[];
+} SWRotatedRaster;
+typedef struct SWRotatedRasterCache {
+    SWRotatedRaster* entries[SWR_RASTER_SLOTS];
+    uint32_t frame;
+    int first, count, builds;
+} SWRotatedRasterCache;
+
+static size_t swrRotatedRasterBytes;
+
+static void swrDropRotatedRaster(SWRotatedRasterCache* cache)
+{
+    SWRotatedRaster* entry = cache->entries[cache->first];
+    swrRotatedRasterBytes -= entry->bytes;
+    free(entry);
+    cache->first = (cache->first + 1) % SWR_RASTER_SLOTS;
+    cache->count--;
+}
+
+static SWRotatedRaster* swrBuildRotatedRaster(SWRotatedRasterCache* cache, SWTexture* texture,
+                                              const SWRasterKey* key, int radius)
+{
+    int side = radius * 2 + 1;
+    uintpixel_t* pixels = calloc((size_t) side * side, sizeof(*pixels));
+    if (pixels == NULL) return NULL;
+    SWRenderer scratch = {0};
+    scratch.fb = pixels;
+    scratch.fbPitch = (uint16_t) side;
+    scratch.portW = scratch.maxX = scratch.portH = scratch.maxY = side;
+    scratch.blendMode = bm_normal;
+    int x = radius + (key->dw < 0 ? (int) key->px : -(int) key->px);
+    int y = radius + (key->dh < 0 ? (int) key->py : -(int) key->py);
+    swrDrawSpriteRotatedInternal(&scratch.base, x, y, key->dw, key->dh, texture,
+                                 key->sx, key->sy, SWR_RASTER_W, SWR_RASTER_H,
+                                 (uintpixel_t) key->tint, 256, key->angle, key->px, key->py);
+
+    int spans = 0, opaque = 0;
+    for (int row = 0; row < side; ++row) {
+        bool inside = false;
+        for (int col = 0; col < side; ++col) {
+            bool covered = swrIsOpaque(pixels[row * side + col]);
+            spans += covered && !inside;
+            opaque += covered;
+            inside = covered;
+        }
+    }
+    size_t bytes = sizeof(SWRotatedRaster) + spans * sizeof(SWRasterSpan) + opaque * sizeof(*pixels);
+    while (cache->count > 0 && (cache->count == SWR_RASTER_SLOTS ||
+                                bytes > SWR_RASTER_BYTES - swrRotatedRasterBytes))
+        swrDropRotatedRaster(cache);
+    SWRotatedRaster* entry = bytes <= SWR_RASTER_BYTES - swrRotatedRasterBytes ? malloc(bytes) : NULL;
+    if (entry != NULL) {
+        entry->key = *key;
+        entry->bytes = bytes;
+        entry->count = spans;
+        uintpixel_t* colors = (uintpixel_t*) (entry->spans + spans);
+        int index = 0, offset = 0;
+        for (int row = 0; row < side; ++row) {
+            const uintpixel_t* line = pixels + row * side;
+            for (int col = 0; col < side; ) {
+                if (!swrIsOpaque(line[col])) { ++col; continue; }
+                int first = col++;
+                while (col < side && swrIsOpaque(line[col])) ++col;
+                int length = col - first;
+                entry->spans[index++] = (SWRasterSpan) { first - x, row - y, length, offset };
+                memcpy(colors + offset, line + first, (size_t) length * sizeof(*colors));
+                offset += length;
+            }
+        }
+        cache->entries[(cache->first + cache->count++) % SWR_RASTER_SLOTS] = entry;
+        swrRotatedRasterBytes += bytes;
+    }
+    free(pixels);
+    return entry;
+}
+
+static bool swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int y,
+                                  const SWRasterKey* key)
+{
+    // With a half-grid pivot and bounded integer positions, translating the
+    // draw preserves the inverse sampler's pixel-center offsets exactly.
+    if (key->dw == 0 || key->dw < -64 || key->dw > 64 || key->dh == 0 || key->dh < -64 || key->dh > 64 ||
+        x < -4096 || x > 4096 || y < -4096 || y > 4096 || !isfinite(key->angle)) return false;
+    int w = swrAbs(key->dw), h = swrAbs(key->dh);
+    if (!(key->px >= 0.0f && key->px <= w && key->py >= 0.0f && key->py <= h) ||
+        key->px * 2 != (int) (key->px * 2) || key->py * 2 != (int) (key->py * 2)) return false;
+    SWRotatedRasterCache* cache = texture->rotatedRasters;
+    if (cache == NULL) {
+        if (sizeof(*cache) > SWR_RASTER_BYTES - swrRotatedRasterBytes) return false;
+        cache = calloc(1, sizeof(*cache));
+        if (cache == NULL) return false;
+        texture->rotatedRasters = cache;
+        swrRotatedRasterBytes += sizeof(*cache);
+    }
+    const SWRotatedRaster* entry = NULL;
+    for (int i = 0; i < cache->count; ++i) {
+        const SWRotatedRaster* have = cache->entries[(cache->first + i) % SWR_RASTER_SLOTS];
+        if (memcmp(&have->key.angle, &key->angle, sizeof(key->angle)) == 0 &&
+            memcmp(&have->key, key, sizeof(*key)) == 0) {
+            entry = have;
+            break;
+        }
+    }
+    if (entry == NULL) {
+        if (cache->frame != swr->frameCounter) {
+            cache->frame = swr->frameCounter;
+            cache->builds = 0;
+        }
+        if (cache->builds == SWR_RASTER_BUILDS) return false;
+        // The Manhattan extent bounds the rotated corners in both axes.
+        int radius = swrCeiling(fmaxf(key->px, w - key->px) + fmaxf(key->py, h - key->py)) + 2;
+        if (radius > 64) return false;
+        cache->builds++;
+        entry = swrBuildRotatedRaster(cache, texture, key, radius);
+        if (entry == NULL) return false;
+    }
+    int right = swr->portX + swr->portW, bottom = swr->portY + swr->portH;
+    const uintpixel_t* colors = (const uintpixel_t*) (entry->spans + entry->count);
+    for (int i = 0; i < entry->count; ++i) {
+        SWRasterSpan span = entry->spans[i];
+        int row = y + span.y;
+        if (row < swr->portY || row >= bottom) continue;
+        int col = x + span.x;
+        int first = swrMax(col, swr->portX), last = swrMin(col + span.count, right);
+        if (first >= last) continue;
+        swrDirtyRow(swr, row, first, last);
+        swrCopyPixels(swr->fb + row * swr->fbPitch + first, colors + span.offset + first - col, last - first);
+    }
+    return true;
+}
+#endif
+
+void swrFreeRotatedRasters(SWTexture* texture)
+{
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    SWRotatedRasterCache* cache = texture->rotatedRasters;
+    if (cache == NULL) return;
+    while (cache->count > 0) swrDropRotatedRaster(cache);
+    swrRotatedRasterBytes -= sizeof(*cache);
+    free(cache);
+    texture->rotatedRasters = NULL;
+#else
+    (void) texture;
+#endif
+}
+
 void swrDrawSpriteRotated(
     Renderer* renderer, float dx, float dy, float dw, float dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -3157,21 +3318,21 @@ void swrDrawSpriteRotated(
     swrTransformPosIfNeeded(swr, &dx, &dy);
     swrTransformSizeIfNeeded(swr, &pivotX, &pivotY);
     swrTransformSizeIfNeeded(swr, &dw, &dh);
+    int x = swrFloor(dx), y = swrFloor(dy), w = swrCeiling(dw), h = swrCeiling(dh);
+    uintpixel_t packed = swrConvertPixel(tintColor);
+    int opacity = swrIntAlpha(alpha);
+
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    if (sw == SWR_RASTER_W && sh == SWR_RASTER_H && texture->immutable &&
+        sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        swr->blendMode == bm_normal && opacity > 253) {
+        SWRasterKey key = { sx, sy, w, h, angleDeg, pivotX, pivotY, packed };
+        if (swrDrawRotatedRaster(swr, texture, x, y, &key)) return;
+    }
+#endif
     
     swrDrawSpriteRotatedInternal(
-        renderer,
-        swrFloor(dx),
-        swrFloor(dy),
-        swrCeiling(dw),
-        swrCeiling(dh),
-        texture,
-        sx, sy,
-        sw, sh,
-        swrConvertPixel(tintColor),
-        swrIntAlpha(alpha),
-        angleDeg,
-        pivotX,
-        pivotY
+        renderer, x, y, w, h, texture, sx, sy, sw, sh, packed, opacity, angleDeg, pivotX, pivotY
     );
 }
 

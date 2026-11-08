@@ -6,6 +6,64 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkTranslatedRotation(void)
+{
+    enum { WIDTH = 64, HEIGHT = 56, SRC_W = 47, SRC_H = 33 };
+    uintpixel_t source[SRC_W * SRC_H];
+    uintpixel_t actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
+    for (int i = 0; i < SRC_W * SRC_H; ++i)
+        source[i] = (i % 7 < 3) ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
+    SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
+    SWRenderer swr = {0};
+    swr.fb = swr.mainFb = actual;
+    swr.fbPitch = WIDTH;
+    swr.portX = 2;
+    swr.portY = 3;
+    swr.maxX = WIDTH - 2;
+    swr.maxY = HEIGHT - 3;
+    swr.portW = swr.maxX - swr.portX;
+    swr.portH = swr.maxY - swr.portY;
+    swr.viewX = swr.portX;
+    swr.viewY = swr.portY;
+    swr.scaleX = swr.scaleY = 1.0f;
+    swr.blendMode = bm_normal;
+
+    static const int places[][2] = { {18, 12}, {-9, 2}, {56, 45}, {3, -7} };
+    for (int flip = 0; flip < 2; ++flip) {
+        for (unsigned i = 0; i < sizeof(places) / sizeof(places[0]); ++i) {
+            SWDirtyBuffer dirty = { .width = WIDTH, .height = HEIGHT };
+            swr.dirtyMark = &dirty;
+            for (int j = 0; j < WIDTH * HEIGHT; ++j)
+                actual[j] = expected[j] = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));
+            int x = places[i][0] + (flip ? 22 : 0), y = places[i][1];
+            int width = flip ? -22 : 23;
+            swr.fb = actual;
+            swrDrawSpriteRotated(&swr.base, x, y, width, 16, &texture, 1, 1, 45, 31,
+                                 0x808080, 1.0f, 37.0f, 10.5f, 8.0f);
+            swr.fb = expected;
+            swrDrawSpriteRotatedInternal(&swr.base, x, y, width, 16, &texture, 1, 1, 45, 31,
+                                         swrConvertPixel(0x808080), 256, 37.0f, 10.5f, 8.0f);
+            if (memcmp(actual, expected, sizeof(actual)) || texture.rotatedRasters == NULL ||
+                texture.rotatedRasters->count != flip + 1) {
+                fprintf(stderr, "FAIL: translated raster flip=%d placement=%u\n", flip, i);
+                exit(1);
+            }
+            for (int j = 0; j < WIDTH * HEIGHT; ++j) {
+                uintpixel_t under = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));
+                int row = (j / WIDTH) >> SWR_DIRTY_TILE_H_SHIFT;
+                uint32_t tile = 1u << ((j % WIDTH) >> SWR_DIRTY_TILE_W_SHIFT);
+                if (actual[j] != under && !(dirty.rows[row] & tile)) {
+                    fprintf(stderr, "FAIL: translated raster missed dirty tile at pixel %d\n", j);
+                    exit(1);
+                }
+            }
+            checks += WIDTH * HEIGHT;
+        }
+    }
+    swrFreeRotatedRasters(&texture);
+    if (texture.rotatedRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
+}
+
 static void checkHalfTint(void)
 {
     for (unsigned src = 0; src <= 0xffff; src++) {
@@ -124,6 +182,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkTranslatedRotation();
     checkHalfTint();
     checkDoubledSprite();
     checkHalfBlend();

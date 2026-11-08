@@ -33,6 +33,7 @@ SWTexture* swrCreateTextureEx(const void* srcBuffer, int width, int height, bool
     txt->halfBuffer = NULL;
     txt->glyphHints = NULL;
     txt->buttonCache = NULL;
+    txt->rotatedRasters = NULL;
     txt->rowBounds = NULL;
     txt->halfRowBounds = NULL;
     txt->halfFullBounds = NULL;
@@ -139,6 +140,7 @@ void swrFreeTexture(SWTexture* texture)
     
     swrFreeGlyphHints(texture);
     swrFreeButtonCache(texture);
+    swrFreeRotatedRasters(texture);
     free(texture->halfBuffer); // the coverage, if any, is in the same allocation
     free(texture->rowBounds);
     free(texture->spans);
