@@ -43,14 +43,39 @@ static void checkBoxSampleSpan(void)
     if (from != 1 || to != 25) exit(1);
 }
 
-static void checkTranslatedRotation(void)
+static void checkPointSampleSpan(void)
 {
-    enum { WIDTH = 64, HEIGHT = 56, SRC_W = 47, SRC_H = 33 };
-    uintpixel_t source[SRC_W * SRC_H];
+    enum { UNIT = 1 << 14, WIDTH = 19 };
+    for (int flip = 0; flip < 2; ++flip) {
+        for (int left = 0; left < 62; left += 3) {
+            for (int end = left; end <= 65; end += 5) {
+                for (int step = UNIT; step <= 3 * UNIT; step += 4097) {
+                    const uint16_t bounds[] = { (uint16_t) left, (uint16_t) end };
+                    int from = 0, to = WIDTH;
+                    swrPointSampleSpan(bounds, 7, WIDTH, step, UNIT, flip != 0, &from, &to);
+                    for (int x = 0; x < WIDTH; ++x) {
+                        int col = 7 + (flip ? WIDTH - 1 - x : x) * step / UNIT;
+                        if ((col >= left && col < end) != (x >= from && x < to)) {
+                            fprintf(stderr, "FAIL: point sample span flip=%d at %d\n", flip, x);
+                            exit(1);
+                        }
+                        ++checks;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void checkTranslatedRotation(int sourceWidth, int sourceHeight, bool eye)
+{
+    enum { WIDTH = 64, HEIGHT = 56 };
+    int texWidth = sourceWidth + 2, texHeight = sourceHeight + 2;
+    uintpixel_t source[47 * 42];
     uintpixel_t actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
-    for (int i = 0; i < SRC_W * SRC_H; ++i)
+    for (int i = 0; i < texWidth * texHeight; ++i)
         source[i] = (i % 7 < 3) ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
-    SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
+    SWTexture texture = { .buffer = source, .width = (uint16_t) texWidth, .height = (uint16_t) texHeight, .immutable = true };
     SWRenderer swr = {0};
     swr.fb = swr.mainFb = actual;
     swr.fbPitch = WIDTH;
@@ -72,16 +97,19 @@ static void checkTranslatedRotation(void)
             swr.dirtyMark = &dirty;
             for (int j = 0; j < WIDTH * HEIGHT; ++j)
                 actual[j] = expected[j] = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));
-            int x = places[i][0] + (flip ? 22 : 0), y = places[i][1];
-            int width = flip ? -22 : 23;
+            int w = eye ? 20 : flip ? 22 : 23, h = eye ? 20 : 16;
+            int x = places[i][0] + (flip ? w : 0), y = places[i][1];
+            int width = flip ? -w : w;
+            uint32_t color = eye ? 0xffffff : 0x808080;
+            float px = eye ? 10.0f : 10.5f, py = eye ? 10.0f : 8.0f;
             swr.fb = actual;
-            swrDrawSpriteRotated(&swr.base, x, y, width, 16, &texture, 1, 1, 45, 31,
-                                 0x808080, 1.0f, 37.0f, 10.5f, 8.0f);
+            swrDrawSpriteRotated(&swr.base, x, y, width, h, &texture, 1, 1, sourceWidth, sourceHeight,
+                                 color, 1.0f, 37.0f, px, py);
             swr.fb = expected;
-            swrDrawSpriteRotatedInternal(&swr.base, x, y, width, 16, &texture, 1, 1, 45, 31,
-                                         swrConvertPixel(0x808080), 256, 37.0f, 10.5f, 8.0f, NULL);
-            if (memcmp(actual, expected, sizeof(actual)) || texture.rotatedRasters == NULL ||
-                texture.rotatedRasters->count != flip + 1) {
+            swrDrawSpriteRotatedInternal(&swr.base, x, y, width, h, &texture, 1, 1, sourceWidth, sourceHeight,
+                                         swrConvertPixel(color), 256, 37.0f, px, py, NULL);
+            SWRotatedRasterCache* cache = eye ? texture.eyeRasters : texture.rotatedRasters;
+            if (memcmp(actual, expected, sizeof(actual)) || cache == NULL || cache->count != flip + 1) {
                 fprintf(stderr, "FAIL: translated raster flip=%d placement=%u\n", flip, i);
                 exit(1);
             }
@@ -98,7 +126,7 @@ static void checkTranslatedRotation(void)
         }
     }
     swrFreeRotatedRasters(&texture);
-    if (texture.rotatedRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
+    if (texture.rotatedRasters != NULL || texture.eyeRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
 }
 
 static void checkStationaryVine(void)
@@ -256,7 +284,9 @@ int main(int argc, char** argv)
 {
     (void) argv;
     checkBoxSampleSpan();
-    checkTranslatedRotation();
+    checkPointSampleSpan();
+    checkTranslatedRotation(45, 31, false);
+    checkTranslatedRotation(40, 40, true);
     checkStationaryVine();
     checkHalfTint();
     checkDoubledSprite();

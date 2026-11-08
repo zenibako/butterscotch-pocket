@@ -34,6 +34,7 @@ SWTexture* swrCreateTextureEx(const void* srcBuffer, int width, int height, bool
     txt->glyphHints = NULL;
     txt->buttonCache = NULL;
     txt->rotatedRasters = NULL;
+    txt->eyeRasters = NULL;
     txt->stationaryRasters = NULL;
     txt->rowBounds = NULL;
     txt->halfRowBounds = NULL;

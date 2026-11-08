@@ -162,6 +162,7 @@ static SWTexture* loadFromPack(SWRenderer* swr, uint32_t pageId)
     texture->glyphHints = NULL;
     texture->buttonCache = NULL;
     texture->rotatedRasters = NULL;
+    texture->eyeRasters = NULL;
     texture->stationaryRasters = NULL;
     texture->rowBounds = NULL;
     texture->halfRowBounds = NULL;
@@ -329,6 +330,7 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->glyphHints = NULL;
     texture->buttonCache = NULL;
     texture->rotatedRasters = NULL;
+    texture->eyeRasters = NULL;
     texture->stationaryRasters = NULL;
     texture->rowBounds = NULL;
     texture->halfRowBounds = NULL;
