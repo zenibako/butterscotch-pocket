@@ -730,6 +730,9 @@ modes, not predictions whose savings can be added together. Profile
 instrumentation changes timing; its script totals are workload rankings, not
 baseline timings.
 
+The Flowey report's `45x31 raster` lines break down rotating pipe draws by
+cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
+
 On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
 `BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
 `BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,

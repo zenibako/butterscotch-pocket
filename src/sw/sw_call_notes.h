@@ -27,6 +27,18 @@ extern bool swrDrawTimed;
 // full, the one with the least time makes way for a new one.
 int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed);
 
+enum { SWR_PIPE_RASTER_W = 45, SWR_PIPE_RASTER_H = 31 };
+typedef enum {
+    SWR_RASTER_OTHER, SWR_RASTER_PIVOT, SWR_RASTER_WARM, SWR_RASTER_BUILT, SWR_RASTER_PATHS
+} SWRasterPath;
+typedef struct {
+    uint64_t nanos[SWR_RASTER_PATHS];
+    uint32_t calls[SWR_RASTER_PATHS];
+} SWPipeRasterNotes;
+
+// Breakdown of timed full-sprite 45x31 rotations, using the existing draw timer.
+extern SWRasterPath swrLastPipeRasterPath;
+void swrPipeRasterTake(SWPipeRasterNotes* out);
 
 // The sprite cost probe (swrSpriteCostProbe in sw_renderer.c) finds out where
 // a sprite draw's time goes by cutting the draw short at numbered stages and

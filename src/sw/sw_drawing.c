@@ -2106,6 +2106,16 @@ static void swrDrawSpriteRotatedInternal(
     #define SWR_TURNED_NEAR 2048
     #define SWR_TURNED_STEP_SPAN 2048
     #define SWR_TURNED_STEP_REACH 16000.0f
+    // The small pipe sprites take at most 96 steps at a scale ratio under 6.
+    // Step rounding contributes under 52 fixed units here. Keep a wider
+    // 256-unit margin for the float coordinate math and the texel boundaries.
+    int recheckBand = SWR_TURNED_NEAR;
+    if (sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H &&
+        maxXc - minXc <= 96 && dw >= 8 && dw <= 64 && dh >= 8 && dh <= 64 &&
+        pivotX >= 0.0f && pivotX <= dw && pivotY >= 0.0f && pivotY <= dh &&
+        dx >= -4096 && dx <= 4096 && dy >= -4096 && dy <= 4096)
+        recheckBand = 256;
+    uint32_t steppedSpan = (uint32_t) (0x10000 - 2 * recheckBand);
     // A step across the screen moves the texel by this much each way.
     float texStepXf = cosA * sw_dw * 65536.0f, texStepYf = -sinA * sh_dh * 65536.0f;
     bool steppable = sw < 8192 && sh < 8192 &&
@@ -2168,7 +2178,7 @@ static void swrDrawSpriteRotatedInternal(
         // That drifts from the sum by a few thousandths of a texel over a
         // row, which only matters to a pixel that lands that close to the
         // line between two texels or to the sprite's edge. Any pixel within
-        // SWR_TURNED_NEAR of one is worked out by the sum as before; for the
+        // the recheck band is worked out by the sum as before; for the
         // rest the two agree on the texel, so the picture is the same.
         bool stepped = steppable && rowTo - rowFrom <= SWR_TURNED_STEP_SPAN;
         int32_t texX = 0, texY = 0; // the unmirrored texel coordinate, 16.16
@@ -2192,8 +2202,8 @@ static void swrDrawSpriteRotatedInternal(
         {
             int tx, ty;
             // Far enough from every line between texels (the sprite's edges are two of them)?
-            if (stepped && (uint32_t) ((texX & 0xFFFF) - SWR_TURNED_NEAR) < (uint32_t) (0x10000 - 2 * SWR_TURNED_NEAR) &&
-                           (uint32_t) ((texY & 0xFFFF) - SWR_TURNED_NEAR) < (uint32_t) (0x10000 - 2 * SWR_TURNED_NEAR))
+            if (stepped && (uint32_t) ((texX & 0xFFFF) - recheckBand) < steppedSpan &&
+                           (uint32_t) ((texY & 0xFFFF) - recheckBand) < steppedSpan)
             {
                 int wholeX = texX >> 16, wholeY = texY >> 16;
                 if ((uint32_t) wholeX >= (uint32_t) sw || (uint32_t) wholeY >= (uint32_t) sh) continue;
@@ -3582,7 +3592,7 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
 // Keep translated pipe and eye poses separate from stationary vine poses.
-enum { SWR_RASTER_W = 45, SWR_RASTER_H = 31, SWR_RASTER_SLOTS = 64,
+enum { SWR_RASTER_SLOTS = 64,
        SWR_RASTER_BYTES = 192 * 1024, SWR_RASTER_BUILDS = 8,
        SWR_VINE_W = 511, SWR_VINE_H = 33, SWR_VINE_SLOTS = 12, SWR_VINE_BYTES = 256 * 1024,
        SWR_EYE_SIZE = 40, SWR_EYE_BYTES = 128 * 1024, SWR_EYE_BUILDS = 2,
@@ -3695,25 +3705,25 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
     return entry;
 }
 
-static bool swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int y,
-                                  const SWRasterKey* key, bool stationary)
+static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int y,
+                                         const SWRasterKey* key, bool stationary)
 {
-    if (x < -4096 || x > 4096 || y < -4096 || y > 4096 || !isfinite(key->angle)) return false;
+    if (x < -4096 || x > 4096 || y < -4096 || y > 4096 || !isfinite(key->angle)) return SWR_RASTER_OTHER;
     // With a half-grid pivot and bounded integer positions, translating the
     // draw preserves the inverse sampler's pixel-center offsets exactly.
     if (!stationary && (key->dw == 0 || key->dw < -64 || key->dw > 64 ||
-                        key->dh == 0 || key->dh < -64 || key->dh > 64)) return false;
+                        key->dh == 0 || key->dh < -64 || key->dh > 64)) return SWR_RASTER_OTHER;
     int w = swrAbs(key->dw), h = swrAbs(key->dh);
     if (!(key->px >= 0.0f && key->px <= w && key->py >= 0.0f && key->py <= h) ||
-        (!stationary && (key->px * 2 != (int) (key->px * 2) || key->py * 2 != (int) (key->py * 2)))) return false;
+        (!stationary && (key->px * 2 != (int) (key->px * 2) || key->py * 2 != (int) (key->py * 2)))) return SWR_RASTER_PIVOT;
     bool eye = key->sw == SWR_EYE_SIZE;
     SWRotatedRasterCache** slot = stationary ? &texture->stationaryRasters :
                                 eye ? &texture->eyeRasters : &texture->rotatedRasters;
     SWRotatedRasterCache* cache = *slot;
     if (cache == NULL) {
-        if (sizeof(*cache) > SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes) return false;
+        if (sizeof(*cache) > SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes) return SWR_RASTER_OTHER;
         cache = calloc(1, sizeof(*cache));
-        if (cache == NULL) return false;
+        if (cache == NULL) return SWR_RASTER_OTHER;
         *slot = cache;
         cache->bytes = sizeof(*cache);
         swrRotatedRasterBytes += sizeof(*cache);
@@ -3727,20 +3737,22 @@ static bool swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int
             break;
         }
     }
+    SWRasterPath path = SWR_RASTER_WARM;
     if (entry == NULL) {
         if (cache->frame != swr->frameCounter) {
             cache->frame = swr->frameCounter;
             cache->builds = 0;
         }
         int buildLimit = stationary ? 1 : eye ? SWR_EYE_BUILDS : SWR_RASTER_BUILDS;
-        if (cache->builds == buildLimit) return false;
+        if (cache->builds == buildLimit) return SWR_RASTER_OTHER;
         // The Manhattan extent bounds the rotated corners in both axes.
         int radius = stationary ? 0 : swrCeiling(fmaxf(key->px, w - key->px) + fmaxf(key->py, h - key->py)) + 2;
-        if (radius > 64) return false;
+        if (radius > 64) return SWR_RASTER_OTHER;
         cache->builds++;
         size_t limit = stationary ? SWR_VINE_BYTES : eye ? SWR_EYE_BYTES : SWR_RASTER_BYTES;
         entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, limit);
-        if (entry == NULL) return false;
+        if (entry == NULL) return SWR_RASTER_OTHER;
+        path = SWR_RASTER_BUILT;
     }
     int right = swr->portX + swr->portW, bottom = swr->portY + swr->portH;
     const uintpixel_t* colors = (const uintpixel_t*) (entry->spans + entry->count);
@@ -3754,7 +3766,7 @@ static bool swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int
         swrDirtyRow(swr, row, first, last);
         swrCopyPixels(swr->fb + row * swr->fbPitch + first, colors + span.offset + first - col, last - first);
     }
-    return true;
+    return path;
 }
 
 static void swrFreeRasterCache(SWRotatedRasterCache** slot)
@@ -3798,7 +3810,7 @@ void swrDrawSpriteRotated(
     int opacity = swrIntAlpha(alpha);
 
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
-    bool pipe = sw == SWR_RASTER_W && sh == SWR_RASTER_H;
+    bool pipe = sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H;
     bool eye = sw == SWR_EYE_SIZE && sh == SWR_EYE_SIZE && (packed & 0x7fff) == 0x7fff &&
                w >= -SWR_EYE_SIZE && w <= SWR_EYE_SIZE && h >= -SWR_EYE_SIZE && h <= SWR_EYE_SIZE;
     bool vine = sw == SWR_VINE_W && sh == SWR_VINE_H && (packed & 0x7fff) == 0x7fff &&
@@ -3816,7 +3828,11 @@ void swrDrawSpriteRotated(
             key.portX = swr->portX; key.portY = swr->portY;
             key.portW = swr->portW; key.portH = swr->portH;
         }
-        if (swrDrawRotatedRaster(swr, texture, x, y, &key, vine)) return;
+        SWRasterPath path = swrDrawRotatedRaster(swr, texture, x, y, &key, vine);
+#ifdef SW_DRAW_PROFILE
+        if (pipe && swrCallNotes && swrDrawTimed) swrLastPipeRasterPath = path;
+#endif
+        if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
     }
 #endif
     

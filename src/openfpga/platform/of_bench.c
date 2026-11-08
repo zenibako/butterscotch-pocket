@@ -30,6 +30,7 @@ static OfPerfTotals g_sectionTotals[OF_BENCH_MAX_SECTIONS];
 static SWCallNote g_sectionNotes[OF_BENCH_MAX_SECTIONS][OF_BENCH_NOTES];
 static int g_sectionNoteCount[OF_BENCH_MAX_SECTIONS];
 static uint32_t g_sectionNotesMissed[OF_BENCH_MAX_SECTIONS];
+static SWPipeRasterNotes g_sectionPipeRaster[OF_BENCH_MAX_SECTIONS];
 static unsigned g_firstFrameMs = 0;
 
 /* Draw calls and mixing are timed on one frame in this many: timing them
@@ -226,6 +227,11 @@ void ofBenchAddFlipTime(uint64_t nanos) {
     if (g_running) g_flipNanos += nanos;
 }
 
+static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
+    unsigned calls = notes->calls[path];
+    return calls ? (unsigned) (notes->nanos[path] / ((uint64_t) calls * 1000u)) : 0;
+}
+
 void ofBenchFrame(Runner *runner) {
     if (!g_running) return;
 
@@ -238,6 +244,7 @@ void ofBenchFrame(Runner *runner) {
         ofPerfTakeTotals(NULL); /* loading is not part of the first section */
         swrCallNotes = true;
         swrCallNotesTake(NULL, 0, NULL);
+        swrPipeRasterTake(NULL);
     }
     g_frame++;
     if (g_frame < section->lastFrame) return;
@@ -259,6 +266,7 @@ void ofBenchFrame(Runner *runner) {
     g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
     ofPerfTakeTotals(&g_sectionTotals[g_section]);
     g_sectionNoteCount[g_section] = swrCallNotesTake(g_sectionNotes[g_section], OF_BENCH_NOTES, &g_sectionNotesMissed[g_section]);
+    swrPipeRasterTake(&g_sectionPipeRaster[g_section]);
     g_sectionStart = now;
     g_flipNanos = 0;
     if (++g_section < g_def.sectionCount) return;
@@ -361,6 +369,17 @@ void ofBenchFrame(Runner *runner) {
                    (unsigned) (t->drawCalls[1] / frames), (unsigned) (t->drawCalls[2] / frames),
                    (unsigned) (t->drawCalls[3] / frames), (unsigned) (t->drawCalls[4] / frames));
         firstFrame = g_def.sections[i].lastFrame;
+    }
+    for (int i = 0; i < g_def.sectionCount; i++) {
+        const SWPipeRasterNotes *notes = &g_sectionPipeRaster[i];
+        if (!(notes->calls[SWR_RASTER_WARM] || notes->calls[SWR_RASTER_BUILT] ||
+              notes->calls[SWR_RASTER_PIVOT] || notes->calls[SWR_RASTER_OTHER])) continue;
+        ofLogPrint("%s 45x31 raster: warm %u/%uus build %u/%uus\n", g_def.sections[i].tag,
+                   (unsigned) notes->calls[SWR_RASTER_WARM], pipeMicros(notes, SWR_RASTER_WARM),
+                   (unsigned) notes->calls[SWR_RASTER_BUILT], pipeMicros(notes, SWR_RASTER_BUILT));
+        ofLogPrint("  pivot %u/%uus other %u/%uus\n",
+                   (unsigned) notes->calls[SWR_RASTER_PIVOT], pipeMicros(notes, SWR_RASTER_PIVOT),
+                   (unsigned) notes->calls[SWR_RASTER_OTHER], pipeMicros(notes, SWR_RASTER_OTHER));
     }
     /* For the last few sections, the draw calls that cost the most, grouped
      * by what was asked for: ms per frame, calls per frame (in tenths), what.

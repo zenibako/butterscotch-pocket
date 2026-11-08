@@ -24,6 +24,15 @@ static int swrPendingCount = 0; // tile pictures being held (see the tile run ca
 bool swrCallNotes = false;
 bool swrDrawTimed = true;
 int swrProbeStop = 0, swrProbePath = 0;
+SWRasterPath swrLastPipeRasterPath;
+static SWPipeRasterNotes swrPipeRasterNotes;
+
+void swrPipeRasterTake(SWPipeRasterNotes* out)
+{
+    if (out != NULL) *out = swrPipeRasterNotes;
+    memset(&swrPipeRasterNotes, 0, sizeof(swrPipeRasterNotes));
+}
+
 #ifdef SW_DRAW_PROFILE
 static bool swrProbing = false;   // no counting of calls, and so no audio top-ups, while the probe times them
 static int32_t swrProbeGridSprite = -1;
@@ -3047,9 +3056,19 @@ void swrSpriteCostProbe(Renderer* renderer, int calls, int32_t* width, int32_t* 
 
 static void SWRenderer_profDrawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha)
 {
+    const TexturePageItem* tpag = NULL;
+    if (swrCallNotes && swrDrawTimed && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count)
+        tpag = &renderer->dataWin->tpag.items[tpagIndex];
+    bool pipe = tpag != NULL && tpag->sourceWidth == SWR_PIPE_RASTER_W &&
+                tpag->sourceHeight == SWR_PIPE_RASTER_H && !SWR_SKIPPED((SWRenderer*) renderer) &&
+                swrMustRotate(angleDeg);
+    if (pipe) swrLastPipeRasterPath = SWR_RASTER_OTHER;
     SWR_PROFILED(SWR_PROF_SPRITE, SWRenderer_drawSprite(renderer, tpagIndex, x, y, originX, originY, xscale, yscale, angleDeg, color, alpha));
-    if (swrCallNotes && swrDrawTimed && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count) {
-        const TexturePageItem* tpag = &renderer->dataWin->tpag.items[tpagIndex];
+    if (tpag != NULL) {
+        if (pipe) {
+            swrPipeRasterNotes.calls[swrLastPipeRasterPath]++;
+            swrPipeRasterNotes.nanos[swrLastPipeRasterPath] += swrProfLast;
+        }
         SWNoteKey key = { .kind = SWR_NOTE_SPRITE, .alpha = (int16_t) (alpha * 100.0f), .a = tpag->targetWidth, .b = tpag->targetHeight,
                           .c = (int32_t) (xscale * 10.0f),
                           .flags = (uint8_t) ((angleDeg != 0.0f ? SWR_NOTE_TURNED : 0) | ((color & 0xFFFFFF) != 0xFFFFFF ? SWR_NOTE_TINTED : 0)) };

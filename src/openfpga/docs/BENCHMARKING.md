@@ -93,6 +93,12 @@ checkpoints. The `vset` and `fset` rows include entry and warmup and should
 be kept separate from attack timing. Flowey uses the same `bs_bullet_1.sav`
 report slot as the Asriel tour.
 
+The `45x31 raster` lines show the number of rotated sprite calls on the timed
+frames and the mean microseconds per call. `warm` reuses a cached raster,
+`build` creates and blits one, `pivot` bypasses the cache because the pivot
+is outside the supported range or off its half-pixel grid, and `other` covers
+remaining fallbacks. These calls also appear in the ordinary sprite totals.
+
 Start with repeated paired Accuracy and Speed runs on the same Pocket. Add No
 Render, No Audio, Core Only and Profile only when attribution is needed. Record
 the actual ELF, version, flags and package hash privately with the collected
