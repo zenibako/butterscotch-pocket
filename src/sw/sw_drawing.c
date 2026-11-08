@@ -1742,6 +1742,22 @@ static void swrDrawSpriteInternal(
     }
 }
 
+// Sprite chains reuse the same angles. Cache their exact float keys so nearby
+// angles keep their own sine and cosine and the sampler retains its rounding.
+static SWRotation swrSpriteRotation(SWRenderer* swr, float angleDeg)
+{
+    uint32_t key;
+    memcpy(&key, &angleDeg, sizeof(key));
+    uint32_t hash = (key ^ (key >> 16)) * 0x9e3779b9u;
+    SWRotation* entry = &swr->rotationCache[hash >> 26];
+    if (key != 0 && entry->angleBits == key) return *entry;
+
+    float radians = -angleDeg * M_PI / 180.0f;
+    SWRotation result = { key, cosf(radians), sinf(radians) };
+    *entry = result;
+    return result;
+}
+
 static void swrDrawSpriteRotatedInternal(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -1752,14 +1768,13 @@ static void swrDrawSpriteRotatedInternal(
 )
 {
     SWRenderer* swr = (SWRenderer*) renderer;
-    float angleRad = -angleDeg * M_PI / 180.0f;
     
     bool flipX = false, flipY = false;
     if (dw < 0) { dw = -dw; dx -= dw; pivotX = dw - pivotX; flipX = true; }
     if (dh < 0) { dh = -dh; dy -= dh; pivotY = dh - pivotY; flipY = true; }
     
-    float cosA = cosf(angleRad);
-    float sinA = sinf(angleRad);
+    SWRotation rotation = swrSpriteRotation(swr, angleDeg);
+    float cosA = rotation.cosine, sinA = rotation.sine;
     
     float cnrx[4], cnry[4];
     cnrx[0] = cnrx[3] = dx;
@@ -1831,13 +1846,19 @@ static void swrDrawSpriteRotatedInternal(
     // Each edge's x for a row is its x at its first corner plus the row's
     // distance from that corner times its slope; a level edge crosses no row.
     #define SWR_TURNED_SPARE 2.0f
-    float edgeSlope[4];
+    float edgeSlope[4], edgeLow[4], edgeHigh[4], edgeReach[4];
     bool edgeLevel[4];
     for (int e = 0; e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
     {
-        float ex = quadX[(e + 1) & 3] - quadX[e], ey = quadY[(e + 1) & 3] - quadY[e];
+        int next = (e + 1) & 3;
+        float y0 = quadY[e], y1 = quadY[next];
+        float ex = quadX[next] - quadX[e], ey = y1 - y0;
         edgeLevel[e] = ey > -0.001f && ey < 0.001f;
-        edgeSlope[e] = edgeLevel[e] ? 0.0f : ex / ey;
+        float slope = edgeLevel[e] ? 0.0f : ex / ey;
+        edgeSlope[e] = slope;
+        edgeReach[e] = slope < 0.0f ? -slope : slope;
+        edgeLow[e] = (y0 < y1 ? y0 : y1) - 1.0f;
+        edgeHigh[e] = (y0 < y1 ? y1 : y0) + 1.0f;
     }
     
     // The numbers the loop needs as floats are worked out once: a conversion
@@ -1845,6 +1866,7 @@ static void swrDrawSpriteRotatedInternal(
     // These are the same values the conversions gave.
     float soxf = (float) sox, soyf = (float) soy, sixf = (float) six, siyf = (float) siy;
     float dwf = (float) dw, dhf = (float) dh;
+    float localPivotX = pxa - dx, localPivotY = pya - dy;
     
     // A pixel's distance across from the pivot depends on its column alone,
     // so it is worked out once for each column the draw can reach, by the
@@ -1880,9 +1902,7 @@ static void swrDrawSpriteRotatedInternal(
         float rowLeft = FLT_MAX, rowRight = -FLT_MAX;
         for (int i = 0; i < 4; i++)
         {
-            float y0 = quadY[i], y1 = quadY[(i + 1) & 3];
-            float low = y0 < y1 ? y0 : y1, high = y0 < y1 ? y1 : y0;
-            if (rowY < low - 1.0f || rowY > high + 1.0f) continue;
+            if (rowY < edgeLow[i] || rowY > edgeHigh[i]) continue;
             if (edgeLevel[i]) {
                 float x0 = quadX[i], x1 = quadX[(i + 1) & 3];
                 if (rowLeft > x0) rowLeft = x0;
@@ -1893,8 +1913,8 @@ static void swrDrawSpriteRotatedInternal(
             }
             // The crossing, and where it would be a row up and a row down:
             // near a corner the edge may end short of this row's middle.
-            float at = quadX[i] + (rowY - y0) * edgeSlope[i];
-            float reach = edgeSlope[i] < 0.0f ? -edgeSlope[i] : edgeSlope[i];
+            float at = quadX[i] + (rowY - quadY[i]) * edgeSlope[i];
+            float reach = edgeReach[i];
             if (rowLeft > at - reach) rowLeft = at - reach;
             if (rowRight < at + reach) rowRight = at + reach;
         }
@@ -1907,6 +1927,7 @@ static void swrDrawSpriteRotatedInternal(
         uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
         // Only this span can affect the buffer's next partial clear.
         swrDirtyRow(swr, cy, rowFrom, rowTo);
+        float oy = rowY - pya;
         
         // Along a row the texel a pixel takes moves by the same amount at
         // every step, so it is followed in whole numbers (sixteen bits below
@@ -1920,11 +1941,10 @@ static void swrDrawSpriteRotatedInternal(
         int32_t texX = 0, texY = 0; // the unmirrored texel coordinate, 16.16
         if (stepped) {
             float ox = acrossHeld ? acrossKept[rowFrom - minXc] : (float) rowFrom + 0.5f - pxa;
-            float oy = cyf + 0.5f - pya;
             float lx =  cosA * ox + sinA * oy;
             float ly = -sinA * ox + cosA * oy;
-            lx += pxa - dx;
-            ly += pya - dy;
+            lx += localPivotX;
+            ly += localPivotY;
             lx = lx * sw_dw;
             ly = ly * sh_dh;
             if (lx > -SWR_TURNED_STEP_REACH && lx < SWR_TURNED_STEP_REACH && ly > -SWR_TURNED_STEP_REACH && ly < SWR_TURNED_STEP_REACH) {
@@ -1955,15 +1975,14 @@ static void swrDrawSpriteRotatedInternal(
             {
                 // we need to determine the texture-space coordinate of cx/cy
                 float ox = acrossHeld ? acrossKept[cx - minXc] : (float) cx + 0.5f - pxa;
-                float oy = cyf + 0.5f - pya;
                 
                 // "undo" the rotation
                 float lx =  cosA * ox + sinA * oy;
                 float ly = -sinA * ox + cosA * oy;
                 
                 // turn it into a texture-local coordinate
-                lx += pxa - dx;
-                ly += pya - dy;
+                lx += localPivotX;
+                ly += localPivotY;
                 
                 if (lx < 0 || ly < 0 || lx >= dwf || ly >= dhf) continue;
                 

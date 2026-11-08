@@ -132,6 +132,13 @@ typedef struct {
     bool solid;
 } SWMirrorLayer;
 
+typedef struct {
+    uint32_t angleBits;
+    float cosine, sine;
+} SWRotation;
+
+#define SWR_ROTATION_CACHE_SIZE 64
+
 typedef struct
 {
     Renderer base;
@@ -243,6 +250,8 @@ typedef struct
     int primitiveType;
     bool primitiveBegun;
     bool primitiveOverflow;
+
+    SWRotation rotationCache[SWR_ROTATION_CACHE_SIZE];
 }
 SWRenderer;
 
