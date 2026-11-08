@@ -207,6 +207,9 @@ int main(void)
     for (unsigned a = 0; a < sizeof(angles) / sizeof(angles[0]); a++) {
         for (int flip = 0; flip < 2; flip++) {
             if (!checkRotatedDraw(&clipped, &texture, angles[a], flip, 0xffffff, 1.0f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 1.0f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 0.5f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 1.0f, bm_add) ||
                 !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 1.0f, bm_normal) ||
                 !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 0.5f, bm_normal) ||
                 !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 1.0f, bm_add)) return 1;

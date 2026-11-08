@@ -6,6 +6,18 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkHalfTint(void)
+{
+    for (unsigned src = 0; src <= 0xffff; src++) {
+        uintpixel_t expected = tint(0xc210, (uintpixel_t) src);
+        if (swrTintHalf((uintpixel_t) src) != expected) {
+            fprintf(stderr, "FAIL: half tint src=%x\n", src);
+            exit(1);
+        }
+        ++checks;
+    }
+}
+
 static void checkDoubledSprite(void)
 {
     enum { SRC_PITCH = 9, DST_PITCH = 20, ROWS = 10 };
@@ -112,6 +124,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkHalfTint();
     checkDoubledSprite();
     checkHalfBlend();
     negativeControl = argc > 1;

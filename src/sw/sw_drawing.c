@@ -1837,6 +1837,9 @@ static void swrDrawSpriteRotatedInternal(
     ptrdiff_t srcOffset = (ptrdiff_t) sy * srcPitch + sx;
     
     int blendmode = swr->blendMode;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
+    bool copyHalfTint = blendmode == bm_normal && alpha > 253 && (tintColor & 0x7fff) == 0x4210;
+#endif
 
     // Half of the box round a turned sprite is outside the sprite, and the
     // test below costs a pixel there most of what one inside costs. So each
@@ -2001,8 +2004,15 @@ static void swrDrawSpriteRotatedInternal(
             
             uintpixel_t src = srcPixels[srcOffset + (ptrdiff_t) ty * srcPitch + tx];
 
-            if (swrIsOpaque(src))
+            if (swrIsOpaque(src)) {
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
+                if (copyHalfTint) {
+                    dstline[cx] = swrTintHalf(src);
+                    continue;
+                }
+#endif
                 alphaBlend(&dstline[cx], tint(tintColor, src), blendmode, alpha);
+            }
 #ifndef SW_NO_SEMI_TRANSPARENT_TEXTURE_SUPPORT
             else if (!swrIsFullyTransparent(src))
                 swrCalculateAlphaBlending(&dstline[cx], src, tintColor, alpha, blendmode);
