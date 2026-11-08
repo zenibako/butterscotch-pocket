@@ -165,6 +165,7 @@ static SWTexture* loadFromPack(SWRenderer* swr, uint32_t pageId)
     texture->eyeRasters = NULL;
     texture->stationaryRasters = NULL;
     texture->rowBounds = NULL;
+    texture->pipeSolidBounds = NULL;
     texture->halfRowBounds = NULL;
     texture->halfFullBounds = NULL;
     texture->spans = texture->halfSpans = NULL;
@@ -333,6 +334,7 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->eyeRasters = NULL;
     texture->stationaryRasters = NULL;
     texture->rowBounds = NULL;
+    texture->pipeSolidBounds = NULL;
     texture->halfRowBounds = NULL;
     texture->halfFullBounds = NULL;
     texture->spans = texture->halfSpans = NULL;

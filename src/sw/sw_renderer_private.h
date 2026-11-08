@@ -83,6 +83,7 @@ typedef struct
     // immutable texture only (swrRowBounds); the half-size copy's are made
     // with it and live in its allocation.
     uint16_t* rowBounds;
+    uint16_t* pipeSolidBounds; // longest fully opaque point and 2x2 runs per row
     uint16_t* halfRowBounds;
     uint16_t* halfFullBounds; // per row of the half-size copy, the longest run of texels standing for all four of theirs: [start, end)
     // For each row, the runs of opaque texels other than spansColor, so that a
@@ -204,6 +205,10 @@ typedef struct
     int overlayFirstAlpha;
     float overlayKeep;              // share of the destination that still shows through
     float overlayRed, overlayGreen, overlayBlue; // accumulated colour, 5-bit channel * 256
+
+    SWSpriteCall pipeCalls[3];
+    int pipeCount;
+    struct SWPipeLayer* pipePlan;
     
     // Translucent layers drawn as four mirrored quarters, held back so that one
     // quarter can be blended and copied to the other three (see swrMirrorFlush).

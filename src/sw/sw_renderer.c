@@ -334,6 +334,7 @@ static void SWRenderer_init(Renderer* renderer, DataWin* dataWin)
 static void SWRenderer_destroy(Renderer* renderer)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->pipeCount != 0) swrOverlayFlush(swr);
     VMBuiltins_resetD3D(renderer);
 
     swr->primitiveBegun = false;
@@ -753,7 +754,7 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
         // held clear, it is the clear's colour again, so the fill below takes
         // the clear instead of writing it out first (a battle's backdrop over
         // the room's floor grid).
-        if (swr->clearHeld && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0) {
+        if (swr->clearHeld && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0) {
             swr->uniformValid = true;
             swr->uniformColor = swr->clearHeldColor;
         }
@@ -763,7 +764,7 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
 #endif
     
     // Still one colour if the flush has nothing to draw; a fill with that colour is then redundant.
-    bool nothingHeld = swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0;
+    bool nothingHeld = swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
 #if PIXEL_SIZE == 16
     // A translucent fill of the whole buffer over a held clear and its tiled
     // passes, with nothing else held: it joins them (swrFillHold).
@@ -912,7 +913,7 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
     // A clear of the whole main buffer still held, with nothing over it but
     // tiled passes held already: this one can be held with them.
     bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
-                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0;
+                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
     DataWin* dwin = renderer->dataWin;
 
     if (0 > tpagIndex || dwin->tpag.count <= (uint32_t) tpagIndex) return;
@@ -1460,6 +1461,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.glyphHints = NULL;
     localSurface.buttonCache = NULL;
     localSurface.rowBounds = NULL;
+    localSurface.pipeSolidBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
     localSurface.spans = localSurface.halfSpans = NULL;
@@ -2264,7 +2266,7 @@ static bool SWRenderer_drawSpriteGrid(Renderer* renderer, int32_t spriteIndex, c
     
     // A grid joins the ones held if nothing has been drawn or held since:
     // only tile pictures can have been, over grids that lie under them.
-    bool joins = swrGrid.count > 0 && (swrGrid.above || swrPendingCount == 0) && swrGrid.count < SWR_GRID_MAX &&
+    bool joins = swr->pipeCount == 0 && swrGrid.count > 0 && (swrGrid.above || swrPendingCount == 0) && swrGrid.count < SWR_GRID_MAX &&
                  swrGrid.cells + cols * rows <= SWR_GRID_MAX_CELLS;
     if (!joins) {
         // The first grid goes over the tile pictures being held, if any, and

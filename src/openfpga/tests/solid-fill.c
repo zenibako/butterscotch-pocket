@@ -6,6 +6,68 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkPipeLayers(void)
+{
+    enum { WIDTH = 200, HEIGHT = 156, SRC_W = 190, SRC_H = 181 };
+    static uintpixel_t actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
+    SWTexture* texture = swrCreateTextureEx(NULL, SRC_W, SRC_H, false);
+    texture->immutable = true;
+    for (int y = 0; y < SRC_H; ++y) {
+        for (int x = 0; x < SRC_W; ++x) {
+            if (x > 9 + y % 23 && x < SRC_W - 6 - y % 29 && (x + 2 * y) % 31 != 0)
+                texture->buffer[y * SRC_W + x] = (uintpixel_t) (0x8000 | ((x * 57 + y * 277) & 0x7fff));
+        }
+    }
+    for (int speed = 0; speed < 2; ++speed) {
+        swrFavorSpeed = swrSmoothMinify = speed != 0;
+        for (int flip = 0; flip < 2; ++flip) {
+            for (int interrupt = 0; interrupt < 2; ++interrupt) {
+                SWRenderer batch = {0};
+                batch.fb = batch.mainFb = actual;
+                batch.fbPitch = WIDTH;
+                batch.portX = batch.viewX = 7;
+                batch.portY = batch.viewY = 3;
+                batch.maxX = WIDTH - 4;
+                batch.maxY = HEIGHT - 6;
+                batch.portW = batch.maxX - batch.portX;
+                batch.portH = batch.maxY - batch.portY;
+                batch.scaleX = batch.scaleY = 1.0f;
+                batch.blendMode = bm_normal;
+                batch.overlayMergeAllowed = true;
+                SWRenderer reference = batch;
+                reference.fb = reference.mainFb = expected;
+                SWTexture* referenceTexture = swrCopyTexture(texture);
+                referenceTexture->immutable = true;
+                for (int i = 0; i < WIDTH * HEIGHT; ++i)
+                    actual[i] = expected[i] = (uintpixel_t) (0x8000 | ((i * 7919) & 0x7fff));
+                for (int layer = 0; layer < 3; ++layer) {
+                    int w = (speed ? 95 : 190) + layer - 1;
+                    int h = speed ? 91 : 181;
+                    int x = (flip ? 73 + w - layer * 10 : -10 + layer * 11);
+                    int y = -5 + layer * 7;
+                    uint32_t tint = layer == 2 ? 0xffffff : 0x999999;
+                    swrDrawSprite(&batch.base, x, y, flip ? -w : w, h, texture, 0, 0, SRC_W, SRC_H, tint, 1.0f);
+                    swrDrawSpriteInternal(&reference.base, x, y, flip ? -w : w, h, referenceTexture,
+                                          0, 0, SRC_W, SRC_H, swrConvertPixel(tint), 256, false, SWR_CONTRAST_NONE);
+                    int pending = interrupt && layer == 2 ? 1 : (layer + 1) % 3;
+                    if (batch.pipeCount != pending) exit(1);
+                    if (interrupt && layer == 1) swrOverlayFlush(&batch);
+                }
+                swrOverlayFlush(&batch);
+                swrOverlayFlush(&reference);
+                if (memcmp(actual, expected, sizeof(actual))) {
+                    fprintf(stderr, "FAIL: pipe composite speed=%d flip=%d interrupted=%d\n", speed, flip, interrupt);
+                    exit(1);
+                }
+                checks += WIDTH * HEIGHT;
+                swrFreeTexture(referenceTexture);
+            }
+        }
+    }
+    swrFavorSpeed = swrSmoothMinify = false;
+    swrFreeTexture(texture);
+}
+
 static void checkBoxSampleSpan(void)
 {
     enum { UNIT = 1 << 14, WIDTH = 96 };
@@ -283,6 +345,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkPipeLayers();
     checkBoxSampleSpan();
     checkPointSampleSpan();
     checkTranslatedRotation(45, 31, false);

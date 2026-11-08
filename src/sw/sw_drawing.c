@@ -164,6 +164,27 @@ MAYBE_UNUSED static const uint16_t* swrRowBounds(SWTexture* texture)
 }
 
 #ifdef SW_HAS_PREMUL_BLEND
+FORCE_INLINE int swrAverageBox(uintpixel_t t0, uintpixel_t t1, uintpixel_t t2, uintpixel_t t3, uintpixel_t* out)
+{
+    if (t0 == t1 && t0 == t2 && t0 == t3) {
+        *out = t0;
+        return swrIsOpaque(t0) ? 4 : 0;
+    }
+    uint32_t red = 0, green = 0, blue = 0;
+    int covered = 0;
+    #define SW_ACCUMULATE(texel) \
+        if (swrIsOpaque(texel)) { \
+            red += ((texel) >> 10) & 31u; green += ((texel) >> 5) & 31u; blue += (texel) & 31u; covered++; \
+        }
+    SW_ACCUMULATE(t0) SW_ACCUMULATE(t1) SW_ACCUMULATE(t2) SW_ACCUMULATE(t3)
+    #undef SW_ACCUMULATE
+    static const uint32_t reciprocal[5] = { 0, 65536, 32768, 21846, 16384 };
+    uint32_t scale = reciprocal[covered];
+    *out = (uintpixel_t) (0x8000 | (((red * scale) >> 16) << 10) |
+                         (((green * scale) >> 16) << 5) | ((blue * scale) >> 16));
+    return covered;
+}
+
 FORCE_INLINE int swrFirstSampleAtColumn(int col, int step, int unit)
 {
     return col <= 0 ? 0 : 1 + (col * unit - 1) / step;
@@ -693,6 +714,31 @@ static void swrDrawSpriteInternal(
 #ifdef SW_HAS_PREMUL_BLEND
 #define SW_MIRROR_MIN_PIXELS 4096
 
+typedef struct SWPipeLayer {
+    const uintpixel_t* pixels;
+    const uint16_t* bounds;
+    const uint16_t* solidBounds;
+    const uint8_t* coverage;
+    int pitch, dx, dy, dw, dh, sx, sy, right, bottom, xstep, ystep;
+    uintpixel_t tint;
+    int alpha;
+    bool flipX, box;
+} SWPipeLayer;
+
+static const uint16_t* swrPipeSolidBounds(SWTexture* texture);
+
+static void swrFlushPipeLayers(SWRenderer* swr)
+{
+    int count = swr->pipeCount;
+    swr->pipeCount = 0;
+    for (int i = 0; i < count; ++i) {
+        const SWSpriteCall* call = &swr->pipeCalls[i];
+        swrDrawSpriteInternal(&swr->base, call->dx, call->dy, call->dw, call->dh, call->texture,
+                              call->sx, call->sy, call->sw, call->sh, call->tintColor, call->alpha,
+                              false, SWR_CONTRAST_NONE);
+    }
+}
+
 static void swrMirrorReplay(SWRenderer* swr, const SWSpriteCall* call)
 {
     swrDrawSpriteInternal((Renderer*) swr, call->dx, call->dy, call->dw, call->dh, call->texture,
@@ -1002,7 +1048,7 @@ void swrOverlayFlushForState(SWRenderer* swr)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     swrTileRunsFlush(swr); // takes the clear along if there were pictures
-    if (swr->clearHeld && !swrGridHeld() && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0) {
+    if (swr->clearHeld && !swrGridHeld() && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0) {
         bool uniform = swr->uniformValid;
         swr->clearHeld = false;
         swrOverlayFlush(swr);
@@ -1022,7 +1068,7 @@ void swrOverlayFlush(SWRenderer* swr)
     // and a held clear is older still: the pictures take it with them, and
     // it stays held for a run of tiles coming in to do the same.
     // A held grid lies between the two. With anything else held as well, all of it goes.
-    bool othersHeld = swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0;
+    bool othersHeld = swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0 || swr->pipeCount != 0;
     if (!swr->tileRunEntering || othersHeld) {
         swrTileRunsFlush(swr);
         swrGridFlush(swr);
@@ -1033,6 +1079,9 @@ void swrOverlayFlush(SWRenderer* swr)
     swrClearSettle(swr);
 #endif
     swrOverlayFlushHeld(swr);
+#ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0) swrFlushPipeLayers(swr);
+#endif
     swr->uniformValid = false; // every caller is about to draw
 }
 
@@ -1098,6 +1147,7 @@ static void swrDrawSpriteInternal(
     MAYBE_UNUSED SWTexture* source = texture; // `texture` may become its half-size copy's stand-in
     SWR_PROBE_STOP(3);
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0) swrOverlayFlush(swr);
     const SWSpriteCall asked = { dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha };
 #endif
     
@@ -1201,6 +1251,12 @@ static void swrDrawSpriteInternal(
         
         if (coverage != NULL)
         {
+            if (swr->pipePlan != NULL) {
+                *swr->pipePlan = (SWPipeLayer) { halved.buffer, halved.halfRowBounds, halved.halfFullBounds, coverage,
+                    halfW, dx, dy, dw, dh, sx, sy, sx + dw - 1, sy + dh - 1,
+                    1 << 14, 1 << 14, tintColor, alpha, false, false };
+                return;
+            }
             SWR_PROBE_STOP(5);
             SWR_PROBE_PATH(1);
             swrOverlayFlush(swr);
@@ -1318,6 +1374,16 @@ static void swrDrawSpriteInternal(
     int blendmode = swr->blendMode;
     
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipePlan != NULL) {
+        bool box = swrSmoothMinify && !flipX && xstep > (3 << (fp_prec - 1)) && ystep > (3 << (fp_prec - 1));
+        const uint16_t* bounds = fromHalf ? texture->halfRowBounds : swrRowBounds(texture);
+        const uint16_t* solid = fromHalf ? texture->halfFullBounds : swrPipeSolidBounds(texture);
+        if (solid != NULL && box) solid += texture->height * 2;
+        *swr->pipePlan = (SWPipeLayer) { texture->buffer, bounds, solid, NULL, texture->width,
+            dx, dy, dw, dh, sx, sy, sx + sw - 1, sy + sh - 1, (int) xstep,
+            dh == sh && !box ? 1 << fp_prec : (int) ystep, tintColor, alpha, flipX, box };
+        return;
+    }
     // Nothing comes of a draw this faint: alphaBlend skips it, and a 16-bit texel is opaque or absent.
     // Leaving here keeps what is held, and what is known about the buffer, as it was.
     if (blendmode == bm_normal && alpha < 4) return;
@@ -1484,27 +1550,9 @@ static void swrDrawSpriteInternal(
                 uintpixel_t t3 = (src1 && col1 >= 0) ? src1[col1] : 0;
                 
                 uintpixel_t color;
-                int coverageAlpha = alpha;
-                if (t0 == t1 && t0 == t2 && t0 == t3) {
-                    // Flat area (most of any sprite): nothing to average.
-                    if (!swrIsOpaque(t0)) continue;
-                    color = t0;
-                } else {
-                    uint32_t red = 0, green = 0, blue = 0, covered = 0;
-                    #define SW_ACCUMULATE(texel) \
-                        if (swrIsOpaque(texel)) { \
-                            red += ((texel) >> 10) & 0x1F; green += ((texel) >> 5) & 0x1F; blue += (texel) & 0x1F; covered++; \
-                        }
-                    SW_ACCUMULATE(t0) SW_ACCUMULATE(t1) SW_ACCUMULATE(t2) SW_ACCUMULATE(t3)
-                    #undef SW_ACCUMULATE
-                    if (covered == 0) continue;
-                    
-                    // Divide by the 1..4 covered texels without a hardware divide: x * (65536 / n + 1) >> 16.
-                    static const uint32_t reciprocal[5] = { 0, 65536, 32768, 21846, 16384 };
-                    uint32_t scale = reciprocal[covered];
-                    color = (uintpixel_t)(0x8000 | (((red * scale) >> 16) << 10) | (((green * scale) >> 16) << 5) | ((blue * scale) >> 16));
-                    coverageAlpha = swrContrastCoverage((int) covered, alpha, contrast);
-                }
+                int covered = swrAverageBox(t0, t1, t2, t3, &color);
+                if (covered == 0) continue;
+                int coverageAlpha = swrContrastCoverage(covered, alpha, contrast);
                 
                 if (color != lastColor) {
                     lastTinted = tint(tintColor, color);
@@ -2633,6 +2681,208 @@ void swrTrailEnd(void)
 #endif
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+typedef struct { int from, to; } SWPipeSpan;
+
+typedef struct {
+    const SWPipeLayer* layer;
+    const uintpixel_t* upper;
+    const uintpixel_t* lower;
+    const uint8_t* coverage;
+    SWPipeSpan visible, solid;
+} SWPipeRow;
+
+// Cache one guaranteed opaque interval per row for each sampler. A shorter
+// interval misses some opportunities to skip work, but cannot hide a hole.
+static const uint16_t* swrPipeSolidBounds(SWTexture* texture)
+{
+    if (texture->pipeSolidBounds != NULL) return texture->pipeSolidBounds;
+    int width = texture->width, height = texture->height;
+    uint16_t* bounds = malloc((size_t) height * 4 * sizeof(*bounds));
+    if (bounds == NULL) return NULL;
+    for (int mode = 0; mode < 2; ++mode) {
+        for (int y = 0; y < height; ++y) {
+            const uintpixel_t* row = texture->buffer + y * width;
+            const uintpixel_t* next = mode && y + 1 < height ? row + width : NULL;
+            int start = 0, bestStart = 0, bestEnd = 0;
+            for (int x = 0; x < width; ++x) {
+                if (!swrIsOpaque(row[x]) || (mode && (next == NULL || !swrIsOpaque(next[x])))) {
+                    start = x + 1;
+                } else if (x + 1 - start > bestEnd - bestStart) {
+                    bestStart = start;
+                    bestEnd = x + 1;
+                }
+            }
+            if (mode && bestEnd > bestStart) --bestEnd; // the right-hand tap must also be opaque
+            bounds[(mode * height + y) * 2] = (uint16_t) bestStart;
+            bounds[(mode * height + y) * 2 + 1] = (uint16_t) bestEnd;
+        }
+    }
+    texture->pipeSolidBounds = bounds;
+    return bounds;
+}
+
+static SWPipeRow swrPipeRow(const SWPipeLayer* layer, int y)
+{
+    enum { UNIT = 1 << 14 };
+    SWPipeRow row = { .layer = layer };
+    if (y < layer->dy || y >= layer->dy + layer->dh) return row;
+    int sy = layer->sy + ((y - layer->dy) * layer->ystep) / UNIT;
+    if (layer->box && sy > layer->bottom) return row;
+    int sy2 = layer->box && sy < layer->bottom ? sy + 1 : -1;
+    row.upper = layer->pixels + sy * layer->pitch;
+    if (sy2 >= 0) row.lower = layer->pixels + sy2 * layer->pitch;
+    if (layer->coverage != NULL) row.coverage = layer->coverage + sy * layer->pitch;
+
+    int from = 0, to = layer->dw;
+    if (layer->box) {
+        to = swrMin(to, swrFirstSampleAtColumn(layer->right - layer->sx + 1, layer->xstep, UNIT));
+        if (layer->bounds != NULL)
+            swrBoxSampleSpan(layer->bounds, sy, sy2, layer->sx, layer->right, layer->xstep, UNIT, &from, &to);
+    } else if (layer->bounds != NULL) {
+        swrPointSampleSpan(layer->bounds + sy * 2, layer->sx, layer->dw, layer->xstep, UNIT,
+                           layer->flipX, &from, &to);
+    }
+    row.visible = (SWPipeSpan) { layer->dx + from, layer->dx + to };
+    if (layer->solidBounds != NULL && (!layer->box || row.lower != NULL)) {
+        const uint16_t* solid = layer->solidBounds + sy * 2;
+        uint16_t limits[] = { solid[0], solid[1] };
+        if (layer->box && limits[1] > layer->right) limits[1] = (uint16_t) layer->right;
+        if (limits[0] < limits[1]) {
+            swrPointSampleSpan(limits, layer->sx, layer->dw, layer->xstep, UNIT, layer->flipX, &from, &to);
+            row.solid = (SWPipeSpan) { layer->dx + from, layer->dx + to };
+        }
+    }
+    return row;
+}
+
+static void swrDrawPipeSpan(const SWPipeRow* row, uintpixel_t* dst, int from, int to)
+{
+    if (from >= to) return;
+    const SWPipeLayer* layer = row->layer;
+    int col = from - layer->dx;
+    int step = layer->xstep;
+    if (layer->flipX) { col = layer->dw - 1 - col; step = -step; }
+    int xs = col * layer->xstep;
+    const uintpixel_t* upper = row->upper + layer->sx;
+    uint32_t lastColor = UINT32_MAX;
+    uintpixel_t lastTinted = 0;
+
+    if (row->coverage == NULL && !layer->box) {
+        bool untinted = (layer->tint & 0x7fff) == 0x7fff;
+        for (int x = from; x < to; ++x, xs += step) {
+            uintpixel_t color = upper[xs >> 14];
+            if (!swrIsOpaque(color)) continue;
+            if (color != lastColor) {
+                lastTinted = untinted ? color : tint(layer->tint, color);
+                lastColor = color;
+            }
+            dst[x] = lastTinted;
+        }
+        return;
+    }
+
+    for (int x = from; x < to; ++x, xs += step) {
+        int sourceX = layer->sx + (xs >> 14);
+        uintpixel_t color = row->upper[sourceX];
+        int covered;
+        if (row->coverage != NULL) {
+            covered = row->coverage[sourceX];
+        } else {
+            bool next = sourceX < layer->right;
+            uintpixel_t right = next ? row->upper[sourceX + 1] : 0;
+            uintpixel_t lower = row->lower != NULL ? row->lower[sourceX] : 0;
+            uintpixel_t lowerRight = row->lower != NULL && next ? row->lower[sourceX + 1] : 0;
+            covered = swrAverageBox(color, right, lower, lowerRight, &color);
+        }
+        if (covered == 0) continue;
+        if (color != lastColor) {
+            lastTinted = tint(layer->tint, color);
+            lastColor = color;
+        }
+        int alpha = (layer->alpha * covered) >> 2;
+        if (alpha > 253) dst[x] = lastTinted;
+        else dst[x] = swrBlendPremultiplied(dst[x], swrSpreadRedBlue(lastTinted) * alpha,
+                                           swrGreen(lastTinted) * alpha, 256 - alpha);
+    }
+}
+
+// Cut out the later opaque spans, then draw the remaining pieces in the
+// original order so the partial-coverage edges blend against the same pixels.
+static void swrDrawPipeRow(const SWPipeRow* row, uintpixel_t* dst, SWPipeSpan first, SWPipeSpan second)
+{
+    if (first.from > second.from) {
+        SWPipeSpan swap = first;
+        first = second;
+        second = swap;
+    }
+    int from = row->visible.from, to = row->visible.to;
+    SWPipeSpan covers[] = { first, second };
+    for (int i = 0; i < 2; ++i) {
+        if (covers[i].from >= covers[i].to || covers[i].to <= from || covers[i].from >= to) continue;
+        swrDrawPipeSpan(row, dst, from, covers[i].from);
+        from = covers[i].to;
+    }
+    swrDrawPipeSpan(row, dst, from, to);
+}
+
+static void swrComposePipeLayers(SWRenderer* swr)
+{
+    SWPipeLayer layers[3] = {0};
+    int top = swr->maxY, bottom = swr->portY;
+    swr->pipeCount = 0;
+    // Prepare back to front so the first half-size draw still picks the phase.
+    for (int i = 0; i < 3; ++i) {
+        const SWSpriteCall* call = &swr->pipeCalls[i];
+        swr->pipePlan = &layers[i];
+        swrDrawSpriteInternal(&swr->base, call->dx, call->dy, call->dw, call->dh, call->texture,
+                              call->sx, call->sy, call->sw, call->sh, call->tintColor, call->alpha,
+                              false, SWR_CONTRAST_NONE);
+        if (layers[i].dh == 0) continue;
+        top = swrMin(top, layers[i].dy);
+        bottom = swrMax(bottom, layers[i].dy + layers[i].dh);
+    }
+    swr->pipePlan = NULL;
+    for (int y = top; y < bottom; ++y) {
+        SWPipeRow back = swrPipeRow(&layers[0], y), middle = swrPipeRow(&layers[1], y), front = swrPipeRow(&layers[2], y);
+        int from = swr->maxX, to = swr->portX;
+        SWPipeSpan spans[] = { back.visible, middle.visible, front.visible };
+        for (int i = 0; i < 3; ++i) {
+            if (spans[i].from >= spans[i].to) continue;
+            from = swrMin(from, spans[i].from);
+            to = swrMax(to, spans[i].to);
+        }
+        if (from >= to) continue;
+        swrDirtyRow(swr, y, from, to);
+        uintpixel_t* dst = swr->fb + y * swr->fbPitch;
+        swrDrawPipeRow(&back, dst, middle.solid, front.solid);
+        swrDrawPipeRow(&middle, dst, front.solid, (SWPipeSpan) {0, 0});
+        swrDrawPipeSpan(&front, dst, front.visible.from, front.visible.to);
+    }
+}
+
+static bool swrHoldPipeLayer(SWRenderer* swr, const SWSpriteCall* call)
+{
+    // This footprint is the three normal, opaque Flowey background-pipe draws.
+    bool eligible = swr->overlayMergeAllowed && swr->fb == swr->mainFb && swr->blendMode == bm_normal &&
+        !swrTrailMissed.known && call->texture->width <= 512 && call->texture->height <= 512 && call->sw == 190 && call->sh == 181 && call->alpha > 253 && call->texture->immutable &&
+        call->dw >= -384 && call->dw <= 384 && call->dw != 0 && call->dh > 0 && call->dh <= 384;
+#ifdef SW_DRAW_PROFILE
+    eligible = eligible && swrProbeStop == 0;
+#endif
+    if (swr->pipeCount != 0) {
+        const SWSpriteCall* first = &swr->pipeCalls[0];
+        if (!eligible || first->texture != call->texture || first->sx != call->sx || first->sy != call->sy ||
+            (first->dw < 0) != (call->dw < 0)) swrOverlayFlush(swr);
+    }
+    if (!eligible) return false;
+    if (swr->pipeCount == 0) swrOverlayFlush(swr);
+    swr->pipeCalls[swr->pipeCount++] = *call;
+    if (swr->pipeCount == 3) swrComposePipeLayers(swr);
+    return true;
+}
+#endif
+
 void swrDrawSprite(
     Renderer* renderer, float dx, float dy, float dw, float dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -2645,6 +2895,11 @@ void swrDrawSprite(
     swrTransformSizeIfNeeded(swr, &dw, &dh);
     
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0 || (sw == 190 && sh == 181)) {
+        const SWSpriteCall call = { swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh), texture,
+                                   sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha) };
+        if (swrHoldPipeLayer(swr, &call)) return;
+    }
     if (swrFavorSpeed && swr->overlayMergeAllowed) {
         SWTrailStamp stamp = { true, swr->fb, texture, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
                                sx, sy, sw, sh, swrIntAlpha(alpha), swrConvertPixel(tintColor) };
