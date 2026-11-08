@@ -31,7 +31,7 @@ int main(void) {
     arrput(runner.instances, &other);
     Instance **instances = runner.instances;
 
-    OfBenchSection section = { "attack", 900, "atk1", "room_battle", "obj_star" };
+    OfBenchSection section = { "attack", 900, "atk1", "room_battle", "obj_star", NULL };
     assert(ofBenchSceneMatches(&runner, &section));
     instances[0]->active = false;
     assert(!ofBenchSceneMatches(&runner, &section));

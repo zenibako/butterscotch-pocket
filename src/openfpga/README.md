@@ -680,9 +680,16 @@ and exits with a failure status on desktop. Asriel is not force-cleared.
 Benchmark saves are volatile: the route neither reads nor writes ordinary
 progress.
 
+The Photoshop Flowey tour uses Undertale v1.08's `room_floweyx` checkpoints
+at `fplot=3` and `fplot=7`. It reports 160 frames of phase 2 vine pressure
+(`vines`) and 160 frames of phase 6 eye shots (`eyes`), with room entry and
+attack setup reported separately. Each window ends with the expected battle
+phase, positive HP and its live attack object (`obj_gigavine` or
+`obj_eyeshot_a`). Both modes use seed 7 and volatile saves. Leave the
+controls alone while it runs.
+
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
-core, leaving the gameplay core and its ordinary saves untouched. Its six
-entries and exact arguments are:
+core. Its launch entries and exact arguments are:
 
 | Entry | Arguments |
 |---|---|
@@ -692,6 +699,12 @@ entries and exact arguments are:
 | Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
 | Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
 | Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Flowey - Accuracy | `--bench-flowey` |
+| Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - No Render | `--bench-flowey --draw-every 100000` |
+| Flowey - No Audio | `--bench-flowey --mute` |
+| Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
+| Flowey - Profile | `--bench-flowey --scripts` |
 
 The package contains the benchmark ELF, matched os25 runtime and launch
 metadata, but no game data or save files. Install the Undertale data separately;

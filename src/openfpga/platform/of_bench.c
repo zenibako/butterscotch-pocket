@@ -82,6 +82,13 @@ bool ofBenchStartBulletTour(void) {
     return true;
 }
 
+bool ofBenchStartFloweyTour(void) {
+    if (ofGame.floweyScript == NULL) return false;
+    benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
+               ofGame.floweySections, ofGame.floweySectionCount, true);
+    return true;
+}
+
 /* SD read throughput, cold and warm.
  *
  * Earlier versions of this test read the same 2 MB of data.win several times
@@ -225,8 +232,12 @@ void ofBenchFrame(Runner *runner) {
     g_frame++;
     if (g_frame < section->lastFrame) return;
 
-    if ((section->roomName != NULL || section->requiredObject != NULL) && !g_sectionSeen[g_section]) {
-        ofLogPrint("BENCH FAIL %s: required scene not observed\n", section->name);
+    bool seen = (section->roomName == NULL && section->requiredObject == NULL) || g_sectionSeen[g_section];
+    bool endValid = section->endValid == NULL ||
+                    (ofBenchSceneMatches(runner, section) && section->endValid(runner));
+    if (!seen || !endValid) {
+        ofLogPrint("BENCH FAIL %s: %s\n", section->name,
+                   seen ? "required scene not active at end" : "required scene not observed");
 #ifdef OF_PC
         ofLogDump();
         exit(EXIT_FAILURE);

@@ -136,6 +136,13 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(bulletSmooth);
             if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
         }
+        bool floweySmooth = strcmp(argv[i], "--bench-flowey-smooth") == 0;
+        if (floweySmooth || strcmp(argv[i], "--bench-flowey") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(floweySmooth);
+            if (!ofBenchStartFloweyTour()) logWarn("Bench: this game has no Flowey tour\n");
+        }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */

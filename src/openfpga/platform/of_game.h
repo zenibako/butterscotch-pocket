@@ -45,6 +45,8 @@ typedef struct {
     /* Optional scene contract; NULL means no requirement. */
     const char *roomName;
     const char *requiredObject;
+    /* Optional end-of-window condition for scenes with shared objects. */
+    bool (*endValid)(const Runner *runner);
 } OfBenchSection;
 
 #define OF_BENCH_MAX_SECTIONS 8
@@ -98,6 +100,13 @@ typedef struct {
     int bulletJumpCount;
     const OfBenchSection *bulletSections;
     int bulletSectionCount;
+    /* Optional Photoshop Flowey checkpoint tour. */
+    const char *floweyTitle;
+    const char *floweyScript;
+    const OfJump *floweyJumps;
+    int floweyJumpCount;
+    const OfBenchSection *floweySections;
+    int floweySectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

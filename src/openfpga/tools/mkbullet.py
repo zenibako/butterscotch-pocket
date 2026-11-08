@@ -7,12 +7,18 @@ from pathlib import Path
 import zipfile
 
 MODES = (
-    ('Accuracy', 'accuracy', '--bench-bullet-hell'),
-    ('Speed', 'speed', '--bench-bullet-hell-smooth'),
-    ('No Render', 'no_render', '--bench-bullet-hell --draw-every 100000'),
-    ('No Audio', 'no_audio', '--bench-bullet-hell --mute'),
-    ('Core Only', 'core_only', '--bench-bullet-hell --draw-every 100000 --mute'),
-    ('Profile', 'profile', '--bench-bullet-hell --scripts'),
+    ('Bullet Hell - Accuracy', 'accuracy', '--bench-bullet-hell'),
+    ('Bullet Hell - Speed', 'speed', '--bench-bullet-hell-smooth'),
+    ('Bullet Hell - No Render', 'no_render', '--bench-bullet-hell --draw-every 100000'),
+    ('Bullet Hell - No Audio', 'no_audio', '--bench-bullet-hell --mute'),
+    ('Bullet Hell - Core Only', 'core_only', '--bench-bullet-hell --draw-every 100000 --mute'),
+    ('Bullet Hell - Profile', 'profile', '--bench-bullet-hell --scripts'),
+    ('Flowey - Accuracy', 'fx_acc', '--bench-flowey'),
+    ('Flowey - Speed', 'fx_speed', '--bench-flowey-smooth'),
+    ('Flowey - No Render', 'fx_norend', '--bench-flowey --draw-every 100000'),
+    ('Flowey - No Audio', 'fx_noaud', '--bench-flowey --mute'),
+    ('Flowey - Core Only', 'fx_core', '--bench-flowey --draw-every 100000 --mute'),
+    ('Flowey - Profile', 'fx_prof', '--bench-flowey --scripts'),
 )
 PORT = Path(__file__).resolve().parents[1]
 DIST = PORT / 'dist'
@@ -31,6 +37,8 @@ def package(elf: Path, output: Path, version: str) -> None:
     # Renaming the ELF does not change the filenames it opens at runtime.
     if b'\0bs_bullet_0.sav\0' not in payload or b'\0bs_bullet_1.sav\0' not in payload:
         raise ValueError('benchmark ELF must use the bs_bullet save and log slots (build with APP=bs_bullet)')
+    if b'\0--bench-flowey\0' not in payload or b'\0--bench-flowey-smooth\0' not in payload:
+        raise ValueError('benchmark ELF must include the Flowey tour (rebuild from this revision)')
     if output.exists():
         raise FileExistsError(output)
 
@@ -68,7 +76,7 @@ def package(elf: Path, output: Path, version: str) -> None:
                 slot['filename'] = f'bs_bullet_{number - 10}.sav'
             if len(slot['filename'].encode('utf-8')) > 23:
                 raise ValueError(f"data-slot filename exceeds APF's 23-byte limit: {slot['filename']}")
-        entries[f'Assets/butterscotch/{CORE_ID}/Bullet Hell - {label}.json'] = (
+        entries[f'Assets/butterscotch/{CORE_ID}/{label}.json'] = (
             json.dumps(item, indent=4) + '\n').encode()
 
     output.parent.mkdir(parents=True, exist_ok=True)

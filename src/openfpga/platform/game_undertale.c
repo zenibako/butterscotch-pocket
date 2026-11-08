@@ -163,10 +163,10 @@ static const char g_script[] =
 
 /* Sections end on these frames; they follow the script above. */
 static const OfBenchSection g_sections[] = {
-    { "intro, menu, naming", 650, "intro", NULL, NULL },
-    { "first room 320x240", 1220, "room", NULL, NULL },
-    { "Flowey talk 320x240", 2060, "talk", NULL, NULL },
-    { "Flowey battle (640x480)", 2600, "battl", NULL, NULL },
+    { "intro, menu, naming", 650, "intro", NULL, NULL, NULL },
+    { "first room 320x240", 1220, "room", NULL, NULL, NULL },
+    { "Flowey talk 320x240", 2060, "talk", NULL, NULL, NULL },
+    { "Flowey battle (640x480)", 2600, "battl", NULL, NULL, NULL },
 };
 
 /* The battle tour ("--bench-battles"): a walk to the first room, then six
@@ -242,13 +242,13 @@ static const OfJump g_tourJumps[] = {
 };
 
 static const OfBenchSection g_tourSections[] = {
-    { "boot to the first room", 1000, "boot", NULL, NULL },
-    { "Froggit (640x480)", 1599, "frog", NULL, NULL },
-    { "Toriel (640x480)", 2199, "tori", NULL, NULL },
-    { "Papyrus (640x480)", 2799, "papy", NULL, NULL },
-    { "Undyne (640x480)", 3399, "undy", NULL, NULL },
-    { "Mettaton EX (640x480)", 3999, "mtex", NULL, NULL },
-    { "Asgore (640x480)", 4599, "asgr", NULL, NULL },
+    { "boot to the first room", 1000, "boot", NULL, NULL, NULL },
+    { "Froggit (640x480)", 1599, "frog", NULL, NULL, NULL },
+    { "Toriel (640x480)", 2199, "tori", NULL, NULL, NULL },
+    { "Papyrus (640x480)", 2799, "papy", NULL, NULL, NULL },
+    { "Undyne (640x480)", 3399, "undy", NULL, NULL, NULL },
+    { "Mettaton EX (640x480)", 3999, "mtex", NULL, NULL, NULL },
+    { "Asgore (640x480)", 4599, "asgr", NULL, NULL, NULL },
 };
 
 /* The bullet-hell tour retains the battle tour's 600-frame Asgore
@@ -301,14 +301,48 @@ static const OfJump g_bulletJumps[] = {
 #undef BULLET_HP_AT
 
 static const OfBenchSection g_bulletSections[] = {
-    { "boot to the first room", 1000, "boot", NULL, NULL },
-    { "Asgore control (640x480)", 1600, "asgr", "room_battle", "obj_asgoreb" },
-    { "Asriel encounter setup", 1920, "aset", "room_battle", NULL },
-    { "Asriel Chaos Saber", 2070, "saber", "room_battle", "obj_ultimagen" },
-    { "Lost Soul transition", 5480, "trans", "room_battle", NULL },
-    { "Lost Soul green spears", 5630, "spear", "room_battle", "obj_greenspeargen" },
+    { "boot to the first room", 1000, "boot", NULL, NULL, NULL },
+    { "Asgore control (640x480)", 1600, "asgr", "room_battle", "obj_asgoreb", NULL },
+    { "Asriel encounter setup", 1920, "aset", "room_battle", NULL, NULL },
+    { "Asriel Chaos Saber", 2070, "saber", "room_battle", "obj_ultimagen", NULL },
+    { "Lost Soul transition", 5480, "trans", "room_battle", NULL, NULL },
+    { "Lost Soul green spears", 5630, "spear", "room_battle", "obj_greenspeargen", NULL },
     /* Not an attack: keeps the final report overlay out of the 5629 probe. */
-    { "benchmark capture tail", 5631, "tail", "room_battle", NULL },
+    { "benchmark capture tail", 5631, "tail", "room_battle", NULL, NULL },
+};
+
+/* Undertale v1.08: room_floweyx's controller loads phase fplot - 1.
+ * Let each checkpoint finish its setup, then measure the native attacks
+ * for equal windows that end before the stationary player dies. */
+static const char g_floweyScript[] =
+    "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z";
+
+static const OfJump g_floweyJumps[] = {
+    { 900, 294, "fplot=3", NULL },
+    { 1430, 294, "fplot=7", NULL },
+};
+
+static bool floweyPhaseActive(const Runner *runner, GMLReal phase) {
+    VMContext *vm = runner->vmContext;
+    Instance *globals = vm->globalScopeInstance;
+    RValue actualPhase = Instance_getSelfVar(globals, VM_getOrAllocateVarID(vm, "battlephase"));
+    RValue health = Instance_getSelfVar(globals, VM_getOrAllocateVarID(vm, "my_hp"));
+    return RValue_toReal(actualPhase) == phase && RValue_toReal(health) > 0;
+}
+
+static bool floweyVinesActive(const Runner *runner) {
+    return floweyPhaseActive(runner, 2);
+}
+
+static bool floweyFinaleActive(const Runner *runner) {
+    return floweyPhaseActive(runner, 6);
+}
+
+static const OfBenchSection g_floweySections[] = {
+    { "Boot and vine setup", 1260, "vset", "room_floweyx", "obj_flowey_master", NULL },
+    { "Flowey vine pressure", 1420, "vines", "room_floweyx", "obj_gigavine", floweyVinesActive },
+    { "Finale checkpoint setup", 1830, "fset", "room_floweyx", "obj_flowey_master", NULL },
+    { "Flowey finale eye shots", 1990, "eyes", "room_floweyx", "obj_eyeshot_a", floweyFinaleActive },
 };
 
 static void battleUiInstall(Runner *runner) {
@@ -376,6 +410,12 @@ const OfGame ofGame = {
     .bulletJumpCount = (int) (sizeof(g_bulletJumps) / sizeof(g_bulletJumps[0])),
     .bulletSections = g_bulletSections,
     .bulletSectionCount = (int) (sizeof(g_bulletSections) / sizeof(g_bulletSections[0])),
+    .floweyTitle = "Undertale Photoshop Flowey",
+    .floweyScript = g_floweyScript,
+    .floweyJumps = g_floweyJumps,
+    .floweyJumpCount = (int) (sizeof(g_floweyJumps) / sizeof(g_floweyJumps[0])),
+    .floweySections = g_floweySections,
+    .floweySectionCount = (int) (sizeof(g_floweySections) / sizeof(g_floweySections[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,

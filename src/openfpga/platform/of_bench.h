@@ -18,6 +18,8 @@ void ofBenchStart(void);
 bool ofBenchStartTour(void);
 /* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
 bool ofBenchStartBulletTour(void);
+/* "--bench-flowey": the game's Flowey checkpoint tour, if it has one (false if not). */
+bool ofBenchStartFloweyTour(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
 /* Call once per presented frame. Prints the report and halts at the end. */

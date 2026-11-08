@@ -60,7 +60,8 @@ python3 src/openfpga/tools/mkbullet.py \
   --output "../artifacts/bullet-hell-$(git rev-parse --short HEAD)/bullet-hell.zip"
 ```
 
-The ZIP contains no game data or saves. Its six unique entries are:
+The ZIP contains no game data or saves. It has entries for both the Asriel
+bullet-hell tour and the Photoshop Flowey checkpoint tour:
 
 | Entry | Exact `ARGS=` value |
 | --- | --- |
@@ -70,6 +71,18 @@ The ZIP contains no game data or saves. Its six unique entries are:
 | Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
 | Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
 | Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Flowey - Accuracy | `--bench-flowey` |
+| Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - No Render | `--bench-flowey --draw-every 100000` |
+| Flowey - No Audio | `--bench-flowey --mute` |
+| Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
+| Flowey - Profile | `--bench-flowey --scripts` |
+
+For Flowey, compare the 160-frame `vines` and `eyes` rows. Both are natural
+attack windows in `room_floweyx`, reached via its phase 2 and phase 6
+checkpoints. The `vset` and `fset` rows include entry and warmup and should
+be kept separate from attack timing. Flowey uses the same `bs_bullet_1.sav`
+report slot as the Asriel tour.
 
 Start with repeated paired Accuracy and Speed runs on the same Pocket. Add No
 Render, No Audio, Core Only and Profile only when attribution is needed. Record
