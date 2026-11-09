@@ -538,6 +538,10 @@ readability at half resolution. Both games use the shared sampler in
 assets and active battle context. Accuracy and non-battle screens keep their
 ordinary sampling.
 
+In the Photoshop Flowey fight, Speed mode also hides the rotating decorative
+pipe segments during ordinary animation. Flash and debug branches retain the
+original artwork.
+
 `make battle-contrast-fixture` builds `./<game>_pc_battle_contrast_fixture`
 without game assets. Run it once for each `GAME` to check game-specific
 selection as well as shared coverage, clipping, cache isolation and fallback

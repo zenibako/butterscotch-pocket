@@ -74,11 +74,20 @@ enum { PARTICLE_GOAL, PARTICLE_SIZE, PARTICLE_PHASE, PARTICLE_DIVISOR, PARTICLE_
 static int32_t particleVars[PARTICLE_FIELD_COUNT];
 static bool particleVarsResolved;
 
+enum {
+    PIPE_FROZEN, PIPE_PHASE, PIPE_FLASH, PIPE_TINT, PIPE_I, PIPE_MIRROR_OFFSET,
+    PIPE_X, PIPE_Y, PIPE_SWELL, PIPE_ANGLE, PIPE_X2, PIPE_Y2, PIPE_SWELL2, PIPE_ANGLE2,
+    PIPE_ANGLE_OFFSET, PIPE_SOUL_RESCUE, PIPE_DEBUG, PIPE_FIELD_COUNT
+};
+static int32_t pipeVars[PIPE_FIELD_COUNT];
+static bool pipeVarsResolved;
+
 static void forgetNativeVm(void) {
     particleVarsResolved = false;
+    pipeVarsResolved = false;
 }
 
-static void setParticleReal(Instance *self, int32_t id, GMLReal number) {
+static void setNativeReal(Instance *self, int32_t id, GMLReal number) {
     RValue value = RValue_makeReal(number);
     value.gmlStackType = GML_TYPE_VARIABLE; /* arithmetic result stored by pop.v.v */
     Instance_setSelfVar(self, id, value);
@@ -122,16 +131,16 @@ static bool orangeParticleStep(VMContext *ctx) {
     GMLReal goal = values[PARTICLE_GOAL], size = values[PARTICLE_SIZE];
     if (goal - (size + (GMLReal)0.1) > epsilon) {
         size += (GMLReal)0.03;
-        setParticleReal(self, particleVars[PARTICLE_SIZE], size);
+        setNativeReal(self, particleVars[PARTICLE_SIZE], size);
     }
     if (goal - (size - (GMLReal)0.1) < -epsilon) {
         size -= (GMLReal)0.03;
-        setParticleReal(self, particleVars[PARTICLE_SIZE], size);
+        setNativeReal(self, particleVars[PARTICLE_SIZE], size);
     }
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_XSCALE, "image_xscale", RValue_makeReal(size), -1);
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_YSCALE, "image_yscale", RValue_makeReal(size), -1);
     self->imageAlpha = (float)alpha;
-    setParticleReal(self, particleVars[PARTICLE_PHASE], phase);
+    setNativeReal(self, particleVars[PARTICLE_PHASE], phase);
     GMLReal dx = GMLReal_sin(angle) * values[PARTICLE_X_WAVE];
     GMLReal dy = GMLReal_cos(angle) * values[PARTICLE_Y_WAVE];
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_X, "x", RValue_makeReal((GMLReal)self->x + dx), -1);
@@ -139,8 +148,119 @@ static bool orangeParticleStep(VMContext *ctx) {
     return true;
 }
 
+typedef struct {
+    int last, xOrigin, xRadius, yOrigin, yRadius;
+    GMLReal yDivisor;
+} FloweyPipeWave;
+
+static bool pipeNumber(Instance *instance, int field, GMLReal *out) {
+    RValue value = Instance_getSelfVar(instance, pipeVars[field]);
+    if (value.type != RVALUE_REAL && value.type != RVALUE_INT32) return false;
+    *out = RValue_toReal(value);
+    return isfinite(*out);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweyPipeDraw(VMContext *ctx, int pipe) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    static const FloweyPipeWave waves[] = {
+        { 9, 45, 60, 45, 50, (GMLReal)3 },
+        { 12, 49, 85, 3, 40, (GMLReal)2.2 },
+        { 15, 34, 45, 34, 40, (GMLReal)3 },
+    };
+    if (!ofPlatformSpeedMode()) return false;
+    Runner *runner = ctx->runner;
+    Instance *self = ctx->currentCallFrame->self;
+    if (runner == NULL || self == NULL || runner->currentRoom == NULL || ctx->globalScopeInstance == NULL ||
+        runner->currentRoom->name == NULL || strcmp(runner->currentRoom->name, "room_floweyx") != 0 ||
+        self->spriteIndex < 0 || (uint32_t) self->spriteIndex >= ctx->dataWin->sprt.count) return false;
+    const char *sprite = ctx->dataWin->sprt.sprites[self->spriteIndex].name;
+    if (sprite == NULL || strcmp(sprite, "spr_pipepart") != 0) return false;
+
+    GMLReal epsilon = runner->mathEpsilon;
+    if (!(epsilon >= 0 && epsilon < (GMLReal)0.5) || !isfinite(self->x) || !isfinite(self->y)) return false;
+    if (!pipeVarsResolved) {
+        static const char *const names[PIPE_FIELD_COUNT] = {
+            "frozen", "siner", "flash", "blend2", "i", "op", "offx", "offy", "offs", "offv",
+            "offx2", "offy2", "offs2", "offv2", "magicfactor3", "soul_rescue", "debug"
+        };
+        for (int i = 0; i < PIPE_FIELD_COUNT; i++) pipeVars[i] = VM_getOrAllocateVarID(ctx, names[i]);
+        pipeVarsResolved = true;
+    }
+
+    GMLReal frozen, flash, mirrorOffset;
+    RValue phaseValue = Instance_getSelfVar(self, pipeVars[PIPE_PHASE]);
+    if (phaseValue.type != RVALUE_REAL || !isfinite(phaseValue.real) ||
+        !pipeNumber(self, PIPE_FROZEN, &frozen) || !pipeNumber(self, PIPE_FLASH, &flash) ||
+        !pipeNumber(self, PIPE_MIRROR_OFFSET, &mirrorOffset)) return false;
+    /* Flash and debug paths have renderer or keyboard effects. Run their
+     * original event, including the pipe art, when either is active. */
+    if (GMLReal_fabs(flash - (GMLReal)1) <= epsilon || GMLReal_fabs(flash - (GMLReal)2) <= epsilon)
+        return false;
+    GMLReal rescue = 0, angleOffset = 0, debug;
+    if (pipe == 0 && !pipeNumber(ctx->globalScopeInstance, PIPE_SOUL_RESCUE, &rescue)) return false;
+    if (pipe != 0 && (!pipeNumber(ctx->globalScopeInstance, PIPE_DEBUG, &debug) ||
+                      GMLReal_fabs(debug - (GMLReal)1) <= epsilon)) return false;
+    if (pipe == 1 && !pipeNumber(self, PIPE_ANGLE_OFFSET, &angleOffset)) return false;
+
+    /* Every iteration replaces these fields; only the last value on each
+     * side can survive the event. Keep that state and omit the pipe draws. */
+    const FloweyPipeWave *wave = &waves[pipe];
+    int last = wave->last;
+    bool advances = GMLReal_fabs(frozen) <= epsilon;
+    GMLReal phase = advances ? phaseValue.real + (GMLReal)1 : phaseValue.real;
+    /* Use the target's math library for the fixed angles too, as the VM does. */
+    volatile GMLReal xAngle = (GMLReal)(last - wave->xOrigin) / (GMLReal)3;
+    volatile GMLReal yAngle = (GMLReal)(last - wave->yOrigin) / wave->yDivisor;
+    GMLReal dx = GMLReal_sin(xAngle) * (GMLReal)wave->xRadius;
+    GMLReal y = (GMLReal)self->y + GMLReal_cos(yAngle) * (GMLReal)wave->yRadius;
+    GMLReal bob = GMLReal_cos(((GMLReal)last + phase) / (GMLReal)6);
+    GMLReal swell = (GMLReal)2 * GMLReal_sin((phase + (GMLReal)(4 * last)) / (GMLReal)6) - (GMLReal)1;
+    bool leftRescued = pipe == 0 && rescue - (GMLReal)1 >= -epsilon;
+    bool rightRescued = pipe == 0 && rescue - (GMLReal)2 >= -epsilon;
+    GMLReal x1 = (GMLReal)self->x + dx, x2 = (GMLReal)self->x - dx;
+    if (pipe == 0) {
+        x1 -= (GMLReal)(2 * last);
+        x2 += (GMLReal)(2 * last);
+    }
+    x2 += mirrorOffset;
+    GMLReal y1 = y + bob * (GMLReal)(leftRescued ? 4 : 8);
+    GMLReal y2 = y + bob * (GMLReal)(rightRescued ? 4 : 8);
+    if (!isfinite(x1) || !isfinite(x2) || !isfinite(y1) || !isfinite(y2) || !isfinite(swell)) return false;
+
+    if (advances) setNativeReal(self, pipeVars[PIPE_PHASE], phase);
+    if (GMLReal_fabs(flash) <= epsilon) {
+        RValue white = RValue_makeReal((GMLReal)16777215);
+        VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_BLEND, "image_blend", white, -1);
+        Instance_setSelfVar(self, pipeVars[PIPE_TINT], white);
+    }
+    setNativeReal(self, pipeVars[PIPE_I], (GMLReal)(last + 1));
+    setNativeReal(self, pipeVars[PIPE_X], x1);
+    setNativeReal(self, pipeVars[PIPE_Y], y1);
+    if (leftRescued || swell <= epsilon) Instance_setSelfVar(self, pipeVars[PIPE_SWELL], RValue_makeReal(0));
+    else setNativeReal(self, pipeVars[PIPE_SWELL], swell / (GMLReal)3);
+    if (pipe == 1) setNativeReal(self, pipeVars[PIPE_ANGLE], (GMLReal)(-22 * last - 310));
+    setNativeReal(self, pipeVars[PIPE_X2], x2);
+    setNativeReal(self, pipeVars[PIPE_Y2], y2);
+    if (rightRescued || swell <= epsilon) Instance_setSelfVar(self, pipeVars[PIPE_SWELL2], RValue_makeReal(0));
+    else setNativeReal(self, pipeVars[PIPE_SWELL2], swell / (GMLReal)3);
+    if (pipe == 1) setNativeReal(self, pipeVars[PIPE_ANGLE2], (GMLReal)(20 * last) + angleOffset);
+    return true;
+}
+
+static bool floweyPipeDraw1(VMContext *ctx) { return floweyPipeDraw(ctx, 0); }
+static bool floweyPipeDraw2(VMContext *ctx) { return floweyPipeDraw(ctx, 1); }
+static bool floweyPipeDraw3(VMContext *ctx) { return floweyPipeDraw(ctx, 2); }
+
 static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_orangeparticle_Step_0", 392, 0x85cd9b4f052c0694ull, orangeParticleStep },
+    { "gml_Object_obj_floweypipetest_Draw_0", 2292, 0xd060939f37f20db1ull, floweyPipeDraw1 },
+    { "gml_Object_obj_floweypipetest_2_Draw_0", 2496, 0xc784a157fab0292eull, floweyPipeDraw2 },
+    { "gml_Object_obj_floweypipetest_3_Draw_0", 2148, 0x543e2f97612cf23cull, floweyPipeDraw3 },
 };
 
 /* Save states (of_state_requests.c) are taken anywhere the runner can store
