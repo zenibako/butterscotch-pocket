@@ -166,6 +166,10 @@ typedef struct
     uint32_t contrastItemCount, contrastFontCount;
     bool floweySpeedRoom;
     int32_t floweyVineItem;
+    int32_t floweyStalkSprite, floweyStalkFirst, floweyStalkLast;
+    int32_t floweyOuterEyeShadow;
+    int32_t floweyUprightItems[4];
+    unsigned floweyUprightCount;
     int32_t floweyBackdropItems[5];
     unsigned floweyBackdropCount;
     uintpixel_t* mainFb;

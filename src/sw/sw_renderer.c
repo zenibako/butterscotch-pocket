@@ -571,6 +571,27 @@ static void SWRenderer_endGUI(Renderer* renderer)
     UNIMP2();
 }
 
+static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float y,
+                                  float originX, float originY, float xscale)
+{
+    DataWin* dw = swr->base.dataWin;
+    const Sprite* sprite = &dw->sprt.sprites[swr->floweyStalkSprite];
+    for (uint32_t frame = 0; frame < sprite->textureCount; ++frame) {
+        if (sprite->tpagIndices[frame] != item) continue;
+        /* Hold one visual pose for six animation frames, while the draw event
+         * continues to advance the authored animation and its position. */
+        int32_t held = sprite->tpagIndices[frame - frame % 6];
+        const TexturePageItem* tpag = &dw->tpag.items[held];
+        SWTexture* texture = swrTextureForItem(swr, held);
+        if (texture == NULL) return false;
+        return swrDrawFloweyStalkHalf(&swr->base, texture,
+            x + (tpag->targetX - originX) * xscale, y + (tpag->targetY - originY),
+            tpag->sourceX - texture->originX, tpag->sourceY - texture->originY,
+            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f);
+    }
+    return false;
+}
+
 static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y,
                                   float originX, float originY, float xscale, float yscale,
                                   float angleDeg, uint32_t color, float alpha)
@@ -594,6 +615,18 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     if (swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface) {
         for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
             if (swr->floweyBackdropItems[i] == tpagIndex) return;
+        if (swr->blendMode == bm_normal) {
+            if (tpagIndex == swr->floweyOuterEyeShadow && color == 0 && alpha == 1.0f) return;
+            if (angleDeg != 0.0f && fabsf(angleDeg) <= 2.0f) {
+                for (unsigned i = 0; i < swr->floweyUprightCount; ++i)
+                    if (swr->floweyUprightItems[i] == tpagIndex) angleDeg = 0.0f;
+            }
+            if (swr->floweyStalkSprite >= 0 && tpagIndex >= swr->floweyStalkFirst &&
+                tpagIndex <= swr->floweyStalkLast && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
+                (xscale == 1.0f || xscale == -1.0f) && yscale >= 0.98f && yscale <= 1.02f &&
+                angleDeg == 0.0f && color == 0xffffff && alpha == 1.0f &&
+                swrDrawFloweySideStalk(swr, tpagIndex, x, y, originX, originY, xscale)) return;
+        }
         if (tpagIndex == swr->floweyVineItem && xscale > 0.0f && xscale <= 2.0f &&
             yscale > 0.0f && yscale <= 4.0f) {
             float dx = (float)(tpag->targetX - originX);
@@ -3151,19 +3184,47 @@ static bool swrAssetNamed(const char* name, const char* const* names, size_t cou
     return false;
 }
 
+static bool swrFloweyStalkFrames(const DataWin* dw, const Sprite* sprite)
+{
+    if (sprite->textureCount != 62) return false;
+    int32_t previous = -1;
+    for (uint32_t frame = 0; frame < sprite->textureCount; ++frame) {
+        int32_t item = sprite->tpagIndices[frame];
+        if (item <= previous || (uint32_t) item >= dw->tpag.count) return false;
+        const TexturePageItem* tpag = &dw->tpag.items[item];
+        if (tpag->sourceWidth != 360 || tpag->targetWidth != 360 ||
+            tpag->sourceHeight < 150 || tpag->sourceHeight > 190 || tpag->targetHeight != tpag->sourceHeight)
+            return false;
+        previous = item;
+    }
+    return true;
+}
+
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
 {
     static const char* const backdrop[] = {
         "spr_bgpipe", "spr_vines_flowey", "spr_vines_flowey_2", "spr_vines_flowey_3", "spr_floweyx_behind"
     };
+    static const char* const upright[] = {
+        "spr_floweyx_mouthedge", "spr_floweyx_mouthl", "spr_flipeye_holder", "spr_flipeye_bg"
+    };
     SWRenderer* swr = (SWRenderer*) renderer;
     DataWin* dw = renderer->dataWin;
     swr->floweyVineItem = -1;
+    swr->floweyStalkSprite = -1;
+    swr->floweyOuterEyeShadow = -1;
+    swr->floweyUprightCount = 0;
     swr->floweyBackdropCount = 0;
     if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
     for (uint32_t i = 0; i < dw->sprt.count; ++i) {
         const Sprite* sprite = &dw->sprt.sprites[i];
-        if (!sprite->name || sprite->textureCount != 1) continue;
+        if (!sprite->name) continue;
+        if (strcmp(sprite->name, "spr_sidestalk") == 0 && swrFloweyStalkFrames(dw, sprite)) {
+            swr->floweyStalkSprite = (int32_t) i;
+            swr->floweyStalkFirst = sprite->tpagIndices[0];
+            swr->floweyStalkLast = sprite->tpagIndices[sprite->textureCount - 1];
+        }
+        if (sprite->textureCount != 1) continue;
         int32_t item = sprite->tpagIndices[0];
         if (item < 0 || (uint32_t) item >= dw->tpag.count) continue;
         if (strcmp(sprite->name, "spr_gigavine") == 0) {
@@ -3172,6 +3233,11 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
                 page->sourceWidth == 511 && page->sourceHeight == 33 && page->targetX == 2 && page->targetY == 3 &&
                 page->targetWidth == 511 && page->targetHeight == 33)
                 swr->floweyVineItem = item;
+        } else if (strcmp(sprite->name, "spr_flipeye_holder_bg") == 0) {
+            swr->floweyOuterEyeShadow = item;
+        } else if (swr->floweyUprightCount < sizeof(swr->floweyUprightItems) / sizeof(swr->floweyUprightItems[0]) &&
+                   swrAssetNamed(sprite->name, upright, sizeof(upright) / sizeof(upright[0]))) {
+            swr->floweyUprightItems[swr->floweyUprightCount++] = item;
         } else if (swr->floweyBackdropCount < sizeof(swr->floweyBackdropItems) / sizeof(swr->floweyBackdropItems[0]) &&
                    swrAssetNamed(sprite->name, backdrop, sizeof(backdrop) / sizeof(backdrop[0]))) {
             swr->floweyBackdropItems[swr->floweyBackdropCount++] = item;

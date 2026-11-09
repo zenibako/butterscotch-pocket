@@ -1287,7 +1287,9 @@ static void swrDrawSpriteInternal(
         if (pointSample && osw == odw && osh == odh) {
             // A pre-hinted native mask is already 1:1. Preserve its last visible
             // row/column, including a viewport only one pixel wide or high.
-            sx += diffxl; sy += diffyl; sw = dw; sh = dh;
+            sx += flipX ? diffxu : diffxl;
+            sy += flipY ? diffyu : diffyl;
+            sw = dw; sh = dh;
         } else if (contrast != SWR_CONTRAST_NONE) {
             // This sampler is exactly 2:1. An odd last block has one source
             // texel, so clipping it must not remove a texel from its neighbour.
@@ -3828,6 +3830,38 @@ static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4],
     }
 }
 #endif
+
+bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
+                           int sx, int sy, int sw, int sh, bool mirrored)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 ||
+        sw < 2 || (sw & 1) || sh < 2 || texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !isfinite(dx) || !isfinite(dy)) return false;
+    if (!swrHalfTexture(texture, sx, sy) || texture->halfPhaseX != sx || texture->halfPhaseY != sy)
+        return false;
+
+    /* Treat any coverage as opaque on this decorative art. Use whole 2x2
+     * blocks inside the crop so a packed item's border cannot bleed in. */
+    SWTexture half = *texture;
+    half.buffer = texture->halfBuffer;
+    half.width = (texture->width + sx + 1) / 2;
+    half.height = (texture->height + sy + 1) / 2;
+    half.solid = texture->halfSolid;
+    half.immutable = false; // the stack view cannot own additional caches
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), mirrored ? -sw / 2 : sw / 2, sh / 2,
+                          &half, sx, sy, sw / 2, sh / 2, swrConvertPixel(0xffffff), 256, true, SWR_CONTRAST_NONE);
+    return true;
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored;
+    return false;
+#endif
+}
 
 bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float dh,
                       float angle, float pivotX, float pivotY, uint32_t color, float alpha)

@@ -6,6 +6,35 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkFloweyStalkHalf(void)
+{
+    enum { WIDTH = 4, HEIGHT = 3, TEX_WIDTH = 8, TEX_HEIGHT = 6 };
+    const uintpixel_t colors[] = { 0xfc00, 0x83e0, 0x801f };
+    SWTexture* texture = swrCreateTextureEx(NULL, TEX_WIDTH, TEX_HEIGHT, false);
+    texture->immutable = true;
+    for (int y = 1; y < 5; ++y)
+        for (int x = 1; x < 7; ++x)
+            texture->buffer[y * TEX_WIDTH + x] = colors[(x - 1) / 2];
+    uintpixel_t actual[WIDTH * HEIGHT] = {0};
+    SWRenderer swr = {0};
+    swr.fb = swr.mainFb = actual;
+    swr.fbPitch = WIDTH;
+    swr.portW = swr.maxX = WIDTH;
+    swr.portH = swr.maxY = HEIGHT;
+    swr.scaleX = swr.scaleY = 0.5f;
+    swr.blendMode = bm_normal;
+    if (!swrDrawFloweyStalkHalf(&swr.base, texture, 4, -2, 1, 1, 6, 4, true) ||
+        !swrDrawFloweyStalkHalf(&swr.base, texture, 4, 2, 1, 1, 6, 4, false) ||
+        actual[0] != colors[1] || actual[1] != colors[0] || actual[2] || actual[3] ||
+        actual[6] != colors[0] || actual[7] != colors[1] ||
+        actual[10] != colors[0] || actual[11] != colors[1]) {
+        fprintf(stderr, "FAIL: Flowey stalk half-size cache and clipping\n");
+        exit(1);
+    }
+    checks += WIDTH * HEIGHT;
+    swrFreeTexture(texture);
+}
+
 static void checkFloweyVineFill(void)
 {
     enum { WIDTH = 300, HEIGHT = 24 };
@@ -418,6 +447,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkFloweyStalkHalf();
     checkFloweyVineFill();
     checkBackdropRows();
     checkPipeLayers();
