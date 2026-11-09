@@ -103,8 +103,10 @@ skipping on, "average work" falls because skipped frames are cheap, and
 the worst period can go under 33 (a frame shortened to pay back time), so
 judge a scene in speed mode by the skipped count: 0 means it holds full
 speed drawn, 15 means every other frame is being dropped. To measure what
-a scene costs to draw, use accuracy mode or the benchmark, which never
-skips. A new fidelity-for-speed trade-off belongs under this toggle (see
+a scene costs to draw, use accuracy mode or an uncapped benchmark. The
+Flowey Live Pacing entry uses the normal limiter and reports completed game
+updates per second, display submissions, and adaptive skips separately.
+A new fidelity-for-speed trade-off belongs under this toggle (see
 the comment above `decideFrameSkip` in `platform/of_platform.c`), not
 behind a new button; one that cannot be switched at run time (colour
 depth, mono audio, float reals) is a known difference for the README.

@@ -17,6 +17,7 @@ MODES = (
     ('Chaos Saber - Speed', 'cs_speed', '--bench-chaos-saber-smooth'),
     ('Flowey - Accuracy', 'fx_acc', '--bench-flowey'),
     ('Flowey - Speed', 'fx_speed', '--bench-flowey-smooth'),
+    ('Flowey - Speed (Live Pacing)', 'fx_live', '--bench-flowey-live'),
     ('Flowey - No Render', 'fx_norend', '--bench-flowey --draw-every 100000'),
     ('Flowey - No Audio', 'fx_noaud', '--bench-flowey --mute'),
     ('Flowey - Core Only', 'fx_core', '--bench-flowey --draw-every 100000 --mute'),
@@ -41,6 +42,8 @@ def package(elf: Path, output: Path, version: str) -> None:
         raise ValueError('benchmark ELF must use the bs_bullet save and log slots (build with APP=bs_bullet)')
     if b'\0--bench-flowey\0' not in payload or b'\0--bench-flowey-smooth\0' not in payload:
         raise ValueError('benchmark ELF must include the Flowey tour (rebuild from this revision)')
+    if b'\0--bench-flowey-live\0' not in payload:
+        raise ValueError('benchmark ELF must include Flowey live pacing (rebuild from this revision)')
     if b'\0--bench-chaos-saber\0' not in payload or b'\0--bench-chaos-saber-smooth\0' not in payload:
         raise ValueError('benchmark ELF must include the Chaos Saber benchmark (rebuild from this revision)')
     if output.exists():

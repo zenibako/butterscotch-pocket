@@ -705,8 +705,13 @@ at `fplot=3` and `fplot=7`. It reports 160 frames of phase 2 vine pressure
 (`vines`) and 160 frames of phase 6 eye shots (`eyes`), with room entry and
 attack setup reported separately. Each window ends with the expected battle
 phase, positive HP and its live attack object (`obj_gigavine` or
-`obj_eyeshot_a`). Both modes use seed 7 and volatile saves. Leave the
+`obj_eyeshot_a`). All three modes use seed 7 and volatile saves. Leave the
 controls alone while it runs.
+
+`--bench-flowey-live` runs the same checkpoints with the normal Speed
+mode limiter and adaptive draw skipping. The report shows gameplay updates
+per wall-clock second, display submissions, and skipped draws for each
+section. Full speed is 30 updates per second.
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:
@@ -723,6 +728,7 @@ core. Its launch entries and exact arguments are:
 | Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
 | Flowey - Accuracy | `--bench-flowey` |
 | Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - Speed (Live Pacing) | `--bench-flowey-live` |
 | Flowey - No Render | `--bench-flowey --draw-every 100000` |
 | Flowey - No Audio | `--bench-flowey --mute` |
 | Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |

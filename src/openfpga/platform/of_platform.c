@@ -677,7 +677,7 @@ void platformSwapBuffers(void) {
         scriptProfileFrame();
         ofPerfFrame(NULL, 0, 0);
         ofFocusPresent(g_runner,true);
-        ofBenchFrame(g_runner);
+        ofBenchFrame(g_runner, true);
 #ifdef OF_PC
         dumpFrameIfRequested(false);
 #endif
@@ -732,7 +732,7 @@ void platformSwapBuffers(void) {
 #ifdef OF_PC
     frameLog();
 #endif
-    ofBenchFrame(g_runner);
+    ofBenchFrame(g_runner, false);
 #ifdef OF_PC
     dumpFrameIfRequested(true);
 #endif
@@ -759,16 +759,17 @@ void platformSwapBuffers(void) {
             memcpy(dst + (size_t) y * g_modeStride, g_nextFb + (size_t) y * g_nextW, rowBytes);
     }
     uint64_t flipStart = nowNanos();
+    bool submitted = true;
 #ifdef OF_PC
     /* BS_NOFLIP=1 never presents: the desktop window waits for vsync on every flip, which caps a long scripted
      * run at the display's refresh rate. */
     static int noFlip = -1;
     if (noFlip < 0) noFlip = getenv("BS_NOFLIP") != NULL;
-    if (!noFlip)
+    submitted = !noFlip;
 #endif
-    of_video_flip();
+    if (submitted) of_video_flip();
     uint64_t flipNanos=nowNanos() - flipStart;
-    ofBenchAddFlipTime(flipNanos);
+    ofBenchAddFlipTime(flipNanos, submitted);
 #ifndef OF_PC
     ofLogSetConsole(false);
 #endif
@@ -1329,7 +1330,9 @@ void platformSleepUntil(uint64_t time) {
         usleep((useconds_t) ((remaining - 1000000) / 1000));
     while (nowNanos() < time) {
     }
-    ofPerfAddSleep(nowNanos() - start);
+    uint64_t end = nowNanos();
+    ofPerfAddSleep(end - start);
+    ofBenchPacedFrame(g_runner, end);
 }
 
 void ofPlatformSnapshotNotice(const char *text) {

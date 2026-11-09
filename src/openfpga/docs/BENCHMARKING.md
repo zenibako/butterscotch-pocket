@@ -76,6 +76,7 @@ tour, the short Chaos Saber benchmark and the Photoshop Flowey checkpoint tour:
 | Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
 | Flowey - Accuracy | `--bench-flowey` |
 | Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - Speed (Live Pacing) | `--bench-flowey-live` |
 | Flowey - No Render | `--bench-flowey --draw-every 100000` |
 | Flowey - No Audio | `--bench-flowey --mute` |
 | Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
@@ -92,6 +93,13 @@ attack windows in `room_floweyx`, reached via its phase 2 and phase 6
 checkpoints. The `vset` and `fset` rows include entry and warmup and should
 be kept separate from attack timing. Flowey uses the same `bs_bullet_1.sav`
 report slot as the Asriel tour.
+
+Use Live Pacing to measure gameplay cadence with the Speed limiter active.
+It reports completed game updates, adaptive screen skips, display
+submissions, and elapsed wall time, including the limiter's wait. The
+`other` column includes updates during room transitions that do not submit
+a picture. The uncapped Speed entry measures the cost of drawing every
+frame. Compare timings within the same entry.
 
 The `45x31 raster` lines show the number of rotated sprite calls on the timed
 frames and the mean microseconds per call. `warm` reuses a cached raster,

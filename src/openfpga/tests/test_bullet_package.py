@@ -30,6 +30,7 @@ MODES = (
     ('Chaos Saber - Speed', 'cs_speed', '--bench-chaos-saber-smooth'),
     ('Flowey - Accuracy', 'fx_acc', '--bench-flowey'),
     ('Flowey - Speed', 'fx_speed', '--bench-flowey-smooth'),
+    ('Flowey - Speed (Live Pacing)', 'fx_live', '--bench-flowey-live'),
     ('Flowey - No Render', 'fx_norend', '--bench-flowey --draw-every 100000'),
     ('Flowey - No Audio', 'fx_noaud', '--bench-flowey --mute'),
     ('Flowey - Core Only', 'fx_core', '--bench-flowey --draw-every 100000 --mute'),
@@ -48,7 +49,7 @@ class BulletPackageTest(unittest.TestCase):
         self.elf = self.root / 'app.elf'
         self.payload = (
             ELF_HEADER + b'bs_bullet_0.sav\0bs_bullet_1.sav\0--bench-flowey\0--bench-flowey-smooth\0'
-            b'--bench-chaos-saber\0--bench-chaos-saber-smooth\0'
+            b'--bench-flowey-live\0--bench-chaos-saber\0--bench-chaos-saber-smooth\0'
         )
         self.elf.write_bytes(self.payload)
         self.output = self.root / 'bullet.zip'
@@ -68,8 +69,8 @@ class BulletPackageTest(unittest.TestCase):
         self.assertEqual({path: hashlib.sha256(path.read_bytes()).digest() for path in sources}, before)
         with zipfile.ZipFile(self.output) as archive:
             self.assertIsNone(archive.testzip())
-            self.assertEqual(len(archive.namelist()), 43)
-            self.assertEqual(len(set(archive.namelist())), 43)
+            self.assertEqual(len(archive.namelist()), 45)
+            self.assertEqual(len(set(archive.namelist())), 45)
             for name in CORE_FILES:
                 actual = archive.read(f'Cores/{CORE_ID}/{name}')
                 if name == 'core.json':
@@ -113,7 +114,7 @@ class BulletPackageTest(unittest.TestCase):
                 self.assertTrue(all(len(filename.encode('utf-8')) <= 23 for filename in slots.values()))
                 self.assertEqual(archive.read(f'Assets/butterscotch/common/{slots[2]}').decode(),
                                  f'[os]\nELF=bs_bullet.elf\nARGS={arguments}\nVARIANT=os25\n')
-            self.assertEqual(len(set(instance_names)), 14)
+            self.assertEqual(len(set(instance_names)), 15)
 
     def test_repeated_packaging_is_byte_identical(self):
         # Catches nondeterministic entry order, timestamps, or generated metadata.
@@ -155,6 +156,12 @@ class BulletPackageTest(unittest.TestCase):
     def test_rejects_bullet_elf_without_chaos_saber_benchmark(self):
         self.elf.write_bytes(self.payload.split(b'--bench-chaos-saber', 1)[0])
         with self.assertRaisesRegex(ValueError, 'Chaos Saber benchmark'):
+            self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_bullet_elf_without_live_pacing(self):
+        self.elf.write_bytes(self.payload.replace(b'--bench-flowey-live\0', b''))
+        with self.assertRaisesRegex(ValueError, 'live pacing'):
             self.package()
         self.assertFalse(self.output.exists())
 

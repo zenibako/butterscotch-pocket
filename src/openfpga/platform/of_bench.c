@@ -20,6 +20,12 @@ static int g_frame = 0;
 static int g_section = 0;
 static uint64_t g_startNanos = 0;
 static uint64_t g_sectionStart = 0;
+static int g_sectionFirstUpdate;
+static int g_lastLiveUpdate = -1;
+static bool g_liveFramePending, g_liveSkipped, g_liveSubmitted;
+static struct {
+    unsigned updates, skipped, submitted, micros, rate;
+} g_liveSections[OF_BENCH_MAX_SECTIONS];
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
 static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_flipNanos = 0; /* time inside the display flip this section */
@@ -46,58 +52,64 @@ static struct {
     int sectionCount;
     bool tour;
     bool runProbes;
+    bool livePacing;
 } g_def;
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
-                       const OfBenchSection *sections, int sectionCount, bool tour) {
+                       const OfBenchSection *sections, int sectionCount, bool tour, bool livePacing) {
     for (int i = 0; i < OF_BENCH_MAX_SECTIONS; ++i) g_sectionSeen[i] = false;
     g_def.title = title;
     g_def.sections = sections;
     g_def.sectionCount = sectionCount;
     g_def.tour = tour;
-    g_def.runProbes = true;
+    g_def.runProbes = !livePacing;
+    g_def.livePacing = livePacing;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
-    ofPerfDetailEvery(OF_BENCH_DETAIL_EVERY);
+    ofPerfDetailEvery(livePacing ? 0 : OF_BENCH_DETAIL_EVERY);
     ofPlatformSetInputScript(script);
     if (jumpCount > 0) ofPlatformSetJumps(jumps, jumpCount);
-    ofPlatformSetUncapped(true);
+    ofPlatformSetUncapped(!livePacing);
     ofSaveFsSetVolatile(true);
 }
 
 void ofBenchStart(void) {
     benchStart(ofGame.benchTitle, ofGame.benchScript, ofGame.benchJumps, ofGame.benchJumpCount,
-               ofGame.benchSections, ofGame.benchSectionCount, false);
+               ofGame.benchSections, ofGame.benchSectionCount, false, false);
 }
 
 bool ofBenchStartTour(void) {
     if (ofGame.tourScript == NULL) return false;
     benchStart(ofGame.tourTitle, ofGame.tourScript, ofGame.tourJumps, ofGame.tourJumpCount,
-               ofGame.tourSections, ofGame.tourSectionCount, true);
+               ofGame.tourSections, ofGame.tourSectionCount, true, false);
     return true;
 }
 
 bool ofBenchStartBulletTour(void) {
     if (ofGame.bulletScript == NULL) return false;
     benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
-               ofGame.bulletSections, ofGame.bulletSectionCount, true);
+               ofGame.bulletSections, ofGame.bulletSectionCount, true, false);
     return true;
 }
 
 bool ofBenchStartChaosSaber(void) {
     if (ofGame.saberScript == NULL) return false;
     benchStart(ofGame.saberTitle, ofGame.saberScript, ofGame.saberJumps, ofGame.saberJumpCount,
-               ofGame.saberSections, ofGame.saberSectionCount, true);
+               ofGame.saberSections, ofGame.saberSectionCount, true, false);
     g_def.runProbes = false;
     return true;
 }
 
-bool ofBenchStartFloweyTour(void) {
+bool ofBenchStartFloweyTour(bool livePacing) {
     if (ofGame.floweyScript == NULL) return false;
     benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
-               ofGame.floweySections, ofGame.floweySectionCount, true);
+               ofGame.floweySections, ofGame.floweySectionCount, true, livePacing);
     return true;
+}
+
+bool ofBenchLivePacing(void) {
+    return g_def.livePacing;
 }
 
 /* SD read throughput, cold and warm.
@@ -223,8 +235,10 @@ static void asyncReport(void) {
 static void asyncReport(void) {}
 #endif
 
-void ofBenchAddFlipTime(uint64_t nanos) {
-    if (g_running) g_flipNanos += nanos;
+void ofBenchAddFlipTime(uint64_t nanos, bool submitted) {
+    if (!g_running) return;
+    if (g_def.livePacing) g_liveSubmitted = submitted;
+    else g_flipNanos += nanos;
 }
 
 static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
@@ -232,19 +246,40 @@ static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
     return calls ? (unsigned) (notes->nanos[path] / ((uint64_t) calls * 1000u)) : 0;
 }
 
-void ofBenchFrame(Runner *runner) {
-    if (!g_running) return;
+static void reportWork(void);
 
+static void reportLive(void) {
+    ofLogPrint("Full speed: 30 updates/s\n");
+    ofLogPrint("phase upd/s updates submit skips other   time-us\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        unsigned updates = g_liveSections[i].updates;
+        unsigned skipped = g_liveSections[i].skipped;
+        unsigned submitted = g_liveSections[i].submitted;
+        unsigned rate = g_liveSections[i].rate;
+        ofLogPrint("%-5s %3u.%u %7u %6u %5u %5u %9u\n", g_def.sections[i].tag,
+                   rate / 10, rate % 10, updates, submitted, skipped,
+                   updates - submitted - skipped, g_liveSections[i].micros);
+    }
+    ofLogPrint("submit = frames sent to display\n");
+    ofLogPrint("skips = adaptive; other includes room changes\n");
+}
+
+static void advanceBenchFrame(Runner *runner, uint64_t now) {
     const OfBenchSection *section = &g_def.sections[g_section];
     if (!g_sectionSeen[g_section] && ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
-    uint64_t now = nowNanos();
     if (g_frame == 0) {
         g_firstFrameMs = (unsigned) ((now - g_startNanos) / 1000000u);
         g_sectionStart = now;
-        ofPerfTakeTotals(NULL); /* loading is not part of the first section */
-        swrCallNotes = true;
-        swrCallNotesTake(NULL, 0, NULL);
-        swrPipeRasterTake(NULL);
+        g_sectionFirstUpdate = runner->frameCount;
+        if (!g_def.livePacing) {
+            ofPerfTakeTotals(NULL); /* loading is not part of the first section */
+            swrCallNotes = true;
+            swrCallNotesTake(NULL, 0, NULL);
+            swrPipeRasterTake(NULL);
+        }
+    } else if (g_def.livePacing) {
+        g_liveSections[g_section].skipped += g_liveSkipped;
+        g_liveSections[g_section].submitted += g_liveSubmitted;
     }
     g_frame++;
     if (g_frame < section->lastFrame) return;
@@ -262,11 +297,23 @@ void ofBenchFrame(Runner *runner) {
         ofDiagHalt("benchmark scene check failed");
 #endif
     }
-    g_sectionMs[g_section] = (unsigned) ((now - g_sectionStart) / 1000000u);
-    g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
-    ofPerfTakeTotals(&g_sectionTotals[g_section]);
-    g_sectionNoteCount[g_section] = swrCallNotesTake(g_sectionNotes[g_section], OF_BENCH_NOTES, &g_sectionNotesMissed[g_section]);
-    swrPipeRasterTake(&g_sectionPipeRaster[g_section]);
+    uint64_t elapsed = now - g_sectionStart;
+    if (g_def.livePacing) {
+        // The swap-indexed attack windows stay aligned with the uncapped tour.
+        // Steps on room transitions still count as updates in the wall interval.
+        unsigned updates = (unsigned) (runner->frameCount - g_sectionFirstUpdate);
+        g_liveSections[g_section].updates = updates;
+        g_liveSections[g_section].micros = (unsigned) (elapsed / 1000u);
+        g_liveSections[g_section].rate = elapsed > 0 ?
+            (unsigned) ((updates * 10000000000ull + elapsed / 2u) / elapsed) : 0;
+        g_sectionFirstUpdate = runner->frameCount;
+    } else {
+        g_sectionMs[g_section] = (unsigned) (elapsed / 1000000u);
+        g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
+        ofPerfTakeTotals(&g_sectionTotals[g_section]);
+        g_sectionNoteCount[g_section] = swrCallNotesTake(g_sectionNotes[g_section], OF_BENCH_NOTES, &g_sectionNotesMissed[g_section]);
+        swrPipeRasterTake(&g_sectionPipeRaster[g_section]);
+    }
     g_sectionStart = now;
     g_flipNanos = 0;
     if (++g_section < g_def.sectionCount) return;
@@ -281,8 +328,8 @@ void ofBenchFrame(Runner *runner) {
 #endif
     char drawn[40] = "";
     if (ofPlatformForcedSkip() > 0) snprintf(drawn, sizeof(drawn), ", drawing 1 frame in %d", ofPlatformForcedSkip());
-    ofLogPrint("=== %s benchmark, %s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
-               note[0] != '\0' ? ", " : "", note, drawn);
+    ofLogPrint("=== %s benchmark, %s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
+               g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
 #ifndef OF_PC
     {
         /* Say which OS and bitstream this ran on; tables look alike otherwise. */
@@ -295,6 +342,34 @@ void ofBenchFrame(Runner *runner) {
     ofLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
     ofLogPrint("%s\n", ofLogLoadSummary());
     ofLogPrint("%s\n", ofLogLoadPhases());
+    if (g_def.livePacing) reportLive();
+    else reportWork();
+    ofLogPrint("--- end of report ---\n"); /* ofLogDump keeps a report from its title to this line */
+    ofLogDump();
+    ofDiagHalt("benchmark finished");
+}
+
+void ofBenchFrame(Runner *runner, bool skipped) {
+    if (!g_running) return;
+    if (g_def.livePacing) {
+        g_liveFramePending = true;
+        g_liveSkipped = skipped;
+        g_liveSubmitted = false;
+    } else {
+        advanceBenchFrame(runner, nowNanos());
+    }
+}
+
+void ofBenchPacedFrame(Runner *runner, uint64_t now) {
+    if (!g_liveFramePending) return;
+    g_liveFramePending = false;
+    if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
+    if (runner->frameCount <= g_lastLiveUpdate) return;
+    g_lastLiveUpdate = runner->frameCount;
+    advanceBenchFrame(runner, now);
+}
+
+static void reportWork(void) {
     ofLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
     unsigned totalMs = 0;
@@ -422,7 +497,4 @@ void ofBenchFrame(Runner *runner) {
                    US(at[4]), US(at[5]), US(at[6]), US(at[0]), US(outside));
         #undef US
     }
-    ofLogPrint("--- end of report ---\n"); /* ofLogDump keeps a report from its title to this line */
-    ofLogDump();
-    ofDiagHalt("benchmark finished");
 }
