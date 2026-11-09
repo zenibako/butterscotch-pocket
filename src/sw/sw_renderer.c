@@ -3320,6 +3320,11 @@ void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active)
     ((SWRenderer*) renderer)->floweySpeedRoom = active;
 }
 
+bool SWRenderer_isSkippingScreen(const Renderer* renderer)
+{
+    return renderer != NULL && renderer->vtable == &swrVtable && SWR_SKIPPED((const SWRenderer*)renderer);
+}
+
 void SWRenderer_setContrastAssets(Renderer* renderer, const char* const* sprites, size_t spriteCount,
                                  const char* const* fonts, size_t fontCount)
 {

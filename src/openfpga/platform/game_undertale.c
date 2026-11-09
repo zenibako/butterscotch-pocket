@@ -11,6 +11,7 @@
 #include "log.h"
 #include "of_state_requests.h"
 #include "stb_ds.h"
+#include "utils.h"
 #include "vm_builtins.h"
 
 /* Prompts beyond the ones of_strings.c renames for every game. */
@@ -82,9 +83,19 @@ enum {
 static int32_t pipeVars[PIPE_FIELD_COUNT];
 static bool pipeVarsResolved;
 
+enum {
+    BACKDROP_PHASE, BACKDROP_FROZEN, BACKDROP_I, BACKDROP_LAYER_PHASE, BACKDROP_BLEND,
+    BACKDROP_GROWTH, BACKDROP_GROWTH2, BACKDROP_GROWTH3,
+    BACKDROP_MSIN, BACKDROP_MSIN2, BACKDROP_MSIN3, BACKDROP_YSIN, BACKDROP_YSIN2, BACKDROP_YSIN3,
+    BACKDROP_SSX, BACKDROP_SSX2, BACKDROP_SSX3, BACKDROP_FIELD_COUNT
+};
+static int32_t backdropVars[BACKDROP_FIELD_COUNT];
+static bool backdropVarsResolved;
+
 static void forgetNativeVm(void) {
     particleVarsResolved = false;
     pipeVarsResolved = false;
+    backdropVarsResolved = false;
 }
 
 static void setNativeReal(Instance *self, int32_t id, GMLReal number) {
@@ -153,11 +164,15 @@ typedef struct {
     GMLReal yDivisor;
 } FloweyPipeWave;
 
-static bool pipeNumber(Instance *instance, int field, GMLReal *out) {
-    RValue value = Instance_getSelfVar(instance, pipeVars[field]);
+static bool readNativeNumber(Instance *instance, int32_t id, GMLReal *out) {
+    RValue value = Instance_getSelfVar(instance, id);
     if (value.type != RVALUE_REAL && value.type != RVALUE_INT32) return false;
     *out = RValue_toReal(value);
     return isfinite(*out);
+}
+
+static bool pipeNumber(Instance *instance, int field, GMLReal *out) {
+    return readNativeNumber(instance, pipeVars[field], out);
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -256,11 +271,125 @@ static bool floweyPipeDraw1(VMContext *ctx) { return floweyPipeDraw(ctx, 0); }
 static bool floweyPipeDraw2(VMContext *ctx) { return floweyPipeDraw(ctx, 1); }
 static bool floweyPipeDraw3(VMContext *ctx) { return floweyPipeDraw(ctx, 2); }
 
+static Instance *floweyBackdropInstance(VMContext *ctx, bool skipOnly) {
+    Runner *runner = ctx->runner;
+    if (!ofPlatformSpeedMode() || runner == NULL || runner->currentRoom == NULL ||
+        runner->currentRoom->name == NULL || strcmp(runner->currentRoom->name, "room_floweyx") != 0 ||
+        (skipOnly && !SWRenderer_isSkippingScreen(runner->renderer))) return NULL;
+    if (!backdropVarsResolved) {
+        static const char *const names[BACKDROP_FIELD_COUNT] = {
+            "siner", "frozen", "i", "siner2", "blend3", "growth", "growth2", "growth3",
+            "msin", "msin2", "msin3", "ysin", "ysin2", "ysin3", "ssx", "ssx2", "ssx3"
+        };
+        for (int i = 0; i < BACKDROP_FIELD_COUNT; i++) backdropVars[i] = VM_getOrAllocateVarID(ctx, names[i]);
+        backdropVarsResolved = true;
+    }
+    return ctx->currentCallFrame->self;
+}
+
+/* The layered backdrop's Draw event updates room background state. Each layer
+ * uses the same sine for opacity and drift, so keep both writes with one sine. */
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweyBackgroundMotion(VMContext *ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance *self = floweyBackdropInstance(ctx, false);
+    if (self == NULL) return false;
+    RValue phase = Instance_getSelfVar(self, backdropVars[BACKDROP_PHASE]);
+    if (phase.type != RVALUE_REAL || !isfinite(phase.real) ||
+        !(ctx->runner->mathEpsilon >= 0 && ctx->runner->mathEpsilon < (GMLReal)0.5)) return false;
+
+    for (int i = 0; i < 8; i++) {
+        RuntimeBackground *background = &ctx->runner->backgrounds[i];
+        GMLReal wave = GMLReal_sin((phase.real + (GMLReal)i) / (GMLReal)8);
+        background->alpha = (float)((GMLReal)0.5 + wave * (GMLReal)0.4);
+        background->x = (float)((GMLReal)background->x + wave);
+    }
+    setNativeReal(self, backdropVars[BACKDROP_I], (GMLReal)8);
+    setNativeReal(self, backdropVars[BACKDROP_LAYER_PHASE], phase.real + (GMLReal)7);
+    setNativeReal(self, backdropVars[BACKDROP_PHASE], phase.real + (GMLReal)1);
+    return true;
+}
+
+static bool floweyBackdropPhase(VMContext *ctx, Instance *self, GMLReal *out) {
+    GMLReal frozen;
+    if (self == NULL || !readNativeNumber(self, backdropVars[BACKDROP_FROZEN], &frozen)) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    RValue phase = Instance_getSelfVar(self, backdropVars[BACKDROP_PHASE]);
+    if (phase.type != RVALUE_REAL || !isfinite(phase.real) || !(epsilon >= 0 && epsilon < (GMLReal)0.5)) return false;
+    *out = phase.real;
+    if (GMLReal_fabs(frozen) <= epsilon) {
+        *out += (GMLReal)1;
+        setNativeReal(self, backdropVars[BACKDROP_PHASE], *out);
+    }
+    return true;
+}
+
+/* The VM calls sin and cos separately. A fused sincos can round differently. */
+static inline GMLReal backdropSin(GMLReal angle) {
+    volatile GMLReal separateAngle = angle;
+    return GMLReal_sin(separateAngle);
+}
+
+/* These sprites use the original events on drawn updates and on surfaces.
+ * On a skipped screen update, retain every animation field they write. */
+static bool floweyBackdropPipes(VMContext *ctx) {
+    Instance *self = floweyBackdropInstance(ctx, true);
+    GMLReal phase;
+    if (!floweyBackdropPhase(ctx, self, &phase)) return false;
+    GMLReal wave = backdropSin(phase / (GMLReal)9);
+    setNativeReal(self, backdropVars[BACKDROP_MSIN], wave * (GMLReal)2);
+    setNativeReal(self, backdropVars[BACKDROP_YSIN], GMLReal_cos(phase / (GMLReal)8));
+    setNativeReal(self, backdropVars[BACKDROP_GROWTH], GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.012);
+    setNativeReal(self, backdropVars[BACKDROP_MSIN2], backdropSin(phase / (GMLReal)10) * (GMLReal)1.5);
+    setNativeReal(self, backdropVars[BACKDROP_YSIN2], GMLReal_cos(phase / (GMLReal)9) * (GMLReal)0.8);
+    setNativeReal(self, backdropVars[BACKDROP_GROWTH2], backdropSin(phase / (GMLReal)8) * (GMLReal)0.01);
+    setNativeReal(self, backdropVars[BACKDROP_MSIN3], GMLReal_sin(phase / (GMLReal)11));
+    setNativeReal(self, backdropVars[BACKDROP_YSIN3], GMLReal_cos(phase / (GMLReal)10) * (GMLReal)0.5);
+    setNativeReal(self, backdropVars[BACKDROP_GROWTH3], wave * (GMLReal)0.005);
+    uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
+    setNativeReal(self, backdropVars[BACKDROP_BLEND], (GMLReal)Color_lerp((int32_t)tint, 0, 0.4f));
+    return true;
+}
+
+static void setBackdropVineGrowth(Instance *self, int field, GMLReal number) {
+    RValue value = RValue_makeReal(number);
+    value.gmlStackType = GML_TYPE_INT32; /* ADD/SUB.v.i result stored by pop.v.v */
+    Instance_setSelfVar(self, backdropVars[field], value);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweyBackdropVines(VMContext *ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance *self = floweyBackdropInstance(ctx, true);
+    GMLReal phase;
+    if (!floweyBackdropPhase(ctx, self, &phase)) return false;
+    GMLReal cosine = GMLReal_cos(phase / (GMLReal)6);
+    GMLReal scale = (GMLReal)self->imageXscale;
+    setBackdropVineGrowth(self, BACKDROP_GROWTH, (GMLReal)1 + backdropSin(phase / (GMLReal)6) * (GMLReal)0.05);
+    setBackdropVineGrowth(self, BACKDROP_GROWTH2, (GMLReal)1 + cosine * (GMLReal)0.05);
+    setBackdropVineGrowth(self, BACKDROP_GROWTH3, (GMLReal)1 - GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.05);
+    setNativeReal(self, backdropVars[BACKDROP_SSX], GMLReal_sin(phase / (GMLReal)4) * (GMLReal)2 * scale);
+    setNativeReal(self, backdropVars[BACKDROP_SSX2], GMLReal_sin(phase / (GMLReal)5) * scale);
+    setNativeReal(self, backdropVars[BACKDROP_SSX3], cosine * (GMLReal)0.5 * scale);
+    return true;
+}
+
 static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_orangeparticle_Step_0", 392, 0x85cd9b4f052c0694ull, orangeParticleStep },
     { "gml_Object_obj_floweypipetest_Draw_0", 2292, 0xd060939f37f20db1ull, floweyPipeDraw1 },
     { "gml_Object_obj_floweypipetest_2_Draw_0", 2496, 0xc784a157fab0292eull, floweyPipeDraw2 },
     { "gml_Object_obj_floweypipetest_3_Draw_0", 2148, 0x543e2f97612cf23cull, floweyPipeDraw3 },
+    { "gml_Object_obj_flowey_bgdraw_Draw_0", 272, 0x746a6e5ff0305b36ull, floweyBackgroundMotion },
+    { "gml_Object_obj_bgpipe_Draw_0", 964, 0x12bf9b0542ba714cull, floweyBackdropPipes },
+    { "gml_Object_obj_vines_flowey_Draw_0", 704, 0xec70756e7a99f41aull, floweyBackdropVines },
 };
 
 /* Save states (of_state_requests.c) are taken anywhere the runner can store

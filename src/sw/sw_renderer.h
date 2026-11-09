@@ -16,6 +16,8 @@ bool SWRenderer_snapshotGetState(Renderer* renderer, SWRendererSnapshotState* st
 void SWRenderer_snapshotApplyState(Renderer* renderer, const SWRendererSnapshotState* state);
 
 void SWRenderer_clearFrameBuffer(Renderer* renderer, uint32_t color);
+/* Screen draws can be omitted on a skip. User surfaces still receive draws. */
+bool SWRenderer_isSkippingScreen(const Renderer* renderer);
 
 // Platform opt-in for selected UI assets; only exact half-size Speed draws are adjusted.
 void SWRenderer_setContrastAssets(Renderer* renderer, const char* const* sprites, size_t spriteCount,
