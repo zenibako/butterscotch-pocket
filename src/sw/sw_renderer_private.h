@@ -84,6 +84,7 @@ typedef struct
     // with it and live in its allocation.
     uint16_t* rowBounds;
     struct SWBoxRows* boxRows;
+    struct SWFloweyArtRows* floweyArtRows;
     uint16_t* pipeSolidBounds; // longest fully opaque point and 2x2 runs per row
     uint16_t* halfRowBounds;
     uint16_t* halfFullBounds; // per row of the half-size copy, the longest run of texels standing for all four of theirs: [start, end)
@@ -167,6 +168,7 @@ typedef struct
     bool floweySpeedRoom;
     int32_t floweyVineItem;
     int32_t floweyStalkSprite, floweyStalkFirst, floweyStalkLast;
+    int32_t floweyArmItem, floweyTvCaseItem, floweyTvScreenSprite;
     int32_t floweyOuterEyeShadow;
     int32_t floweyUprightItems[4];
     unsigned floweyUprightCount;

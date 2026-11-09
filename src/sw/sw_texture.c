@@ -38,6 +38,7 @@ SWTexture* swrCreateTextureEx(const void* srcBuffer, int width, int height, bool
     txt->stationaryRasters = NULL;
     txt->rowBounds = NULL;
     txt->boxRows = NULL;
+    txt->floweyArtRows = NULL;
     txt->pipeSolidBounds = NULL;
     txt->halfRowBounds = NULL;
     txt->halfFullBounds = NULL;
@@ -148,6 +149,7 @@ void swrFreeTexture(SWTexture* texture)
     free(texture->halfBuffer); // the coverage, if any, is in the same allocation
     free(texture->rowBounds);
     swrFreeBoxRows(texture);
+    free(texture->floweyArtRows);
     free(texture->pipeSolidBounds);
     free(texture->spans);
     free(texture->halfSpans);

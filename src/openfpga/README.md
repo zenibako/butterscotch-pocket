@@ -543,7 +543,9 @@ pipe segments during ordinary animation. Flash and debug branches retain the
 original artwork. Speed mode omits the layered background pipes and vines and
 renders the long attacking vines as flat silhouettes. The side stalks animate
 in fewer poses, and the mouth and eye surrounds have simpler motion and
-shading. The warning lines still show where the vines will strike.
+shading. The idle arms and TV casing have coarser shading, and the animated TV
+face uses a steadier width. The arm windups, strikes, TV warnings, and vine
+warning lines keep their original animation.
 
 `make battle-contrast-fixture` builds `./<game>_pc_battle_contrast_fixture`
 without game assets. Run it once for each `GAME` to check game-specific

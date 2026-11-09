@@ -3831,6 +3831,144 @@ static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4],
 }
 #endif
 
+#ifdef SW_HAS_PREMUL_BLEND
+typedef struct SWFloweyArtRows {
+    int sx, sy, sw, sh, width, height, kind;
+    SWBoxRow rows[];
+} SWFloweyArtRows;
+
+static uintpixel_t swrFloweyArtBlock(const SWTexture* texture, int sx, int sy, int w, int h)
+{
+    const uintpixel_t* row = texture->buffer + sy * texture->width + sx;
+    const uintpixel_t* next = row + (h > 1 ? texture->width : 0);
+    uintpixel_t color = 0;
+    return swrAverageBox(row[0], w > 1 ? row[1] : 0,
+                         h > 1 ? next[0] : 0, w > 1 && h > 1 ? next[1] : 0, &color) ? color : 0;
+}
+
+static const SWFloweyArtRows* swrFloweyArtRows(SWTexture* texture, int sx, int sy, int sw, int sh, int kind)
+{
+    SWFloweyArtRows* art = texture->floweyArtRows;
+    if (art != NULL)
+        return art->sx == sx && art->sy == sy && art->sw == sw && art->sh == sh && art->kind == kind ? art : NULL;
+
+    bool screen = kind == SWR_FLOWEY_ART_SCREEN;
+    int width = screen ? 65 : (sw + 1) / 2;
+    int height = screen ? sh : (sh + 1) / 2;
+    size_t pixels = (size_t) width * height;
+    art = malloc(sizeof(*art) + height * sizeof(SWBoxRow) +
+                 pixels * sizeof(uintpixel_t) * (kind == SWR_FLOWEY_ART_ARM ? 2 : 1));
+    if (art == NULL) return NULL;
+    *art = (SWFloweyArtRows) { sx, sy, sw, sh, width, height, kind };
+    uintpixel_t* colors = (uintpixel_t*) (art->rows + height);
+    if (screen) {
+        // The old TV animation retains its current frame and palette. Only
+        // the little horizontal stretch is fixed so each row can be copied.
+        int xstep = (sw << 14) / width;
+        for (int y = 0; y < height; ++y) {
+            const uintpixel_t* source = texture->buffer + (sy + y) * texture->width + sx;
+            for (int x = 0; x < width; ++x)
+                colors[y * width + x] = source[(x * xstep) >> 14];
+        }
+    } else {
+        // Share one color over each 2x2 block on screen, with a separate
+        // coverage test for each pixel to retain the claws and TV aperture.
+        for (int y = 0; y < height; y += 2) {
+            for (int x = 0; x < width; x += 2) {
+                int cols = swrMin(2, width - x), rows = swrMin(2, height - y);
+                uintpixel_t blocks[4] = {0}, shade = 0;
+                for (int j = 0; j < rows; ++j)
+                    for (int i = 0; i < cols; ++i) {
+                        int u = 2 * (x + i), v = 2 * (y + j);
+                        blocks[2 * j + i] = swrFloweyArtBlock(texture, sx + u, sy + v, sw - u, sh - v);
+                    }
+                swrAverageBox(blocks[0], blocks[1], blocks[2], blocks[3], &shade);
+                for (int j = 0; j < rows; ++j)
+                    for (int i = 0; i < cols; ++i)
+                        colors[(y + j) * width + x + i] = blocks[2 * j + i] ? shade : 0;
+            }
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        const uintpixel_t* row = colors + y * width;
+        int first = width, end = 0, start = 0, solidFrom = 0, solidTo = 0;
+        for (int x = 0; x < width; ++x) {
+            if (!swrIsOpaque(row[x])) {
+                start = x + 1;
+                continue;
+            }
+            if (first == width) first = x;
+            end = x + 1;
+            if (end - start > solidTo - solidFrom) {
+                solidFrom = start;
+                solidTo = end;
+            }
+        }
+        art->rows[y] = (SWBoxRow) { first, end, solidFrom, solidTo };
+        if (kind == SWR_FLOWEY_ART_ARM)
+            for (int x = 0; x < width; ++x)
+                colors[pixels + y * width + x] = row[width - x - 1];
+    }
+    texture->floweyArtRows = art;
+    return art;
+}
+#endif
+
+bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                      int sx, int sy, int sw, int sh, int kind)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    bool mirrored = dw < 0.0f;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 ||
+        sw <= 0 || sw > 171 || sh <= 0 || sh > 275 ||
+        texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !(dh > 0.0f && dh <= 310.0f) || (mirrored && kind != SWR_FLOWEY_ART_ARM)) return false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrTransformSizeIfNeeded(swr, &dw, &dh);
+    if (kind == SWR_FLOWEY_ART_SCREEN) dx += (dw - 65.0f) * 0.5f;
+    if (!(fabsf(dx) < 8192.0f && fabsf(dy) < 8192.0f)) return false;
+
+    const SWFloweyArtRows* art = swrFloweyArtRows(texture, sx, sy, sw, sh, kind);
+    if (art == NULL) return false;
+    int width = art->width, height = swrCeiling(dh);
+    int left = swrFloor(dx) - (mirrored ? width : 0), top = swrFloor(dy);
+    int clipLeft = swrMax(0, swr->portX - left), clipRight = swrMin(width, swr->maxX - left);
+    int firstRow = swrMax(0, swr->portY - top), endRow = swrMin(height, swr->maxY - top);
+    if (clipLeft >= clipRight || firstRow >= endRow) return true;
+
+    const uintpixel_t* colors = (const uintpixel_t*) (art->rows + art->height);
+    if (mirrored) colors += (size_t) width * art->height;
+    int ystep = (art->height << 14) / height;
+    swrOverlayFlush(swr);
+    for (int y = firstRow; y < endRow; ++y) {
+        int row = (y * ystep) >> 14;
+        SWBoxRow bounds = art->rows[row];
+        if (bounds.from >= bounds.to) continue;
+        int first = swrMax(clipLeft, mirrored ? width - bounds.to : bounds.from);
+        int end = swrMin(clipRight, mirrored ? width - bounds.from : bounds.to);
+        if (first >= end) continue;
+        int solidFrom = swrMin(end, swrMax(first, mirrored ? width - bounds.solidTo : bounds.solidFrom));
+        int solidTo = swrMax(solidFrom, swrMin(end, mirrored ? width - bounds.solidFrom : bounds.solidTo));
+        swrDirtyRow(swr, top + y, left + first, left + end);
+        uintpixel_t* dst = swr->fb + (top + y) * swr->fbPitch + left + first;
+        const uintpixel_t* src = colors + row * width;
+        swrCopyPixels(dst + solidFrom - first, src + solidFrom, solidTo - solidFrom);
+        for (int x = first; x < solidFrom; ++x)
+            if (swrIsOpaque(src[x])) dst[x - first] = src[x];
+        for (int x = solidTo; x < end; ++x)
+            if (swrIsOpaque(src[x])) dst[x - first] = src[x];
+    }
+    return true;
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) kind;
+    return false;
+#endif
+}
+
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
                            int sx, int sy, int sw, int sh, bool mirrored)
 {

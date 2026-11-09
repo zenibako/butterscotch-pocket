@@ -6,6 +6,63 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkFloweyArt(void)
+{
+    enum { WIDTH = 6, HEIGHT = 4 };
+    const uintpixel_t colors[] = {0, 0xfc00, 0x83e0, 0x801f};
+    SWTexture* texture = swrCreateTextureEx(NULL, 9, 5, false);
+    texture->immutable = true;
+    for (int y = 1; y < 5; ++y)
+        for (int x = 1; x < 9; ++x)
+            texture->buffer[y * 9 + x] = colors[(x - 1) / 2];
+    uintpixel_t actual[WIDTH * HEIGHT] = {0};
+    SWRenderer swr = {0};
+    swr.fb = swr.mainFb = actual;
+    swr.fbPitch = WIDTH;
+    swr.portW = swr.maxX = WIDTH;
+    swr.portH = swr.maxY = HEIGHT;
+    swr.scaleX = swr.scaleY = 0.5f;
+    swr.blendMode = bm_normal;
+    if (!swrDrawFloweyArt(&swr.base, texture, 6, -2, -8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM) ||
+        !swrDrawFloweyArt(&swr.base, texture, 6, 2, 8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM) ||
+        !swrIsOpaque(actual[0]) || !swrIsOpaque(actual[1]) || actual[2] || actual[3] ||
+        actual[WIDTH + 3] || actual[WIDTH + 4] != colors[1] ||
+        actual[WIDTH + 5] != actual[0] || actual[3 * WIDTH + 5]) {
+        fprintf(stderr, "FAIL: Flowey art opacity and mirrored clipping\n");
+        exit(1);
+    }
+    checks += WIDTH * HEIGHT;
+    swrFreeTexture(texture);
+}
+
+static void checkFloweyTvPalette(void)
+{
+    enum { WIDTH = 65, SOURCE_WIDTH = 90 };
+    SWTexture* texture = swrCreateTextureEx(NULL, SOURCE_WIDTH, 2, false);
+    texture->immutable = true;
+    for (int i = 0; i < 2 * SOURCE_WIDTH; ++i)
+        texture->buffer[i] = i % 3 ? 0x8000 : 0xffff;
+    uintpixel_t actual[2 * WIDTH] = {0};
+    SWRenderer swr = {0};
+    swr.fb = swr.mainFb = actual;
+    swr.fbPitch = swr.portW = swr.maxX = WIDTH;
+    swr.portH = swr.maxY = 2;
+    swr.scaleX = swr.scaleY = 0.5f;
+    swr.blendMode = bm_normal;
+    if (!swrDrawFloweyArt(&swr.base, texture, 0, 0, 130, 4, 0, 0, SOURCE_WIDTH, 2, SWR_FLOWEY_ART_SCREEN))
+        exit(1);
+    int step = (SOURCE_WIDTH << 14) / WIDTH;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < WIDTH; ++x) {
+            if (actual[y * WIDTH + x] == texture->buffer[y * SOURCE_WIDTH + ((x * step) >> 14)]) continue;
+            fprintf(stderr, "FAIL: Flowey TV nearest-neighbor palette\n");
+            exit(1);
+        }
+    }
+    checks += 2 * WIDTH;
+    swrFreeTexture(texture);
+}
+
 static void checkFloweyStalkHalf(void)
 {
     enum { WIDTH = 4, HEIGHT = 3, TEX_WIDTH = 8, TEX_HEIGHT = 6 };
@@ -447,6 +504,8 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkFloweyArt();
+    checkFloweyTvPalette();
     checkFloweyStalkHalf();
     checkFloweyVineFill();
     checkBackdropRows();

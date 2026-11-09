@@ -592,6 +592,15 @@ static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float
     return false;
 }
 
+static bool swrFloweyScreenItem(const SWRenderer* swr, int32_t item)
+{
+    if (swr->floweyTvScreenSprite < 0) return false;
+    const Sprite* screen = &swr->base.dataWin->sprt.sprites[swr->floweyTvScreenSprite];
+    for (uint32_t frame = 0; frame < screen->textureCount; ++frame)
+        if (screen->tpagIndices[frame] == item) return true;
+    return false;
+}
+
 static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y,
                                   float originX, float originY, float xscale, float yscale,
                                   float angleDeg, uint32_t color, float alpha)
@@ -612,7 +621,8 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
         logError("%s: tpagIndex of %d is invalid, as pageId of %d is invalid\n", __func__, tpagIndex, pageId);
         return;
     }
-    if (swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface) {
+    bool floweySpeed = swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface;
+    if (floweySpeed) {
         for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
             if (swr->floweyBackdropItems[i] == tpagIndex) return;
         if (swr->blendMode == bm_normal) {
@@ -659,6 +669,23 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     dy *= yscale;
     dx += x;
     dy += y;
+
+    // The idle arm is a separate item from the attack's stem and strike.
+    // The TV's warnings and flashes also use separate items or fills.
+    if (floweySpeed && angleDeg == 0.0f && color == 0xffffff && alpha == 1.0f &&
+        sw == tpag->targetWidth && sh == tpag->targetHeight) {
+        int kind = SWR_FLOWEY_ART_NONE;
+        if (tpagIndex == swr->floweyArmItem && sw == 171 && sh == 275 &&
+            (xscale == 1.0f || xscale == -1.0f) && yscale >= 0.96f && yscale <= 1.04f)
+            kind = SWR_FLOWEY_ART_ARM;
+        else if (tpagIndex == swr->floweyTvCaseItem && sw == 155 && sh == 167 && xscale == 1.0f && yscale == 1.0f)
+            kind = SWR_FLOWEY_ART_CASE;
+        else if (sw == 90 && sh == 105 && xscale >= 1.39f && xscale <= 1.51f &&
+                 yscale >= 0.89f && yscale <= 1.01f && swrFloweyScreenItem(swr, tpagIndex))
+            kind = SWR_FLOWEY_ART_SCREEN;
+        if (kind != SWR_FLOWEY_ART_NONE &&
+            swrDrawFloweyArt(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, kind)) return;
+    }
     
     if (UNLIKELY(swrMustRotate(angleDeg)))
     {
@@ -1519,6 +1546,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.buttonCache = NULL;
     localSurface.rowBounds = NULL;
     localSurface.boxRows = NULL;
+    localSurface.floweyArtRows = NULL;
     localSurface.pipeSolidBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
@@ -3212,6 +3240,9 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     DataWin* dw = renderer->dataWin;
     swr->floweyVineItem = -1;
     swr->floweyStalkSprite = -1;
+    swr->floweyArmItem = -1;
+    swr->floweyTvCaseItem = -1;
+    swr->floweyTvScreenSprite = -1;
     swr->floweyOuterEyeShadow = -1;
     swr->floweyUprightCount = 0;
     swr->floweyBackdropCount = 0;
@@ -3224,6 +3255,8 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
             swr->floweyStalkFirst = sprite->tpagIndices[0];
             swr->floweyStalkLast = sprite->tpagIndices[sprite->textureCount - 1];
         }
+        if (strcmp(sprite->name, "spr_tvinside_old") == 0 && sprite->textureCount == 37)
+            swr->floweyTvScreenSprite = (int32_t) i;
         if (sprite->textureCount != 1) continue;
         int32_t item = sprite->tpagIndices[0];
         if (item < 0 || (uint32_t) item >= dw->tpag.count) continue;
@@ -3233,6 +3266,10 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
                 page->sourceWidth == 511 && page->sourceHeight == 33 && page->targetX == 2 && page->targetY == 3 &&
                 page->targetWidth == 511 && page->targetHeight == 33)
                 swr->floweyVineItem = item;
+        } else if (strcmp(sprite->name, "spr_floweyarm") == 0) {
+            swr->floweyArmItem = item;
+        } else if (strcmp(sprite->name, "spr_floweyx_tv") == 0) {
+            swr->floweyTvCaseItem = item;
         } else if (strcmp(sprite->name, "spr_flipeye_holder_bg") == 0) {
             swr->floweyOuterEyeShadow = item;
         } else if (swr->floweyUprightCount < sizeof(swr->floweyUprightItems) / sizeof(swr->floweyUprightItems[0]) &&
