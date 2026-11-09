@@ -1237,6 +1237,60 @@ static void swrCopyDoubledSprite(uintpixel_t* dst, int dstPitch, const uintpixel
         }
     }
 }
+
+// Copy a solid run in reverse. Align the destination before writing pairs.
+static void swrCopyReversedPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
+{
+    if (count == 0) return;
+    if ((uintptr_t) dst & 3) {
+        *dst++ = src[--count];
+    }
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+    dst = __builtin_assume_aligned(dst, 4);
+#endif
+#endif
+    while (count >= 2) {
+        uint32_t pair;
+        count -= 2;
+        memcpy(&pair, src + count, sizeof(pair));
+        pair = (pair << 16) | (pair >> 16);
+        memcpy(dst, &pair, sizeof(pair));
+        dst += 2;
+    }
+    if (count != 0) *dst = src[0];
+}
+
+// Point-sampled half-size art treats every covered texel as opaque. Use the
+// existing half-size row bounds and copy the longest solid run in bulk.
+static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
+                                int dx, int dy, int sx, int sy, int w, int h, bool flipX)
+{
+    swrDirtyRect(swr, dx, dy, dx + w, dy + h);
+    for (int y = 0; y < h; ++y) {
+        int row = sy + y;
+        int from = swrMax(0, texture->halfRowBounds[2 * row] - sx);
+        int to = swrMin(w, texture->halfRowBounds[2 * row + 1] - sx);
+        if (from >= to) continue;
+        int solidFrom = swrMin(to, swrMax(from, texture->halfFullBounds[2 * row] - sx));
+        int solidTo = swrMax(solidFrom, swrMin(to, texture->halfFullBounds[2 * row + 1] - sx));
+        const uintpixel_t* src = texture->buffer + row * texture->width + sx;
+        uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+        if (flipX) {
+            swrCopyReversedPixels(dst + w - solidTo, src + solidFrom, solidTo - solidFrom);
+            for (int x = from; x < solidFrom; ++x)
+                if (swrIsOpaque(src[x])) dst[w - 1 - x] = src[x];
+            for (int x = solidTo; x < to; ++x)
+                if (swrIsOpaque(src[x])) dst[w - 1 - x] = src[x];
+        } else {
+            swrCopyPixels(dst + solidFrom, src + solidFrom, solidTo - solidFrom);
+            for (int x = from; x < solidFrom; ++x)
+                if (swrIsOpaque(src[x])) dst[x] = src[x];
+            for (int x = solidTo; x < to; ++x)
+                if (swrIsOpaque(src[x])) dst[x] = src[x];
+        }
+    }
+}
 #endif
 
 /**
@@ -1760,6 +1814,13 @@ static void swrDrawSpriteInternal(
     if (blendmode == bm_normal && alpha > 253)
     {
         bool untinted = (tintColor & 0x7FFF) == 0x7FFF;
+        if (pointSample && untinted && !flipY && dw == sw && dh == sh &&
+            texture->buffer == texture->halfBuffer && texture->halfFullBounds != NULL) {
+            SWR_PROBE_PATH(texture->solid == 1 ? 2 : 3);
+            swrBlitHalfPointRows(swr, texture, dx, dy, sx, sy, dw, dh, flipX);
+            if (swr->baseMode != 0) swrBaseFinish(swr, false);
+            return;
+        }
         if (untinted && texture->immutable && !flipY && xstep == (1 << (fp_prec - 1)) && ystep == xstep &&
             !((dx | dw | swr->fbPitch) & 1) && !((uintptr_t) swr->fb & 3)) {
             SWR_PROBE_PATH(texture->solid == 1 ? 2 : 3);
@@ -3794,7 +3855,42 @@ void swrFreeRotatedRasters(SWTexture* texture)
 }
 
 #ifdef SW_HAS_PREMUL_BLEND
-static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4], uintpixel_t color, int alpha)
+enum { SWR_FLOWEY_VINE_SETS = 16, SWR_FLOWEY_VINE_SPANS = 256 };
+
+typedef struct {
+    uint16_t first, end;
+    uint8_t row, ink;
+} SWFloweyVineSpan;
+
+typedef struct {
+    uint32_t angle;
+    int16_t x, y;
+    int count;
+    bool valid;
+    SWFloweyVineSpan spans[SWR_FLOWEY_VINE_SPANS];
+} SWFloweyVinePose;
+
+typedef struct SWFloweyVineCache {
+    SWFloweyVinePose poses[SWR_FLOWEY_VINE_SETS][2];
+    uint8_t older[SWR_FLOWEY_VINE_SETS];
+} SWFloweyVineCache;
+
+typedef struct {
+    uintpixel_t color;
+    uint32_t redBlue, green;
+} SWFloweyVinePaint;
+
+FORCE_INLINE void swrPaintVineSpan(SWRenderer* swr, int row, int first, int end,
+                                  const SWFloweyVinePaint* paint, int alpha)
+{
+    swrDirtyRow(swr, row, first, end);
+    uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
+    if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), paint->color);
+    else swrBlendSolidRow(dst, (size_t) (end - first), paint->redBlue, paint->green, 256 - alpha);
+}
+
+static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4],
+                           const SWFloweyVinePaint* paint, int alpha, SWFloweyVinePose* pose, unsigned ink)
 {
     int from = swr->maxY, to = swr->portY;
     int firstRow[4], endRow[4];
@@ -3811,7 +3907,6 @@ static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4],
         from = swrMin(from, firstRow[i]);
         to = swrMax(to, endRow[i]);
     }
-    uint32_t redBlue = swrSpreadRedBlue(color) * alpha, green = swrGreen(color) * alpha;
     // A convex band crosses two edges on each row. That pair only changes
     // at a vertex, so select it once for all rows before the next edge change.
     for (int row = from; row < to;) {
@@ -3837,10 +3932,12 @@ static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4],
             int first = swrMax(swr->portX, swrCeiling(left - 0.5f));
             int end = swrMin(swr->maxX, swrCeiling(right - 0.5f));
             if (first >= end) continue;
-            swrDirtyRow(swr, row, first, end);
-            uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
-            if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), color);
-            else swrBlendSolidRow(dst, (size_t) (end - first), redBlue, green, 256 - alpha);
+            if (pose != NULL) {
+                if (pose->count < SWR_FLOWEY_VINE_SPANS)
+                    pose->spans[pose->count++] = (SWFloweyVineSpan) { first, end, row, ink };
+                else pose->valid = false;
+            }
+            swrPaintVineSpan(swr, row, first, end, paint, alpha);
         }
     }
 }
@@ -4079,11 +4176,56 @@ bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float d
      * Collision and the preview lines are handled by their original events. */
     static const int edge[] = { 0, 112, 224, 336, 448, 511 };
     static const int top[] = { 0, 0, 0, 2, 0 }, bottom[] = { 28, 25, 25, 28, 33 };
-    SWRotation rotation = swrMustRotate(angle) ? swrSpriteRotation(swr, angle) : (SWRotation){ 0, 1.0f, 0.0f };
-    float x = swrFloor(dx) + pivotX, y = swrFloor(dy) + pivotY;
-    float sx = (float) swrCeiling(dw) / 511.0f, sy = (float) swrCeiling(dh) / 33.0f;
+    int left = swrFloor(dx), topRow = swrFloor(dy);
+    int width = swrCeiling(dw), height = swrCeiling(dh);
     uintpixel_t packed = swrConvertPixel(color);
+    SWFloweyVinePaint paint[2] = {
+        { .color = tint(packed, swrConvertPixel(0x329ec1)) },
+        { .color = tint(packed, swrConvertPixel(0x285cff)) }
+    };
+    for (int i = 0; i < 2; ++i) {
+        paint[i].redBlue = swrSpreadRedBlue(paint[i].color) * opacity;
+        paint[i].green = swrGreen(paint[i].color) * opacity;
+    }
     swrOverlayFlush(swr);
+
+    // Full-size stock vines hold their exact pose over several updates. Keep
+    // only their clipped spans, in band order, so overlaps still blend twice.
+    SWFloweyVinePose* pose = NULL;
+    if (width == 256 && height == 17 && pivotX == 6.5f && pivotY == 5.5f &&
+        swr->portX == 0 && swr->portY == 0 && swr->maxX == 320 && swr->maxY == 240) {
+        if (swr->floweyVineCache == NULL)
+            swr->floweyVineCache = calloc(1, sizeof(*swr->floweyVineCache));
+        if (swr->floweyVineCache != NULL) {
+            uint32_t angleBits;
+            memcpy(&angleBits, &angle, sizeof(angleBits));
+            uint32_t hash = (uint32_t) left * 0x9e3779b1u ^ (uint32_t) topRow * 0x85ebca6bu ^ angleBits * 0xc2b2ae35u;
+            hash ^= hash >> 16;
+            SWFloweyVineCache* cache = swr->floweyVineCache;
+            unsigned set = hash % SWR_FLOWEY_VINE_SETS;
+            for (unsigned way = 0; way < 2; ++way) {
+                pose = &cache->poses[set][way];
+                if (pose->valid && pose->x == left && pose->y == topRow && pose->angle == angleBits) {
+                    cache->older[set] = 1 - way;
+                    for (int i = 0; i < pose->count; ++i) {
+                        SWFloweyVineSpan span = pose->spans[i];
+                        swrPaintVineSpan(swr, span.row, span.first, span.end, &paint[span.ink], opacity);
+                    }
+                    return true;
+                }
+            }
+            pose = &cache->poses[set][cache->older[set]];
+            cache->older[set] ^= 1;
+            pose->x = left;
+            pose->y = topRow;
+            pose->angle = angleBits;
+            pose->count = 0;
+            pose->valid = true;
+        }
+    }
+    SWRotation rotation = swrMustRotate(angle) ? swrSpriteRotation(swr, angle) : (SWRotation){ 0, 1.0f, 0.0f };
+    float x = left + pivotX, y = topRow + pivotY;
+    float sx = (float) width / 511.0f, sy = (float) height / 33.0f;
     for (int band = 0; band < 5; ++band) {
         float x0 = edge[band] * sx - pivotX, x1 = edge[band + 1] * sx - pivotX;
         float y0 = top[band] * sy - pivotY, y1 = bottom[band] * sy - pivotY;
@@ -4093,8 +4235,8 @@ bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float d
             xx[j] = rotation.cosine * u[j] - rotation.sine * v[j] + x;
             yy[j] = rotation.sine * u[j] + rotation.cosine * v[j] + y;
         }
-        uintpixel_t ink = swrConvertPixel(band == 4 ? 0x285cff : 0x329ec1);
-        swrFillVineBand(swr, xx, yy, tint(packed, ink), opacity);
+        unsigned ink = band == 4;
+        swrFillVineBand(swr, xx, yy, &paint[ink], opacity, pose, ink);
     }
     return true;
 #else

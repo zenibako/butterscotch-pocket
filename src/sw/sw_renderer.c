@@ -365,6 +365,7 @@ static void SWRenderer_destroy(Renderer* renderer)
     }
     swrFreeItemTextures(swr);
     swrFreeTexture(swr->floweyPipeBackdrop);
+    free(swr->floweyVineCache);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
