@@ -170,9 +170,12 @@ typedef struct
     int32_t floweyStalkSprite, floweyStalkFirst, floweyStalkLast;
     int32_t floweyArmItem, floweyTvCaseItem, floweyTvScreenSprite;
     int32_t floweyOuterEyeShadow;
+    int32_t floweyPipeItem;
+    uint32_t floweyPipeFrame;
+    SWTexture* floweyPipeBackdrop;
     int32_t floweyUprightItems[4];
     unsigned floweyUprightCount;
-    int32_t floweyBackdropItems[5];
+    int32_t floweyBackdropItems[4];
     unsigned floweyBackdropCount;
     uintpixel_t* mainFb;
     uint16_t mainWidth;

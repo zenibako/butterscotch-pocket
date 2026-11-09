@@ -6,6 +6,27 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkFloweyPipeBackdrop(void)
+{
+    SWTexture* pipe = swrCreateTextureEx(NULL, 192, 183, false);
+    for (int y = 41; y < 43; ++y)
+        for (int x = 1; x < 3; ++x)
+            pipe->buffer[y * pipe->width + x] = 0xffff;
+    SWTexture* art = swrMakeFloweyPipeBackdrop(pipe, 1, 1);
+    if (art == NULL || art->width != 320 || !art->immutable ||
+        !swrIsOpaque(art->buffer[10 * art->width + 200]) ||
+        art->buffer[7 * art->width + 109] != art->buffer[10 * art->width + 200] ||
+        !swrIsOpaque(art->buffer[20 * art->width + 229]) ||
+        art->buffer[17 * art->width + 80] != art->buffer[20 * art->width + 229] ||
+        art->buffer[20 * art->width + 229] == art->buffer[10 * art->width + 200] ||
+        art->buffer[10 * art->width + 199] || art->buffer[21 * art->width + 229]) {
+        fprintf(stderr, "FAIL: static Flowey pipe placement and masking\n");
+        exit(1);
+    }
+    swrFreeTexture(art);
+    swrFreeTexture(pipe);
+}
+
 static void checkFloweyArt(void)
 {
     enum { WIDTH = 6, HEIGHT = 4 };
@@ -504,6 +525,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkFloweyPipeBackdrop();
     checkFloweyArt();
     checkFloweyTvPalette();
     checkFloweyStalkHalf();

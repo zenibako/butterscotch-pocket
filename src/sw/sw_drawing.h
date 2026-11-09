@@ -29,6 +29,7 @@ void swrPlotPixel(Renderer* renderer, float x, float y, uintpixel_t color, float
 void swrDrawLine(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uintpixel_t color, uintpixel_t color2, float alpha, int alignment);
 bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float dh,
                       float angle, float pivotX, float pivotY, uint32_t color, float alpha);
+SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy);
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
                            int sx, int sy, int sw, int sh, bool mirrored);
 enum { SWR_FLOWEY_ART_NONE, SWR_FLOWEY_ART_ARM, SWR_FLOWEY_ART_CASE, SWR_FLOWEY_ART_SCREEN };

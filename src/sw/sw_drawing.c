@@ -3929,6 +3929,49 @@ static const SWFloweyArtRows* swrFloweyArtRows(SWTexture* texture, int sx, int s
 }
 #endif
 
+SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { WIDTH = 320, HEIGHT = 128, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
+    if (sx < 0 || sy < 0 || sx + PIPE_WIDTH > pipe->width || sy + PIPE_HEIGHT > pipe->height)
+        return NULL;
+    SWTexture* art = calloc(1, sizeof(*art));
+    if (art == NULL) return NULL;
+    art->buffer = calloc(WIDTH * HEIGHT, sizeof(*art->buffer));
+    if (art->buffer == NULL) {
+        free(art);
+        return NULL;
+    }
+    art->width = WIDTH;
+    art->height = HEIGHT;
+    art->immutable = true;
+
+    // The six ordinary back-pipe draws in a neutral pose, at 320x240.
+    // Leave the gaps transparent so the held-clear path can retain the base.
+    static const int left[] = { 200, 210, 229, 15, 5, -14 };
+    static const int top[] = { -10, -5, 0, -13, -8, -3 };
+    for (int layer = 0; layer < 6; ++layer) {
+        int brightness = layer == 2 || layer == 5 ? 2 : 1;
+        for (int y = swrMax(0, top[layer]); y < top[layer] + (PIPE_HEIGHT + 1) / 2; ++y) {
+            int v = 2 * (y - top[layer]);
+            for (int x = swrMax(0, left[layer]); x < swrMin(WIDTH, left[layer] + PIPE_WIDTH / 2); ++x) {
+                int col = x - left[layer];
+                int u = 2 * (layer < 3 ? col : PIPE_WIDTH / 2 - 1 - col);
+                uintpixel_t color = swrFloweyArtBlock(pipe, sx + u, sy + v, PIPE_WIDTH - u, PIPE_HEIGHT - v);
+                if (!swrIsOpaque(color)) continue;
+                int gray = (((color >> 10) & 31) + 2 * ((color >> 5) & 31) + (color & 31)) / 4;
+                int shade = 2 + gray / 4 * brightness;
+                art->buffer[y * WIDTH + x] = (uintpixel_t) (0x8000 | (shade << 10) | (shade << 5) | shade);
+            }
+        }
+    }
+    return art;
+#else
+    (void) pipe; (void) sx; (void) sy;
+    return NULL;
+#endif
+}
+
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
                       int sx, int sy, int sw, int sh, int kind)
 {
