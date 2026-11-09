@@ -28,8 +28,8 @@ void ofPlatformStartSleepTest(void);
 /* The tour advances on each eligible swap, including adaptive skips. */
 typedef struct Runner Runner;
 void ofBenchFrame(Runner *runner, bool skipped);
-/* Complete a live sample after display submission and the frame limiter. */
-void ofBenchPacedFrame(Runner *runner, uint64_t now);
+/* Complete a live sample using the frame limiter's existing clock reads. */
+void ofBenchPacedFrame(Runner *runner, uint64_t waitStart, uint64_t waitEnd);
 
 /* Time spent inside the display flip, reported separately from the rest. */
 void ofBenchAddFlipTime(uint64_t nanos, bool submitted);

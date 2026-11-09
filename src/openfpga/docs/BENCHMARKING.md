@@ -98,8 +98,12 @@ Use Live Pacing to measure gameplay cadence with the Speed limiter active.
 It reports completed game updates, adaptive screen skips, display
 submissions, and elapsed wall time, including the limiter's wait. The
 `other` column includes updates during room transitions that do not submit
-a picture. The uncapped Speed entry measures the cost of drawing every
-frame. Compare timings within the same entry.
+a picture. Separate `drawn` and `skip` rows report the sample count and
+average work, limiter wait, and total milliseconds per update. An update
+with no eligible swap stays in the wall-clock rate and out of both timing
+rows. A drawn update can count without a display submission, for example
+when the desktop flip is disabled. The uncapped Speed entry measures the
+cost of drawing every frame. Compare timings within the same entry.
 
 The `45x31 raster` lines show the number of rotated sprite calls on the timed
 frames and the mean microseconds per call. `warm` reuses a cached raster,

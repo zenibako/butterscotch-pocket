@@ -712,7 +712,8 @@ controls alone while it runs.
 `--bench-flowey-live` runs the same checkpoints with the normal Speed
 mode limiter and adaptive draw skipping. The report shows gameplay updates
 per wall-clock second, display submissions, and skipped draws for each
-section. Full speed is 30 updates per second.
+section. The `drawn` and `skip` rows give average work, limiter wait, and
+total milliseconds per update. Full speed is 30 updates per second.
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:

@@ -22,9 +22,16 @@ static uint64_t g_startNanos = 0;
 static uint64_t g_sectionStart = 0;
 static int g_sectionFirstUpdate;
 static int g_lastLiveUpdate = -1;
+static uint64_t g_liveLastPaceEnd;
 static bool g_liveFramePending, g_liveSkipped, g_liveSubmitted;
+enum { LIVE_DRAWN, LIVE_SKIPPED, LIVE_KINDS };
+typedef struct {
+    unsigned count;
+    uint64_t workNanos, waitNanos;
+} LiveUpdateTimes;
 static struct {
-    unsigned updates, skipped, submitted, micros, rate;
+    unsigned updates, submitted, micros, rate;
+    LiveUpdateTimes times[LIVE_KINDS];
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
 static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
@@ -253,7 +260,7 @@ static void reportLive(void) {
     ofLogPrint("phase upd/s updates submit skips other   time-us\n");
     for (int i = 0; i < g_def.sectionCount; ++i) {
         unsigned updates = g_liveSections[i].updates;
-        unsigned skipped = g_liveSections[i].skipped;
+        unsigned skipped = g_liveSections[i].times[LIVE_SKIPPED].count;
         unsigned submitted = g_liveSections[i].submitted;
         unsigned rate = g_liveSections[i].rate;
         ofLogPrint("%-5s %3u.%u %7u %6u %5u %5u %9u\n", g_def.sections[i].tag,
@@ -262,6 +269,25 @@ static void reportLive(void) {
     }
     ofLogPrint("submit = frames sent to display\n");
     ofLogPrint("skips = adaptive; other includes room changes\n");
+    ofLogPrint("ms/update    count   work   wait  total\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        for (int kind = 0; kind < LIVE_KINDS; ++kind) {
+            const LiveUpdateTimes *t = &g_liveSections[i].times[kind];
+            const char *tag = g_def.sections[i].tag;
+            const char *label = kind == LIVE_SKIPPED ? "skip" : "drawn";
+            if (t->count == 0) {
+                ofLogPrint("%-5s %-5s %5u %6s %6s %6s\n", tag, label, t->count, "--", "--", "--");
+                continue;
+            }
+            uint64_t unit = (uint64_t) t->count * 100000u;
+            unsigned work = (unsigned) ((t->workNanos + unit / 2) / unit);
+            unsigned wait = (unsigned) ((t->waitNanos + unit / 2) / unit);
+            unsigned total = (unsigned) ((t->workNanos + t->waitNanos + unit / 2) / unit);
+            ofLogPrint("%-5s %-5s %5u %4u.%u %4u.%u %4u.%u\n", tag, label, t->count,
+                       work / 10, work % 10, wait / 10, wait % 10, total / 10, total % 10);
+        }
+    }
+    ofLogPrint("wait = time in the frame limiter\n");
 }
 
 static void advanceBenchFrame(Runner *runner, uint64_t now) {
@@ -277,9 +303,6 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
             swrCallNotesTake(NULL, 0, NULL);
             swrPipeRasterTake(NULL);
         }
-    } else if (g_def.livePacing) {
-        g_liveSections[g_section].skipped += g_liveSkipped;
-        g_liveSections[g_section].submitted += g_liveSubmitted;
     }
     g_frame++;
     if (g_frame < section->lastFrame) return;
@@ -360,13 +383,25 @@ void ofBenchFrame(Runner *runner, bool skipped) {
     }
 }
 
-void ofBenchPacedFrame(Runner *runner, uint64_t now) {
+void ofBenchPacedFrame(Runner *runner, uint64_t waitStart, uint64_t waitEnd) {
+    if (!g_running || !g_def.livePacing) return;
+    uint64_t updateStart = g_liveLastPaceEnd;
+    // Room changes can run an update without reaching the swap path. Move
+    // the boundary anyway so the following sample excludes that work.
+    g_liveLastPaceEnd = waitEnd;
     if (!g_liveFramePending) return;
     g_liveFramePending = false;
     if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
     if (runner->frameCount <= g_lastLiveUpdate) return;
     g_lastLiveUpdate = runner->frameCount;
-    advanceBenchFrame(runner, now);
+    if (g_frame != 0) {
+        LiveUpdateTimes *t = &g_liveSections[g_section].times[g_liveSkipped ? LIVE_SKIPPED : LIVE_DRAWN];
+        ++t->count;
+        t->workNanos += waitStart - updateStart;
+        t->waitNanos += waitEnd - waitStart;
+        g_liveSections[g_section].submitted += g_liveSubmitted;
+    }
+    advanceBenchFrame(runner, waitEnd);
 }
 
 static void reportWork(void) {
