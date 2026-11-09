@@ -3796,37 +3796,52 @@ void swrFreeRotatedRasters(SWTexture* texture)
 #ifdef SW_HAS_PREMUL_BLEND
 static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4], uintpixel_t color, int alpha)
 {
-    float top = y[0], bottom = y[0];
-    float low[4], high[4], start[4], slope[4];
+    int from = swr->maxY, to = swr->portY;
+    int firstRow[4], endRow[4];
+    float low[4], start[4], slope[4];
     for (int i = 0; i < 4; ++i) {
         int next = (i + 1) & 3;
         int a = y[i] < y[next] ? i : next;
         int b = a == i ? next : i;
-        low[i] = y[a]; high[i] = y[b]; start[i] = x[a];
-        slope[i] = high[i] > low[i] ? (x[b] - x[a]) / (high[i] - low[i]) : 0.0f;
-        if (y[i] < top) top = y[i];
-        if (y[i] > bottom) bottom = y[i];
+        low[i] = y[a]; start[i] = x[a];
+        firstRow[i] = swrMax(swr->portY, swrCeiling(y[a] - 0.5f));
+        endRow[i] = swrMin(swr->maxY, swrCeiling(y[b] - 0.5f));
+        if (firstRow[i] >= endRow[i]) continue;
+        slope[i] = (x[b] - x[a]) / (y[b] - y[a]);
+        from = swrMin(from, firstRow[i]);
+        to = swrMax(to, endRow[i]);
     }
-    int from = swrMax(swr->portY, swrCeiling(top - 0.5f));
-    int to = swrMin(swr->maxY, swrCeiling(bottom - 0.5f));
     uint32_t redBlue = swrSpreadRedBlue(color) * alpha, green = swrGreen(color) * alpha;
-    for (int row = from; row < to; ++row) {
-        float center = row + 0.5f;
-        float left = FLT_MAX, right = -FLT_MAX;
+    // A convex band crosses two edges on each row. That pair only changes
+    // at a vertex, so select it once for all rows before the next edge change.
+    for (int row = from; row < to;) {
+        int next = to, a = -1, b = -1;
         for (int edge = 0; edge < 4; ++edge) {
-            if (center < low[edge] || center >= high[edge]) continue;
-            float at = start[edge] + (center - low[edge]) * slope[edge];
-            if (at < left) left = at;
-            if (at > right) right = at;
+            if (firstRow[edge] >= endRow[edge]) continue;
+            if (row < firstRow[edge]) next = swrMin(next, firstRow[edge]);
+            else if (row < endRow[edge]) {
+                next = swrMin(next, endRow[edge]);
+                if (a < 0) a = edge;
+                else b = edge;
+            }
         }
-        if (left >= right) continue;
-        int first = swrMax(swr->portX, swrCeiling(left - 0.5f));
-        int end = swrMin(swr->maxX, swrCeiling(right - 0.5f));
-        if (first >= end) continue;
-        swrDirtyRow(swr, row, first, end);
-        uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
-        if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), color);
-        else swrBlendSolidRow(dst, (size_t) (end - first), redBlue, green, 256 - alpha);
+        if (b < 0) {
+            row = next;
+            continue;
+        }
+        for (; row < next; ++row) {
+            float center = row + 0.5f;
+            float x0 = start[a] + (center - low[a]) * slope[a];
+            float x1 = start[b] + (center - low[b]) * slope[b];
+            float left = x0 < x1 ? x0 : x1, right = x0 < x1 ? x1 : x0;
+            int first = swrMax(swr->portX, swrCeiling(left - 0.5f));
+            int end = swrMin(swr->maxX, swrCeiling(right - 0.5f));
+            if (first >= end) continue;
+            swrDirtyRow(swr, row, first, end);
+            uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
+            if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), color);
+            else swrBlendSolidRow(dst, (size_t) (end - first), redBlue, green, 256 - alpha);
+        }
     }
 }
 #endif
