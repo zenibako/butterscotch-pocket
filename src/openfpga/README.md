@@ -540,7 +540,9 @@ ordinary sampling.
 
 In the Photoshop Flowey fight, Speed mode also hides the rotating decorative
 pipe segments during ordinary animation. Flash and debug branches retain the
-original artwork.
+original artwork. Speed mode omits the layered background pipes and vines and
+renders the long attacking vines as flat silhouettes. The warning lines still
+show where the vines will strike.
 
 `make battle-contrast-fixture` builds `./<game>_pc_battle_contrast_fixture`
 without game assets. Run it once for each `GAME` to check game-specific

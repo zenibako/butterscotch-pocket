@@ -3791,6 +3791,89 @@ void swrFreeRotatedRasters(SWTexture* texture)
 #endif
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+static void swrFillVineBand(SWRenderer* swr, const float x[4], const float y[4], uintpixel_t color, int alpha)
+{
+    float top = y[0], bottom = y[0];
+    float low[4], high[4], start[4], slope[4];
+    for (int i = 0; i < 4; ++i) {
+        int next = (i + 1) & 3;
+        int a = y[i] < y[next] ? i : next;
+        int b = a == i ? next : i;
+        low[i] = y[a]; high[i] = y[b]; start[i] = x[a];
+        slope[i] = high[i] > low[i] ? (x[b] - x[a]) / (high[i] - low[i]) : 0.0f;
+        if (y[i] < top) top = y[i];
+        if (y[i] > bottom) bottom = y[i];
+    }
+    int from = swrMax(swr->portY, swrCeiling(top - 0.5f));
+    int to = swrMin(swr->maxY, swrCeiling(bottom - 0.5f));
+    uint32_t redBlue = swrSpreadRedBlue(color) * alpha, green = swrGreen(color) * alpha;
+    for (int row = from; row < to; ++row) {
+        float center = row + 0.5f;
+        float left = FLT_MAX, right = -FLT_MAX;
+        for (int edge = 0; edge < 4; ++edge) {
+            if (center < low[edge] || center >= high[edge]) continue;
+            float at = start[edge] + (center - low[edge]) * slope[edge];
+            if (at < left) left = at;
+            if (at > right) right = at;
+        }
+        if (left >= right) continue;
+        int first = swrMax(swr->portX, swrCeiling(left - 0.5f));
+        int end = swrMin(swr->maxX, swrCeiling(right - 0.5f));
+        if (first >= end) continue;
+        swrDirtyRow(swr, row, first, end);
+        uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
+        if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), color);
+        else swrBlendSolidRow(dst, (size_t) (end - first), redBlue, green, 256 - alpha);
+    }
+}
+#endif
+
+bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float dh,
+                      float angle, float pivotX, float pivotY, uint32_t color, float alpha)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->blendMode != bm_normal || !isfinite(angle) || fabsf(angle) >= 8192.0f ||
+        !isfinite(alpha) || !isfinite(pivotX) || !isfinite(pivotY)) return false;
+    int opacity = swrIntAlpha(alpha);
+    if (opacity < 4) return true;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrTransformSizeIfNeeded(swr, &dw, &dh);
+    swrTransformSizeIfNeeded(swr, &pivotX, &pivotY);
+    if (!(dw > 0 && dw <= 1024 && dh > 0 && dh <= 256 && fabsf(dx) < 8192 && fabsf(dy) < 8192 &&
+          fabsf(pivotX) < 1024 && fabsf(pivotY) < 256)) return false;
+
+    /* These bands enclose the stock cropped art, with an extra texel where
+     * possible at their top and bottom. The last band retains the warm tip.
+     * Collision and the preview lines are handled by their original events. */
+    static const int edge[] = { 0, 112, 224, 336, 448, 511 };
+    static const int top[] = { 0, 0, 0, 2, 0 }, bottom[] = { 28, 25, 25, 28, 33 };
+    SWRotation rotation = swrMustRotate(angle) ? swrSpriteRotation(swr, angle) : (SWRotation){ 0, 1.0f, 0.0f };
+    float x = swrFloor(dx) + pivotX, y = swrFloor(dy) + pivotY;
+    float sx = (float) swrCeiling(dw) / 511.0f, sy = (float) swrCeiling(dh) / 33.0f;
+    uintpixel_t packed = swrConvertPixel(color);
+    swrOverlayFlush(swr);
+    for (int band = 0; band < 5; ++band) {
+        float x0 = edge[band] * sx - pivotX, x1 = edge[band + 1] * sx - pivotX;
+        float y0 = top[band] * sy - pivotY, y1 = bottom[band] * sy - pivotY;
+        float u[4] = { x0, x1, x1, x0 }, v[4] = { y0, y0, y1, y1 };
+        float xx[4], yy[4];
+        for (int j = 0; j < 4; ++j) {
+            xx[j] = rotation.cosine * u[j] - rotation.sine * v[j] + x;
+            yy[j] = rotation.sine * u[j] + rotation.cosine * v[j] + y;
+        }
+        uintpixel_t ink = swrConvertPixel(band == 4 ? 0x285cff : 0x329ec1);
+        swrFillVineBand(swr, xx, yy, tint(packed, ink), opacity);
+    }
+    return true;
+#else
+    (void) renderer; (void) dx; (void) dy; (void) dw; (void) dh; (void) angle;
+    (void) pivotX; (void) pivotY; (void) color; (void) alpha;
+    return false;
+#endif
+}
+
 void swrDrawSpriteRotated(
     Renderer* renderer, float dx, float dy, float dw, float dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,

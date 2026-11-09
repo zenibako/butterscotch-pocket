@@ -492,6 +492,7 @@ static const OfBenchSection g_floweySections[] = {
 };
 
 static void battleUiInstall(Runner *runner) {
+    SWRenderer_setFloweySpeedAssets(runner->renderer);
     static const char *const sprites[] = {
         "spr_fightbt", "spr_fightbt_ja", "spr_fightbt_hollow", "spr_fightbt_hollow_ja",
         "spr_itembt", "spr_itembt_ja", "spr_itembt_hollow", "spr_itembt_hollow_ja",

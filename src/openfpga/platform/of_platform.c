@@ -443,6 +443,13 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     swrFavorSpeed = g_smoothLowres;
     if (g_runner != NULL && g_runner->renderer != NULL && ofGame.battleUiActive != NULL)
         SWRenderer_setContrastEnabled(g_runner->renderer, lowres && battle);
+#ifdef GAME_UNDERTALE
+    if (g_runner != NULL && g_runner->renderer != NULL) {
+        const Room *room = g_runner->currentRoom;
+        SWRenderer_setFloweySpeedRoom(g_runner->renderer, lowres && room != NULL && room->name != NULL &&
+                                                         strcmp(room->name, "room_floweyx") == 0);
+    }
+#endif
     *outW = hires ? OF_HIRES_W : OF_SCREEN_W;
     *outH = hires ? OF_HIRES_H : OF_SCREEN_H;
     return true;

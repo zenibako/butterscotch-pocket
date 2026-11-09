@@ -6,6 +6,32 @@
 static unsigned long checks;
 static bool negativeControl;
 
+static void checkFloweyVineFill(void)
+{
+    enum { WIDTH = 300, HEIGHT = 24 };
+    static uintpixel_t pixels[WIDTH * HEIGHT];
+    SWRenderer swr = {0};
+    swr.fb = swr.mainFb = pixels;
+    swr.fbPitch = WIDTH;
+    swr.portX = 3;
+    swr.portY = 1;
+    swr.viewX = swr.portX;
+    swr.viewY = swr.portY;
+    swr.maxX = WIDTH - 4;
+    swr.maxY = HEIGHT - 2;
+    swr.portW = swr.maxX - swr.portX;
+    swr.portH = swr.maxY - swr.portY;
+    swr.scaleX = swr.scaleY = 1.0f;
+    swr.blendMode = bm_normal;
+    if (!swrDrawFloweyVine(&swr.base, 5, 2, 256, 17, 0, 0, 0, 0xffffff, 1.0f) ||
+        !swrIsOpaque(pixels[8 * WIDTH + 20]) || !swrIsOpaque(pixels[8 * WIDTH + 250]) ||
+        pixels[8 * WIDTH + 20] == pixels[8 * WIDTH + 250] ||
+        pixels[8 * WIDTH + 4] || pixels[8 * WIDTH + 261] || pixels[20 * WIDTH + 20]) {
+        fprintf(stderr, "FAIL: Flowey vine fill and clip\n");
+        exit(1);
+    }
+}
+
 static void checkBackdropRows(void)
 {
     enum { WIDTH = 112, HEIGHT = 140, SRC_W = 171, SRC_H = 275 };
@@ -392,6 +418,7 @@ static void checkPitch(int pitch, int alpha, uintpixel_t color, int pattern)
 int main(int argc, char** argv)
 {
     (void) argv;
+    checkFloweyVineFill();
     checkBackdropRows();
     checkPipeLayers();
     checkBoxSampleSpan();

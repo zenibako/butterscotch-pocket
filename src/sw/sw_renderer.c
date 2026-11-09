@@ -591,6 +591,21 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
         logError("%s: tpagIndex of %d is invalid, as pageId of %d is invalid\n", __func__, tpagIndex, pageId);
         return;
     }
+    if (swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface) {
+        for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
+            if (swr->floweyBackdropItems[i] == tpagIndex) return;
+        if (tpagIndex == swr->floweyVineItem && xscale > 0.0f && xscale <= 2.0f &&
+            yscale > 0.0f && yscale <= 4.0f) {
+            float dx = (float)(tpag->targetX - originX);
+            float dy = (float)(tpag->targetY - originY);
+            dx *= xscale; dy *= yscale;
+            dx += x; dy += y;
+            int dw = (int)(xscale * tpag->targetWidth);
+            int dh = (int)(yscale * tpag->targetHeight);
+            if (swrDrawFloweyVine(renderer, dx, dy, dw, dh, angleDeg, x - dx, y - dy, color, alpha))
+                return;
+        }
+    }
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);
     if (!texture) {
         logError("%s: could not ensure texture is loaded, tpagIndex: %d, pageId: %d\n", __func__, tpagIndex, pageId);
@@ -3134,6 +3149,39 @@ static bool swrAssetNamed(const char* name, const char* const* names, size_t cou
     for (size_t i = 0; i < count; ++i)
         if (strcmp(name, names[i]) == 0) return true;
     return false;
+}
+
+void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
+{
+    static const char* const backdrop[] = {
+        "spr_bgpipe", "spr_vines_flowey", "spr_vines_flowey_2", "spr_vines_flowey_3", "spr_floweyx_behind"
+    };
+    SWRenderer* swr = (SWRenderer*) renderer;
+    DataWin* dw = renderer->dataWin;
+    swr->floweyVineItem = -1;
+    swr->floweyBackdropCount = 0;
+    if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
+    for (uint32_t i = 0; i < dw->sprt.count; ++i) {
+        const Sprite* sprite = &dw->sprt.sprites[i];
+        if (!sprite->name || sprite->textureCount != 1) continue;
+        int32_t item = sprite->tpagIndices[0];
+        if (item < 0 || (uint32_t) item >= dw->tpag.count) continue;
+        if (strcmp(sprite->name, "spr_gigavine") == 0) {
+            const TexturePageItem* page = &dw->tpag.items[item];
+            if (sprite->width == 514 && sprite->height == 37 && sprite->originX == 15 && sprite->originY == 14 &&
+                page->sourceWidth == 511 && page->sourceHeight == 33 && page->targetX == 2 && page->targetY == 3 &&
+                page->targetWidth == 511 && page->targetHeight == 33)
+                swr->floweyVineItem = item;
+        } else if (swr->floweyBackdropCount < sizeof(swr->floweyBackdropItems) / sizeof(swr->floweyBackdropItems[0]) &&
+                   swrAssetNamed(sprite->name, backdrop, sizeof(backdrop) / sizeof(backdrop[0]))) {
+            swr->floweyBackdropItems[swr->floweyBackdropCount++] = item;
+        }
+    }
+}
+
+void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active)
+{
+    ((SWRenderer*) renderer)->floweySpeedRoom = active;
 }
 
 void SWRenderer_setContrastAssets(Renderer* renderer, const char* const* sprites, size_t spriteCount,
