@@ -95,9 +95,11 @@ static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
 
 #ifndef ENABLE_VM_TRACING
-enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832 };
+enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832, FLOWEY_MOUTH_DRAW_LENGTH = 4992 };
 static uint32_t flipeyeSkippedWords[FLOWEY_FLIPEYE_DRAW_LENGTH / 4];
+static uint32_t mouthSkippedWords[FLOWEY_MOUTH_DRAW_LENGTH / 4];
 static bool flipeyeSkippedReady;
+static bool mouthSkippedReady;
 #endif
 
 static void forgetNativeVm(void) {
@@ -106,6 +108,7 @@ static void forgetNativeVm(void) {
     backdropVarsResolved = false;
 #ifndef ENABLE_VM_TRACING
     flipeyeSkippedReady = false;
+    mouthSkippedReady = false;
 #endif
 }
 
@@ -425,17 +428,23 @@ static bool floweyBackdropVines(VMContext *ctx) {
 }
 
 #ifndef ENABLE_VM_TRACING
+static bool floweySkippingDraw(const VMContext *ctx) {
+    const Runner *runner = ctx->runner;
+    return runner != NULL && SWRenderer_isSkippingScreen(runner->renderer) && ofPlatformSpeedMode() &&
+           runner->currentRoom != NULL && runner->currentRoom->name != NULL &&
+           strcmp(runner->currentRoom->name, "room_floweyx") == 0 &&
+           ctx->dataWin->gen8.wadVersion == 16 && ctx->dataWin->gen8.gameID == 864738521u &&
+           ctx->currentCallFrame->eventType == EVENT_DRAW && ctx->currentCallFrame->eventSubtype == DRAW_NORMAL;
+}
+
+static void skipFloweyDrawSpan(uint8_t *bytecode, uint32_t from, uint32_t to) {
+    BinaryUtils_writeUint32(bytecode + from, ((uint32_t)OP_B << 24) | ((to - from) / 4));
+}
+
 static bool floweyFlipeyeDraw(VMContext *ctx, RValue *args, int32_t argCount, RValue *result) {
     (void)args;
     (void)argCount;
-    Runner *runner = ctx->runner;
-    if (runner == NULL || !SWRenderer_isSkippingScreen(runner->renderer) || !ofPlatformSpeedMode() ||
-        runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
-        strcmp(runner->currentRoom->name, "room_floweyx") != 0 ||
-        ctx->dataWin->gen8.wadVersion != 16 || ctx->dataWin->gen8.gameID != 864738521u ||
-        ctx->currentCallFrame->eventType != EVENT_DRAW || ctx->currentCallFrame->eventSubtype != DRAW_NORMAL)
-        return false;
-
+    if (!floweySkippingDraw(ctx)) return false;
     uint8_t *bytecode = (uint8_t *)flipeyeSkippedWords;
     if (!flipeyeSkippedReady) {
         if (ctx->ip != 0) return false;
@@ -443,9 +452,28 @@ static bool floweyFlipeyeDraw(VMContext *ctx, RValue *args, int32_t argCount, RV
         /* Both blocks only compute arguments and draw eye sprites. Keep
          * the original update/spawn logic and the op = 126 write between
          * the blocks. Linked operands keep their original byte offsets. */
-        BinaryUtils_writeUint32(bytecode + 0x0c38, ((uint32_t)OP_B << 24) | ((0x151c - 0x0c38) / 4));
-        BinaryUtils_writeUint32(bytecode + 0x1528, ((uint32_t)OP_B << 24) | ((FLOWEY_FLIPEYE_DRAW_LENGTH - 0x1528) / 4));
+        skipFloweyDrawSpan(bytecode, 0x0c38, 0x151c);
+        skipFloweyDrawSpan(bytecode, 0x1528, FLOWEY_FLIPEYE_DRAW_LENGTH);
         flipeyeSkippedReady = true;
+    }
+    *result = VM_executeCurrentBytecode(ctx, bytecode);
+    return true;
+}
+
+static bool floweyMouthDraw(VMContext *ctx, RValue *args, int32_t argCount, RValue *result) {
+    (void)args;
+    (void)argCount;
+    if (!floweySkippingDraw(ctx)) return false;
+    uint8_t *bytecode = (uint8_t *)mouthSkippedWords;
+    if (!mouthSkippedReady) {
+        if (ctx->ip != 0) return false;
+        memcpy(bytecode, ctx->bytecodeBase, sizeof(mouthSkippedWords));
+        /* Skip only the sprite arguments and draws. Keep animation, attacks,
+         * and the debug/laugh logic following the last span. */
+        skipFloweyDrawSpan(bytecode, 0x01ec, 0x0288);
+        skipFloweyDrawSpan(bytecode, 0x03e4, 0x0440);
+        skipFloweyDrawSpan(bytecode, 0x0644, 0x10e8);
+        mouthSkippedReady = true;
     }
     *result = VM_executeCurrentBytecode(ctx, bytecode);
     return true;
@@ -453,6 +481,7 @@ static bool floweyFlipeyeDraw(VMContext *ctx, RValue *args, int32_t argCount, RV
 
 static const OfNativeScript g_nativeScripts[] = {
     { "gml_Object_obj_floweyx_flipeye_Draw_0", FLOWEY_FLIPEYE_DRAW_LENGTH, 0x2ffb1453038ba855ull, floweyFlipeyeDraw },
+    { "gml_Object_obj_floweyx_mouth_Draw_0", FLOWEY_MOUTH_DRAW_LENGTH, 0xee4dc253c9466abbull, floweyMouthDraw },
 };
 #endif
 
