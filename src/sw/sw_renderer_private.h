@@ -182,8 +182,7 @@ typedef struct
     SWTexture* floweyStalkEyePipes;
     SWTexture* floweyStalkPoses[SWR_FLOWEY_STALK_POSES];
     uint16_t floweyStalkLoadTried;
-    int32_t floweyUprightItems[4];
-    unsigned floweyUprightCount;
+    int32_t floweyTrimItems[5];
     int32_t floweyBackdropItems[4];
     unsigned floweyBackdropCount;
     uintpixel_t* mainFb;

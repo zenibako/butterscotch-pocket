@@ -4413,6 +4413,40 @@ void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const
 #endif
 }
 
+bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                       int sx, int sy, int sw, int sh)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 || sw < 2 || sh < 2 ||
+        sw > 81 || sh > 148 || texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !isfinite(dx) || !isfinite(dy) || fabsf(dx) > 8192.0f || fabsf(dy) > 8192.0f ||
+        !(fabsf(dw) >= 0.75f * sw && fabsf(dw) <= 1.1f * sw) ||
+        !(dh >= 0.75f * sh && dh <= 1.1f * sh)) return false;
+    // A final partial block may touch transparent padding, but never another
+    // atlas item: the size checks above restrict this path to isolated crops.
+    if (!swrHalfTexture(texture, sx, sy) || texture->halfPhaseX != sx || texture->halfPhaseY != sy) return false;
+    SWTexture half = *texture;
+    half.buffer = texture->halfBuffer;
+    half.width = (texture->width + sx + 1) / 2;
+    half.height = (texture->height + sy + 1) / 2;
+    half.solid = texture->halfSolid;
+    half.immutable = false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrTransformSizeIfNeeded(swr, &dw, &dh);
+    swrOverlayFlush(swr);
+    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
+                          &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(0xffffff), 256, false, SWR_CONTRAST_NONE);
+    return true;
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
+    (void) sx; (void) sy; (void) sw; (void) sh;
+    return false;
+#endif
+}
+
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
                       int sx, int sy, int sw, int sh, int kind)
 {

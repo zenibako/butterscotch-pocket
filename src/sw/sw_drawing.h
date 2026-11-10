@@ -44,6 +44,8 @@ bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, fl
                            int sx, int sy, int sw, int sh, bool mirrored, uint32_t color, unsigned pose);
 bool swrDrawPackedFloweyStalk(Renderer* renderer, SWTexture* texture, float dx, float dy, bool mirrored, uint32_t color);
 enum { SWR_FLOWEY_ART_NONE, SWR_FLOWEY_ART_ARM, SWR_FLOWEY_ART_CASE, SWR_FLOWEY_ART_SCREEN };
+bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                       int sx, int sy, int sw, int sh);
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
                       int sx, int sy, int sw, int sh, int kind);
 void swrDrawRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t color, float alpha);

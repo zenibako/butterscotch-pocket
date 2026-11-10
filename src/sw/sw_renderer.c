@@ -688,6 +688,10 @@ static bool swrFloweyScreenItem(const SWRenderer* swr, int32_t item)
     return false;
 }
 
+enum {
+    FLOWEY_MOUTH_EDGE, FLOWEY_MOUTH_FLAP, FLOWEY_EYE_HOLDER, FLOWEY_EYE_BG, FLOWEY_EYE_OVERLAY
+};
+
 static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y,
                                   float originX, float originY, float xscale, float yscale,
                                   float angleDeg, uint32_t color, float alpha)
@@ -729,8 +733,8 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
         if (swr->blendMode == bm_normal) {
             if (tpagIndex == swr->floweyOuterEyeShadow && color == 0 && alpha == 1.0f) return;
             if (angleDeg != 0.0f && fabsf(angleDeg) <= 2.0f) {
-                for (unsigned i = 0; i < swr->floweyUprightCount; ++i)
-                    if (swr->floweyUprightItems[i] == tpagIndex) angleDeg = 0.0f;
+                for (unsigned i = FLOWEY_MOUTH_EDGE; i <= FLOWEY_EYE_BG; ++i)
+                    if (swr->floweyTrimItems[i] == tpagIndex) angleDeg = 0.0f;
             }
             if (swr->floweyStalkSprite >= 0 && tpagIndex >= swr->floweyStalkFirst &&
                 tpagIndex <= swr->floweyStalkLast && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
@@ -767,6 +771,15 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     dy *= yscale;
     dx += x;
     dy += y;
+
+    // Reuse the original rims and mouth trim upright through small rotations.
+    if (floweySpeed && color == 0xffffff && alpha == 1.0f &&
+        ((tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_OVERLAY] && fabsf(angleDeg) <= 4.0f) ||
+         ((tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_EDGE] ||
+           tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_FLAP] ||
+           tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_HOLDER]) && fabsf(angleDeg) <= 2.0f)) &&
+        sw == tpag->targetWidth && sh == tpag->targetHeight &&
+        swrDrawFloweyTrim(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh)) return;
 
     // The idle arm is a separate item from the attack's stem and strike.
     // The TV's warnings and flashes also use separate items or fills.
@@ -3333,8 +3346,12 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
         "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey",
         [SWR_FLOWEY_BACKDROP_SHADOW] = "spr_floweyx_behind"
     };
-    static const char* const upright[] = {
-        "spr_floweyx_mouthedge", "spr_floweyx_mouthl", "spr_flipeye_holder", "spr_flipeye_bg"
+    static const char* const trim[] = {
+        [FLOWEY_MOUTH_EDGE] = "spr_floweyx_mouthedge",
+        [FLOWEY_MOUTH_FLAP] = "spr_floweyx_mouthl",
+        [FLOWEY_EYE_HOLDER] = "spr_flipeye_holder",
+        [FLOWEY_EYE_BG] = "spr_flipeye_bg",
+        [FLOWEY_EYE_OVERLAY] = "spr_lefteye_overlay"
     };
     SWRenderer* swr = (SWRenderer*) renderer;
     DataWin* dw = renderer->dataWin;
@@ -3346,7 +3363,8 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     swr->floweyTvCaseItem = -1;
     swr->floweyTvScreenSprite = -1;
     swr->floweyOuterEyeShadow = -1;
-    swr->floweyUprightCount = 0;
+    for (unsigned i = 0; i < sizeof(trim) / sizeof(trim[0]); ++i)
+        swr->floweyTrimItems[i] = -1;
     swr->floweyBackdropCount = 0;
     for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i)
         swr->floweyBackdropItems[i] = -1;
@@ -3384,10 +3402,9 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
             swr->floweyTvCaseItem = item;
         } else if (strcmp(sprite->name, "spr_flipeye_holder_bg") == 0) {
             swr->floweyOuterEyeShadow = item;
-        } else if (swr->floweyUprightCount < sizeof(swr->floweyUprightItems) / sizeof(swr->floweyUprightItems[0]) &&
-                   swrAssetNamed(sprite->name, upright, sizeof(upright) / sizeof(upright[0]))) {
-            swr->floweyUprightItems[swr->floweyUprightCount++] = item;
         } else {
+            for (unsigned i = 0; i < sizeof(trim) / sizeof(trim[0]); ++i)
+                if (strcmp(sprite->name, trim[i]) == 0) swr->floweyTrimItems[i] = item;
             for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i) {
                 if (strcmp(sprite->name, backdrop[i]) != 0) continue;
                 swr->floweyBackdropItems[i] = item;
