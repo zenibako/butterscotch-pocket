@@ -277,6 +277,8 @@ typedef struct
     SWRotation rotationCache[SWR_ROTATION_CACHE_SIZE];
     struct SWFloweyVineCache* floweyVineCache;
     int32_t floweyPipeSegmentItem;
+    struct SWFloweyVineBatch* floweyVineBatch;
+    bool floweyVinesPending;
 }
 SWRenderer;
 

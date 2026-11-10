@@ -1196,6 +1196,7 @@ void swrOverlayFlushForState(SWRenderer* swr)
 
 void swrOverlayFlush(SWRenderer* swr)
 {
+    if (swr->floweyVinesPending) swrFlushFloweyVines(swr);
     swrTrailEnd();
 #ifdef SW_HAS_PREMUL_BLEND
     // Held tile pictures are older than anything else held, so they go first,
@@ -3916,9 +3917,90 @@ typedef struct {
     uint32_t redBlue, green;
 } SWFloweyVinePaint;
 
+enum { SWR_VINE_BATCH_W = 320, SWR_VINE_BATCH_H = 240 };
+
+typedef struct {
+    uint16_t first, end;
+    uintpixel_t color;
+} SWFloweyVineRow;
+
+typedef struct SWFloweyVineBatch {
+    SWFloweyVineRow rows[SWR_VINE_BATCH_H];
+    int top, bottom;
+} SWFloweyVineBatch;
+
+FORCE_INLINE void swrWriteOpaqueVineSpan(SWRenderer* swr, int row, const SWFloweyVineRow* span)
+{
+    swrDirtyRow(swr, row, span->first, span->end);
+    uintpixel_t* dst = swr->fb + row * swr->fbPitch + span->first;
+    swrFillPixels(dst, (size_t) (span->end - span->first), span->color);
+}
+
+FORCE_INLINE void swrQueueVineSpan(SWRenderer* swr, SWFloweyVineBatch* batch, int row,
+                                  int first, int end, uintpixel_t color)
+{
+    SWFloweyVineRow* pending = &batch->rows[row];
+    if (pending->end != 0) {
+        if (pending->color == color && first <= pending->end && end >= pending->first) {
+            pending->first = swrMin(first, pending->first);
+            pending->end = swrMax(end, pending->end);
+            return;
+        }
+        swrWriteOpaqueVineSpan(swr, row, pending);
+    } else {
+        batch->top = swrMin(batch->top, row);
+        batch->bottom = swrMax(batch->bottom, row + 1);
+    }
+    *pending = (SWFloweyVineRow) { first, end, color };
+}
+#endif
+
+void swrFlushFloweyVines(SWRenderer* swr)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    if (!swr->floweyVinesPending) return;
+    SWFloweyVineBatch* batch = swr->floweyVineBatch;
+    swr->floweyVinesPending = false;
+    for (int row = batch->top; row < batch->bottom; ++row) {
+        SWFloweyVineRow* pending = &batch->rows[row];
+        if (pending->end == 0) continue;
+        swrWriteOpaqueVineSpan(swr, row, pending);
+        pending->end = 0;
+    }
+#else
+    (void) swr;
+#endif
+}
+
+#ifdef SW_HAS_PREMUL_BLEND
+// Consecutive opaque vines can only overwrite one another. Merge same-ink
+// overlaps per row. A different ink or a gap commits the older span.
+static void swrBeginFloweyVineDraw(SWRenderer* swr, int opacity)
+{
+    bool eligible = opacity > 253 && swr->floweySpeedRoom && !swr->drawingToSurface && swr->fb == swr->mainFb &&
+                    swr->mainWidth == SWR_VINE_BATCH_W && swr->mainHeight == SWR_VINE_BATCH_H &&
+                    swr->portX == 0 && swr->portY == 0 && swr->maxX == SWR_VINE_BATCH_W && swr->maxY == SWR_VINE_BATCH_H;
+    SWFloweyVineBatch* batch = swr->floweyVineBatch;
+    if (eligible && swr->floweyVinesPending) return;
+    swrOverlayFlush(swr);
+    if (!eligible) return;
+    if (batch == NULL) {
+        batch = calloc(1, sizeof(*batch));
+        if (batch == NULL) return;
+        swr->floweyVineBatch = batch;
+    }
+    batch->top = SWR_VINE_BATCH_H;
+    batch->bottom = 0;
+    swr->floweyVinesPending = true;
+}
+
 FORCE_INLINE void swrPaintVineSpan(SWRenderer* swr, int row, int first, int end,
                                   const SWFloweyVinePaint* paint, int alpha)
 {
+    if (swr->floweyVinesPending) {
+        swrQueueVineSpan(swr, swr->floweyVineBatch, row, first, end, paint->color);
+        return;
+    }
     swrDirtyRow(swr, row, first, end);
     uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
     if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), paint->color);
@@ -4304,7 +4386,7 @@ bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float d
         paint[i].redBlue = swrSpreadRedBlue(paint[i].color) * opacity;
         paint[i].green = swrGreen(paint[i].color) * opacity;
     }
-    swrOverlayFlush(swr);
+    swrBeginFloweyVineDraw(swr, opacity);
 
     // Full-size stock vines hold their exact pose over several updates. Keep
     // only their clipped spans, in band order, so overlaps still blend twice.
