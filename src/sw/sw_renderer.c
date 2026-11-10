@@ -3287,7 +3287,8 @@ static bool swrFloweyStalkFrames(const DataWin* dw, const Sprite* sprite)
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
 {
     static const char* const backdrop[] = {
-        "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey", "spr_floweyx_behind"
+        "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey",
+        [SWR_FLOWEY_BACKDROP_SHADOW] = "spr_floweyx_behind"
     };
     static const char* const upright[] = {
         "spr_floweyx_mouthedge", "spr_floweyx_mouthl", "spr_flipeye_holder", "spr_flipeye_bg"
@@ -3373,6 +3374,12 @@ void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer)
         if (pipe == NULL) return;
         swr->floweyStalkEyePipes = swrMakeFloweyStalkEyePipes(pipe, page->sourceX - pipe->originX, page->sourceY - pipe->originY);
         if (swr->floweyStalkEyePipes == NULL) return;
+        int32_t backingItem = swr->floweyBackdropItems[SWR_FLOWEY_BACKDROP_SHADOW];
+        if (backingItem >= 0) {
+            SWTexture* backing = swrTextureForItem(swr, backingItem);
+            if (backing != NULL)
+                swrAddFloweyStalkEyeBacking(swr->floweyStalkEyePipes, backing, &renderer->dataWin->tpag.items[backingItem]);
+        }
     }
     // Draw at the native eye-pipe event's depth, over the green stalks and
     // under the eyes. Like the rear pipes, hold the pose through camera shake.

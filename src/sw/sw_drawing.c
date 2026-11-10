@@ -4185,6 +4185,41 @@ SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy)
 #endif
 }
 
+void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const TexturePageItem* item)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    // spr_floweyx_behind at (140, 10), including its trim, starts at (70, 6) at half resolution.
+    enum { LEFT = 70, TOP = 6, SOURCE_W = 354, SOURCE_H = 269 };
+    int sx = item->sourceX - backing->originX, sy = item->sourceY - backing->originY;
+    int top = 2 * (art->originY - TOP);
+    if (item->sourceWidth != SOURCE_W || item->sourceHeight != SOURCE_H ||
+        item->targetWidth != SOURCE_W || item->targetHeight != SOURCE_H ||
+        item->targetX != 0 || item->targetY != 2 ||
+        sx < 0 || sy < 0 || sx + SOURCE_W > backing->width || sy + SOURCE_H > backing->height ||
+        top < 0 || top + 2 * art->height > SOURCE_H) return;
+
+    // Keep the original black silhouette only inside each cached rim.
+    int left = LEFT - art->originX, half = art->width / 2;
+    uintpixel_t black = swrConvertPixel(0);
+    for (int y = 0; y < art->height; ++y) {
+        uintpixel_t* row = art->buffer + y * art->width;
+        for (int side = 0; side < 2; ++side) {
+            int first = side * half, last = first + half - 1;
+            while (first < last && !swrIsOpaque(row[first])) ++first;
+            while (last > first && !swrIsOpaque(row[last])) --last;
+            int end = swrMin(last, left + SOURCE_W / 2);
+            for (int x = swrMax(first + 1, left); x < end; ++x) {
+                if (!swrIsOpaque(row[x]) &&
+                    swrIsOpaque(swrFloweyArtBlock(backing, sx + 2 * (x - left), sy + top + 2 * y, 2, 2)))
+                    row[x] = black;
+            }
+        }
+    }
+#else
+    (void) art; (void) backing; (void) item;
+#endif
+}
+
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
                       int sx, int sy, int sw, int sh, int kind)
 {
