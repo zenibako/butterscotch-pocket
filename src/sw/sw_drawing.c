@@ -2155,6 +2155,62 @@ static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation 
     return rows;
 }
 
+static bool swrFloweyVineBlockTarget(const SWRenderer* swr)
+{
+    return swr->portX == 0 && swr->portY == 0 && swr->portW == 320 && swr->portH == 240 &&
+           swr->fb == swr->mainFb && !swr->drawingToSurface &&
+           swr->fbPitch == 320 && ((uintptr_t) swr->fb & 3) == 0;
+}
+
+// In Speed, sample the original vine once per 2x2 screen block. This
+// keeps the textured strike visible while reducing sampling and writes.
+static void swrDrawFloweyVineBlocks(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
+                                   const uintpixel_t* src, int pitch, int dx, int dy, int dw, float pxa, float pya,
+                                   int minX, int minY, int maxX, int maxY, uintpixel_t color)
+{
+    const float c = rotation.cosine, s = rotation.sine;
+    const float scaleX = (float) SWR_VINE_W / dw, scaleY = (float) SWR_VINE_H / SWR_GROWTH_HEIGHT;
+    const int x0 = minX & ~1, y0 = minY & ~1;
+    const int xEnd = (maxX + 1) & ~1, yEnd = (maxY + 1) & ~1;
+    const float ox = (float) x0 + 1.0f - pxa, oy = (float) y0 + 1.0f - pya;
+    const int32_t stepU = swrFloor(c * scaleX * 131072.0f + 0.5f);
+    const int32_t stepV = swrFloor(-s * scaleY * 131072.0f + 0.5f);
+    const int32_t downU = swrFloor(s * scaleX * 131072.0f + 0.5f);
+    const int32_t downV = swrFloor(c * scaleY * 131072.0f + 0.5f);
+    // The rotated bounds have already been intersected with the viewport.
+    int32_t startU = swrFloor(((c * ox + s * oy) + (pxa - dx)) * scaleX * 65536.0f + 0.5f);
+    int32_t startV = swrFloor(((-s * ox + c * oy) + 5.5f) * scaleY * 65536.0f + 0.5f);
+    const int leftOrigin = swrFloor(pxa) - 1;
+    const bool tinted = (color & 0x7fff) != 0x7fff;
+    for (int y = y0; y < yEnd; y += 2, startU += downU, startV += downV) {
+        int left = leftOrigin + rows->left[y - dy + SWR_GROWTH_ROW_RADIUS];
+        int from = swrMax((left - 2) & ~1, x0), to = swrMin((left + rows->span + 3) & ~1, xEnd);
+        if (from >= to) continue;
+        int32_t u = startU + ((from - x0) >> 1) * stepU;
+        int32_t v = startV + ((from - x0) >> 1) * stepV;
+        uintpixel_t* top = swr->fb + y * 320;
+        uintpixel_t* bottom = top + 320;
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+#endif
+#endif
+        swrDirtyRow(swr, y, from, to);
+        swrDirtyRow(swr, y + 1, from, to);
+        for (int x = from; x < to; x += 2, u += stepU, v += stepV) {
+            unsigned tx = (unsigned) (u >> 16), ty = (unsigned) (v >> 16);
+            if (tx >= SWR_VINE_W || ty >= SWR_VINE_H) continue;
+            uintpixel_t pixel = src[ty * pitch + tx];
+            if (!swrIsOpaque(pixel)) continue;
+            if (tinted) pixel = tint(color, pixel);
+            uint32_t pair = pixel | ((uint32_t) pixel << 16);
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        }
+    }
+}
+
 // A growing strike keeps its angle, so the inverse transform advances by a
 // constant per row as well as per column. Re-anchor every 16 rows and use the
 // float sampler at texel boundaries to retain its edge and colour rounding.
@@ -2332,6 +2388,17 @@ static void swrDrawSpriteRotatedInternal(
 
     bool cachedRows = false;
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    if (floweyGrowth && capture == NULL && !flipX && !flipY && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH &&
+        dh == SWR_GROWTH_HEIGHT && sw == SWR_VINE_W && sh == SWR_VINE_H &&
+        sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        pivotY == 5.5f && swr->blendMode == bm_normal && alpha > 253 && swrFloweyVineBlockTarget(swr)) {
+        const SWVineGrowthRows* rows = swrVineGrowthRows(texture, rotation, (minYc & ~1) - dy, maxYc - dy);
+        if (rows != NULL) {
+            swrDrawFloweyVineBlocks(swr, rows, rotation, texture->buffer + sy * texture->width + sx,
+                                   texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, tintColor);
+            return;
+        }
+    }
     const SWVineGrowthRows* growthRows = floweyGrowth ? swrVineGrowthRows(texture, rotation, minYc - dy, maxYc - dy) : NULL;
     cachedRows = growthRows != NULL;
     int growthLeft = cachedRows ? swrFloor(pxa) - 1 : 0;
@@ -4686,7 +4753,15 @@ void swrDrawSpriteRotated(
                  (w == (SWR_VINE_W + 1) / 2 && h == (SWR_VINE_H + 1) / 2)) &&
                 swr->portX >= 0 && swr->portY >= 0 && swr->maxX <= 640 && swr->maxY <= 480 &&
                 swr->maxX == swr->portX + swr->portW && swr->maxY == swr->portY + swr->portH;
-    if ((pipe || vine || eye) && texture->immutable &&
+    floweyGrowth = floweyVine && texture->immutable && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
+                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH &&
+                   h == SWR_GROWTH_HEIGHT && pivotY == 5.5f &&
+                   pivotX >= 0.0f && pivotX <= w && x >= -4096 && x <= 4096 && y >= -4096 && y <= 4096;
+    // Avoid building a full-resolution raster when the coarse sampler will
+    // handle the fully extended vine in the same way as the growing strike.
+    bool coarseVine = vine && floweyGrowth && swrFloweyVineBlockTarget(swr) &&
+                      fabsf(swrSpriteRotation(swr, angleDeg).sine) >= 0.7f;
+    if ((pipe || (vine && !coarseVine) || eye) && texture->immutable &&
         sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
         swr->blendMode == bm_normal && opacity > 253) {
         SWRasterKey key = { .sx = sx, .sy = sy, .sw = sw, .sh = sh, .dw = w, .dh = h, .angle = angleDeg,
@@ -4707,10 +4782,6 @@ void swrDrawSpriteRotated(
 #endif
         if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
     }
-    floweyGrowth = floweyVine && texture->immutable && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
-                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH &&
-                   h == SWR_GROWTH_HEIGHT && pivotY == 5.5f &&
-                   pivotX >= 0.0f && pivotX <= w && x >= -4096 && x <= 4096 && y >= -4096 && y <= 4096;
 #else
     (void) floweyVine;
 #endif
