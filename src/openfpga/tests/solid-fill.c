@@ -412,14 +412,16 @@ static void checkGrowingVine(void)
     swr.portW = WIDTH - swr.portX;
     swr.portH = HEIGHT - swr.portY;
     swr.blendMode = bm_normal;
-    const int widths[] = {36, 63, 64, 65, 66, 127, 169, 250, 271};
+    const int widths[] = {36, 63, 64, 65, 66, 87, 107, 128, 148, 169, 189, 210, 230, 250, 271};
     const float angles[] = {45.0f, 49.0f, 67.25f, 83.6f, 89.999f, 90.0f, 90.001f,
-                            120.0f, 135.0f, 225.0f, 270.0f, 278.4f, 315.0f};
+                            120.0f, 135.0f, 225.0f, 231.54f, 254.88f, 269.999f, 270.0f,
+                            270.001f, 278.4f, 311.01f, 315.0f};
+    const int positions[] = {-9, 45, 102};
     const uint32_t colors[] = {0xffa0a0, 0x808080, 0xffffff};
     for (unsigned a = 0; a < sizeof(angles) / sizeof(angles[0]); ++a) {
         for (unsigned i = 0; i < sizeof(widths) / sizeof(widths[0]); ++i) {
-            int w = widths[i], x = 45 - (int) i * 3, y = angles[a] < 180.0f ? 80 : -14;
-            uintpixel_t tintColor = swrConvertPixel(colors[i % (sizeof(colors) / sizeof(colors[0]))]);
+            int w = widths[i], x = positions[(i + a / 3) % 3], y = angles[a] < 180.0f ? 80 : -14;
+            uintpixel_t tintColor = swrConvertPixel(colors[(i + a) % 3]);
             float pivot = w * (13.0f / SRC_W);
             for (int j = 0; j < WIDTH * HEIGHT; ++j)
                 actual[j] = expected[j] = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));

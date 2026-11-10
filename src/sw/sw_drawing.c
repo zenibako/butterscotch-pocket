@@ -2074,7 +2074,8 @@ typedef struct {
 } SWRotatedCapture;
 
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
-enum { SWR_GROWTH_HEIGHT = 17, SWR_GROWTH_MAX_WIDTH = 271,
+enum { SWR_VINE_W = 511, SWR_VINE_H = 33,
+       SWR_GROWTH_HEIGHT = 17, SWR_GROWTH_MAX_WIDTH = 271,
        SWR_GROWTH_ROW_RADIUS = SWR_GROWTH_MAX_WIDTH + SWR_GROWTH_HEIGHT + 2,
        SWR_GROWTH_CACHE_SLOTS = 16 };
 typedef struct {
@@ -2119,6 +2120,68 @@ static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation 
         rows->left[row + SWR_GROWTH_ROW_RADIUS] = (int16_t) swrFloor(rows->slope * (row - 5) + rows->intercept);
     }
     return rows;
+}
+
+// A growing strike keeps its angle, so the inverse transform advances by a
+// constant per row as well as per column. Re-anchor every 16 rows and use the
+// float sampler at texel boundaries to retain its edge and colour rounding.
+static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
+                                  const uintpixel_t* src, int pitch, int dx, int dy, int dw,
+                                  float pxa, float pya, int minX, int minY, int maxX, int maxY)
+{
+    const float c = rotation.cosine, s = rotation.sine;
+    const float xScale = (float) SWR_VINE_W / dw, yScale = (float) SWR_VINE_H / SWR_GROWTH_HEIGHT;
+    const float pivotX = pxa - dx, pivotY = pya - dy;
+    const int leftOrigin = swrFloor(pxa) - 1;
+    const int32_t acrossU = swrFloor((c * xScale) * 65536.0f + 0.5f);
+    const int32_t acrossV = swrFloor((-s * yScale) * 65536.0f + 0.5f);
+    const int32_t downU = swrFloor((s * xScale) * 65536.0f + 0.5f);
+    const int32_t downV = swrFloor((c * yScale) * 65536.0f + 0.5f);
+    // At most 16 rows and 29 pixels across a row, with scales below eight.
+    // 512 fixed-point units cover the step rounding and the float transform.
+    enum { texelBand = 512 };
+    int previousY = minY - 2, previousX = 0;
+    int32_t startU = 0, startV = 0;
+    for (int y = minY; y < maxY; ++y) {
+        int left = leftOrigin + rows->left[y - dy + SWR_GROWTH_ROW_RADIUS];
+        int from = swrMax(left, minX), to = swrMin(left + rows->span, maxX);
+        if (from >= to) continue;
+        float oy = (float) y + 0.5f - pya;
+        if (y != previousY + 1 || (y & 15) == 0) {
+            float ox = (float) from + 0.5f - pxa;
+            float lx = (c * ox + s * oy) + pivotX;
+            float ly = (-s * ox + c * oy) + pivotY;
+            startU = swrFloor((lx * xScale) * 65536.0f + 0.5f);
+            startV = swrFloor((ly * yScale) * 65536.0f + 0.5f);
+        } else {
+            int delta = from - previousX;
+            startU += delta * acrossU + downU;
+            startV += delta * acrossV + downV;
+        }
+        previousY = y;
+        previousX = from;
+        int32_t u = startU, v = startV;
+        uintpixel_t* dst = swr->fb + y * swr->fbPitch + from;
+        swrDirtyRow(swr, y, from, to);
+        for (int x = from; x < to; ++x, ++dst, u += acrossU, v += acrossV) {
+            int tx, ty;
+            if ((uint32_t) ((u & 0xffff) - texelBand) < 65536 - 2 * texelBand &&
+                (uint32_t) ((v & 0xffff) - texelBand) < 65536 - 2 * texelBand) {
+                tx = u >> 16;
+                ty = v >> 16;
+                if ((unsigned) tx >= SWR_VINE_W || (unsigned) ty >= SWR_VINE_H) continue;
+            } else {
+                float ox = (float) x + 0.5f - pxa;
+                float lx = (c * ox + s * oy) + pivotX;
+                float ly = (-s * ox + c * oy) + pivotY;
+                if (lx < 0.0f || ly < 0.0f || lx >= (float) dw || ly >= SWR_GROWTH_HEIGHT) continue;
+                tx = swrMin((int) (lx * xScale), SWR_VINE_W - 1);
+                ty = swrMin((int) (ly * yScale), SWR_VINE_H - 1);
+            }
+            uintpixel_t pixel = src[ty * pitch + tx];
+            if (swrIsOpaque(pixel)) *dst = pixel;
+        }
+    }
 }
 #endif
 
@@ -2195,6 +2258,13 @@ static void swrDrawSpriteRotatedInternal(
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
     const SWVineGrowthRows* growthRows = floweyGrowth ? swrVineGrowthRows(texture, rotation, minYc - dy, maxYc - dy) : NULL;
     cachedRows = growthRows != NULL;
+    if (cachedRows && capture == NULL && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH && dh == SWR_GROWTH_HEIGHT &&
+        sw == SWR_VINE_W && sh == SWR_VINE_H && sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        !flipX && !flipY && swr->blendMode == bm_normal && (tintColor & 0x7fff) == 0x7fff && alpha > 253) {
+        swrDrawGrowingVineRows(swr, growthRows, rotation, texture->buffer + sy * texture->width + sx,
+                              texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc);
+        return;
+    }
     int growthLeft = cachedRows ? swrFloor(pxa) - 1 : 0;
 #else
     (void) floweyGrowth;
@@ -3772,7 +3842,7 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 // Keep translated pipe and eye poses separate from stationary vine poses.
 enum { SWR_RASTER_SLOTS = 64,
        SWR_RASTER_BYTES = 192 * 1024, SWR_RASTER_BUILDS = 8,
-       SWR_VINE_W = 511, SWR_VINE_H = 33, SWR_VINE_SLOTS = 12, SWR_VINE_BYTES = 256 * 1024,
+       SWR_VINE_SLOTS = 12, SWR_VINE_BYTES = 256 * 1024,
        SWR_SPEED_VINE_SLOTS = 16, SWR_SPEED_VINE_BUILDS = 2,
        SWR_EYE_SIZE = 40, SWR_EYE_BYTES = 128 * 1024, SWR_EYE_BUILDS = 2,
        SWR_TOTAL_RASTER_BYTES = SWR_RASTER_BYTES + SWR_VINE_BYTES + SWR_EYE_BYTES };
