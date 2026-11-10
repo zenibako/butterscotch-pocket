@@ -400,20 +400,23 @@ static void checkGrowingVine(void)
     swr.portW = WIDTH - swr.portX;
     swr.portH = HEIGHT - swr.portY;
     swr.blendMode = bm_normal;
-    const int widths[] = {66, 169, 250, 271};
-    const float angles[] = {49.0f, 83.6f, 90.0f, 278.4f, 315.0f};
+    const int widths[] = {36, 63, 64, 65, 66, 127, 169, 250, 271};
+    const float angles[] = {45.0f, 49.0f, 67.25f, 83.6f, 89.999f, 90.0f, 90.001f,
+                            120.0f, 135.0f, 225.0f, 270.0f, 278.4f, 315.0f};
+    const uint32_t colors[] = {0xffa0a0, 0x808080, 0xffffff};
     for (unsigned a = 0; a < sizeof(angles) / sizeof(angles[0]); ++a) {
         for (unsigned i = 0; i < sizeof(widths) / sizeof(widths[0]); ++i) {
-            int w = widths[i], x = 45 - (int) i * 3, y = a < 3 ? 80 : -14;
+            int w = widths[i], x = 45 - (int) i * 3, y = angles[a] < 180.0f ? 80 : -14;
+            uintpixel_t tintColor = swrConvertPixel(colors[i % (sizeof(colors) / sizeof(colors[0]))]);
             float pivot = w * (13.0f / SRC_W);
             for (int j = 0; j < WIDTH * HEIGHT; ++j)
                 actual[j] = expected[j] = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));
             swr.fb = swr.mainFb = actual;
             swrDrawSpriteRotatedInternal(&swr.base, x, y, w, 17, &texture, 0, 0, SRC_W, SRC_H,
-                                         swrConvertPixel(0xffa0a0), 256, angles[a], pivot, 5.5f, NULL, true);
+                                         tintColor, 256, angles[a], pivot, 5.5f, NULL, true);
             swr.fb = expected;
             swrDrawSpriteRotatedInternal(&swr.base, x, y, w, 17, &texture, 0, 0, SRC_W, SRC_H,
-                                         swrConvertPixel(0xffa0a0), 256, angles[a], pivot, 5.5f, NULL, false);
+                                         tintColor, 256, angles[a], pivot, 5.5f, NULL, false);
             if (memcmp(actual, expected, sizeof(actual)) || texture.vineGrowthRows == NULL) {
                 fprintf(stderr, "FAIL: growing vine angle=%g width=%d\n", (double) angles[a], w);
                 exit(1);

@@ -2273,6 +2273,12 @@ static void swrDrawSpriteRotatedInternal(
         pivotX >= 0.0f && pivotX <= dw && pivotY >= 0.0f && pivotY <= dh &&
         dx >= -4096 && dx <= 4096 && dy >= -4096 && dy <= 4096)
         recheckBand = 256;
+    // The growing vine's cached rows are at most 29 pixels wide. With
+    // source-to-screen ratios below eight and screen offsets below 512,
+    // float roundoff and 16.16 step rounding stay well inside 512 units.
+    // Recompute exact coordinates near texture edges and texel boundaries.
+    if (cachedRows && dw >= 64 && sw <= 511 && sh <= 33)
+        recheckBand = 512;
     uint32_t steppedSpan = (uint32_t) (0x10000 - 2 * recheckBand);
     // A step across the screen moves the texel by this much each way.
     float texStepXf = cosA * sw_dw * 65536.0f, texStepYf = -sinA * sh_dh * 65536.0f;
