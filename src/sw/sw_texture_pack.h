@@ -55,6 +55,7 @@ bool swrTexturePackHasFloweyBackdrop(uint32_t nativePages);
 
 bool swrTexturePackHasFloweyStalk(unsigned pose, int width, int height);
 bool swrTexturePackDecodeFloweyStalk(unsigned pose, int width, int height, uintpixel_t* buffer);
+bool swrTexturePackDecodeFloweyOpeningItem(int32_t item, uint32_t page, int x, int y, int w, int h, uintpixel_t* buffer);
 
 // Decodes a page into `buffer`, which must hold width * height pixels.
 bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer);

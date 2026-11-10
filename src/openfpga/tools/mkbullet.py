@@ -33,8 +33,7 @@ CORE_FILES = ('audio.json', 'core.json', 'data.json', 'icon.bin', 'info.txt',
               'input.json', 'interact.json', 'variants.json', 'video.json')
 
 
-def package(elf: Path, output: Path, version: str, *, baked_flowey_pack: bool = False,
-            baked_stalk_pack: bool = False) -> None:
+def package(elf: Path, output: Path, version: str, *, flowey_music: str = '') -> None:
     payload = elf.read_bytes()
     if len(payload) < 52 or payload[:6] != b'\x7fELF\x01\x01' or payload[18:20] != b'\xf3\x00':
         raise ValueError('benchmark input must be a little-endian 32-bit RISC-V ELF')
@@ -80,8 +79,8 @@ def package(elf: Path, output: Path, version: str, *, baked_flowey_pack: bool = 
                 slot['filename'] = ini
             elif number == 3:
                 slot['filename'] = 'bs_bullet.elf'
-            elif number == 6 and (baked_flowey_pack or baked_stalk_pack) and mode.startswith('fx_'):
-                slot['filename'] = 'bs_stalk_music.bin' if baked_stalk_pack else 'bs_bullet_music.bin'
+            elif number == 6 and flowey_music and mode.startswith('fx_'):
+                slot['filename'] = flowey_music
             elif 10 <= number <= 19:
                 slot['filename'] = f'bs_bullet_{number - 10}.sav'
             if len(slot['filename'].encode('utf-8')) > 23:
@@ -108,13 +107,14 @@ def main():
     parser.add_argument('--version', required=True)
     parser.add_argument('--output', type=Path, required=True)
     packs = parser.add_mutually_exclusive_group()
-    packs.add_argument('--baked-flowey-pack', action='store_true',
+    packs.add_argument('--baked-flowey-pack', dest='flowey_music', action='store_const', const='bs_bullet_music.bin',
                        help='use the separately generated bs_bullet_music.bin for Flowey')
-    packs.add_argument('--baked-stalk-pack', action='store_true',
+    packs.add_argument('--baked-stalk-pack', dest='flowey_music', action='store_const', const='bs_stalk_music.bin',
                        help='use the separately generated bs_stalk_music.bin for Flowey')
+    packs.add_argument('--baked-opening-pack', dest='flowey_music', action='store_const', const='bs_open_music.bin',
+                       help='use the separately generated bs_open_music.bin for Flowey')
     args = parser.parse_args()
-    package(args.elf, args.output, args.version, baked_flowey_pack=args.baked_flowey_pack,
-            baked_stalk_pack=args.baked_stalk_pack)
+    package(args.elf, args.output, args.version, flowey_music=args.flowey_music)
     print(args.output)
 
 

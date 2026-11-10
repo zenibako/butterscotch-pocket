@@ -129,12 +129,12 @@ class BulletPackageTest(unittest.TestCase):
 
     def test_baked_pack_remaps_only_the_flowey_music_slots(self):
         self.package()
-        self.check_flowey_music_slot('bs_bullet_music.bin', baked_flowey_pack=True)
-        self.check_flowey_music_slot('bs_stalk_music.bin', baked_stalk_pack=True)
+        for filename in ('bs_bullet_music.bin', 'bs_stalk_music.bin', 'bs_open_music.bin'):
+            self.check_flowey_music_slot(filename)
 
-    def check_flowey_music_slot(self, filename, **options):
+    def check_flowey_music_slot(self, filename):
         baked = self.root / 'baked.zip'
-        mkbullet.package(self.elf, baked, '1.2.3-rc.4', **options)
+        mkbullet.package(self.elf, baked, '1.2.3-rc.4', flowey_music=filename)
         with zipfile.ZipFile(self.output) as stock, zipfile.ZipFile(baked) as archive:
             self.assertEqual(stock.namelist(), archive.namelist())
             changed = set()

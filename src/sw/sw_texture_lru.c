@@ -1,5 +1,8 @@
 #include <stdlib.h>
 #include <errno.h>
+#ifdef OF_PC
+#include <stdio.h>
+#endif
 #include "sw_renderer_private.h"
 #include "sw_texture_pack.h"
 #include "image/image_decoder.h"
@@ -314,10 +317,36 @@ void swrFreeItemTextures(SWRenderer* swr)
     swr->itemCount = 0;
 }
 
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+static void captureFloweyOpeningItem(int32_t item, uint32_t page, int x, int y, int w, int h,
+                                     const uintpixel_t* buffer)
+{
+    static const char* dir;
+    static bool checked;
+    if (!checked) {
+        dir = getenv("BS_FLOWEY_OPENING_OUT");
+        checked = true;
+    }
+    if (!dir) return;
+
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%d.rgb555", dir, (int) item);
+    if (length < 0 || length >= (int) sizeof(path)) return;
+    FILE* out = fopen(path, "wbx");
+    if (!out) return;
+
+    uint16_t shape[] = {(uint16_t) page, (uint16_t) x, (uint16_t) y, (uint16_t) w, (uint16_t) h};
+    size_t pixels = (size_t) w * h;
+    bool ok = fwrite(shape, sizeof(*shape), 5, out) == 5 && fwrite(buffer, sizeof(*buffer), pixels, out) == pixels;
+    if (fclose(out) != 0 || !ok) remove(path);
+}
+#endif
+
 // Loads the item's rectangle, grown by a pixel on each side where the page
 // allows: scaled draws may sample one texel past the item, and should find
 // what is on the page there, as they would with the whole page loaded.
-static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_t pageId, int pageW, int pageH, bool* outOfMemory)
+static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_t pageId, int pageW, int pageH,
+                           int32_t tpagIndex, bool* outOfMemory)
 {
     *outOfMemory = false;
     int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
@@ -335,11 +364,18 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     SWTexture* texture = (SWTexture*) allocOrEvict(swr, sizeof(SWTexture));
     uintpixel_t* buffer = (uintpixel_t*) allocOrEvict(swr, bytes);
     *outOfMemory = !texture || !buffer;
-    if (*outOfMemory || !swrTexturePackDecodeRect(pageId, left, top, w, h, buffer)) {
+    bool openingItem = tpagIndex >= 0 && swr->floweySpeedRoom && swrSmoothMinify;
+    bool decoded = !*outOfMemory &&
+                   ((openingItem && swrTexturePackDecodeFloweyOpeningItem(tpagIndex, pageId, left, top, w, h, buffer)) ||
+                    swrTexturePackDecodeRect(pageId, left, top, w, h, buffer));
+    if (!decoded) {
         free(buffer);
         free(texture);
         return NULL;
     }
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+    if (openingItem) captureFloweyOpeningItem(tpagIndex, pageId, left, top, w, h, buffer);
+#endif
     
     texture->buffer = buffer;
     texture->width = (uint16_t) w;
@@ -379,7 +415,7 @@ SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr)
     SwrTexturePackStats stats;
     swrTexturePackTakeStats(&stats);
     bool outOfMemory;
-    SWTexture* texture = loadItem(swr, &item, pageId, item.sourceWidth, item.sourceHeight, &outOfMemory);
+    SWTexture* texture = loadItem(swr, &item, pageId, item.sourceWidth, item.sourceHeight, -1, &outOfMemory);
     unsigned ms = finishTextureLoad(start);
     swrTexturePackTakeStats(&stats);
     if (texture != NULL)
@@ -450,7 +486,7 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
         SwrTexturePackStats stats;
         swrTexturePackTakeStats(&stats);
         bool outOfMemory;
-        item = loadItem(swr, tpag, (uint32_t) pageId, pageW, pageH, &outOfMemory);
+        item = loadItem(swr, tpag, (uint32_t) pageId, pageW, pageH, tpagIndex, &outOfMemory);
         if (item == NULL) {
             finishTextureLoad(loadStart);
             // Out of memory is worth backing off from: making room has cost

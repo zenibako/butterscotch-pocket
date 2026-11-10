@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append a desktop-captured Flowey backdrop to a private Undertale pack."""
+"""Append desktop-captured Flowey art to a private Undertale pack."""
 import argparse
 import itertools
 from pathlib import Path
@@ -12,6 +12,11 @@ TILE = struct.Struct('<II')
 TAIL = struct.Struct('<III4s')
 STALK = struct.Struct('<HHII')
 STALK_POSES = 11
+OPENING_ITEM = struct.Struct('<6HII')
+OPENING_GROUPS = (
+    (5142, 5455, 6055),  # idle arm, coil/eye pipe, body backing
+    (5237, 5249, 5254, 5468, 5238, 5223, 5463, 5243),  # eye and mouth pieces
+)
 
 
 def encode_tile(pixels: list[int]) -> bytes:
@@ -74,7 +79,7 @@ def append_backdrop(stock: bytes, raw: bytes) -> bytes:
 
 
 def append_stalks(stock: bytes, captures: Path) -> bytes:
-    if stock.endswith(b'UST1'):
+    if stock.endswith((b'UST1', b'UST2')):
         raise ValueError('pack already contains stalk poses')
     payload = bytearray()
     index = bytearray()
@@ -92,6 +97,37 @@ def append_stalks(stock: bytes, captures: Path) -> bytes:
         index.extend(STALK.pack(w, h, len(stock) + len(payload), len(encoded)))
         payload.extend(encoded)
     return b''.join((stock, payload, index, b'UST1'))
+
+
+def append_opening_items(stock: bytes, captures: Path) -> bytes:
+    if not stock.endswith(b'UST1') or len(stock) < STALK.size * STALK_POSES + 4:
+        raise ValueError('opening groups require the held stalk pose pack')
+    # Keep the native tiles, backdrop and pose data at their original offsets.
+    stalk_index = len(stock) - STALK.size * STALK_POSES - 4
+    payload = bytearray()
+    groups = bytearray()
+    items = bytearray()
+    for group in OPENING_GROUPS:
+        group_start = len(payload)
+        for item in group:
+            raw = (captures / f'{item}.rgb555').read_bytes()
+            if len(raw) < 10:
+                raise ValueError(f'truncated opening item {item}')
+            page, x, y, w, h = struct.unpack_from('<5H', raw)
+            if not w or not h or len(raw) != 10 + w * h * 2:
+                raise ValueError(f'invalid dimensions or payload for opening item {item}')
+            pixels = struct.unpack_from(f'<{w * h}H', raw, 10)
+            # Limit each run/literal stream and preserve empty parts of the crop.
+            start = len(payload)
+            for pos in range(0, len(pixels), 16384):
+                part = pixels[pos:pos + 16384]
+                payload.extend(encode_tile(part) or struct.pack('<HH', 0x8000 | (len(part) - 1), 0))
+            items.extend(OPENING_ITEM.pack(item, page, x, y, w, h, stalk_index + start, len(payload) - start))
+        size = len(payload) - group_start
+        if size > 64 * 1024:
+            raise ValueError('opening group exceeds one texture read window')
+        groups.extend(TILE.pack(stalk_index + group_start, size))
+    return b''.join((stock[:stalk_index], payload, groups, items, stock[stalk_index:-4], b'UST2'))
 
 
 def embed(music: bytes, stock: bytes, extended: bytes) -> bytes:
@@ -114,13 +150,18 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--music', type=Path, help='embed the extended pack in a copy of music.bin')
     parser.add_argument('--stalks', type=Path, help='directory of BS_FLOWEY_STALKS_OUT captures (requires --music)')
+    parser.add_argument('--opening', type=Path, help='directory of BS_FLOWEY_OPENING_OUT captures (requires --stalks)')
     args = parser.parse_args()
     if args.stalks and not args.music:
         parser.error('--stalks requires --music')
+    if args.opening and not args.stalks:
+        parser.error('--opening requires --stalks')
     stock = args.stock.read_bytes()
     extended = append_backdrop(stock, args.backdrop.read_bytes())
     if args.stalks:
         extended = append_stalks(extended, args.stalks)
+    if args.opening:
+        extended = append_opening_items(extended, args.opening)
     payload = embed(args.music.read_bytes(), stock, extended) if args.music else extended
     with args.output.open('xb') as out:
         out.write(payload)

@@ -35,3 +35,29 @@ class StalkPackTest(unittest.TestCase):
             (captures / '0.rgb555').write_bytes(b'truncated')
             with self.assertRaises(ValueError):
                 pack.append_stalks(stock, captures)
+
+    def test_opening_groups_preserve_native_tiles_and_stalk_payload(self):
+        payload = b'UTX2test payload bytes!'
+        stalk_index = bytes(11 * 12)
+        with tempfile.TemporaryDirectory() as directory:
+            captures = Path(directory)
+            for group in pack.OPENING_GROUPS:
+                for item in group:
+                    capture = struct.pack('<5H', 14, 123, 456, 8, 4)
+                    (captures / f'{item}.rgb555').write_bytes(capture + struct.pack('<H', 0x8000 + item) * 32)
+            result = pack.append_opening_items(payload + stalk_index + b'UST1', captures)
+            self.assertTrue(result.startswith(payload))
+            self.assertTrue(result.endswith(stalk_index + b'UST2'))
+            index_at = len(payload) + 4 * sum(map(len, pack.OPENING_GROUPS))
+            expected_at = len(payload)
+            item_at = index_at + 2 * 8
+            for group in pack.OPENING_GROUPS:
+                self.assertEqual(struct.unpack_from('<II', result, index_at), (expected_at, 4 * len(group)))
+                index_at += 8
+                for item in group:
+                    self.assertEqual(struct.unpack_from('<6HII', result, item_at),
+                                     (item, 14, 123, 456, 8, 4, expected_at, 4))
+                    self.assertEqual(result[expected_at:expected_at + 4],
+                                     struct.pack('<HH', 0x801f, 0x8000 + item))
+                    expected_at += 4
+                    item_at += 20

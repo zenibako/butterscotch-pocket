@@ -762,6 +762,11 @@ directory on the same desktop run and continue through the TV laugh. Pass
 `bs_stalk_music.bin`. Install it alongside the ordinary assets and use
 `--baked-stalk-pack` when packaging the benchmark core.
 
+For the grouped opening textures, also set `BS_FLOWEY_OPENING_OUT` to a
+separate empty directory on that run. Pass `--opening <directory>` alongside
+`--stalks`, write the output as `bs_open_music.bin`, and package the benchmark
+core with `--baked-opening-pack`.
+
 The Flowey report's `45x31 raster` lines break down rotating pipe draws by
 cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 
