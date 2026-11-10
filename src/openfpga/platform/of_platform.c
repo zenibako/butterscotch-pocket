@@ -1332,7 +1332,7 @@ void platformSleepUntil(uint64_t time) {
     }
     uint64_t end = nowNanos();
     ofPerfAddSleep(end - start);
-    ofBenchPacedFrame(g_runner, start, end);
+    ofBenchPacedFrame(g_runner, g_scriptFrame, start, end);
 }
 
 void ofPlatformSnapshotNotice(const char *text) {

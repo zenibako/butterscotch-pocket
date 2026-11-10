@@ -101,11 +101,13 @@ static void checkFloweyStalkHalf(void)
     swr.portH = swr.maxY = HEIGHT;
     swr.scaleX = swr.scaleY = 0.5f;
     swr.blendMode = bm_normal;
-    if (!swrDrawFloweyStalkHalf(&swr.base, texture, 4, -2, 1, 1, 6, 4, true) ||
-        !swrDrawFloweyStalkHalf(&swr.base, texture, 4, 2, 1, 1, 6, 4, false) ||
+    const uint32_t shade = 0x999999;
+    uintpixel_t tintColor = swrConvertPixel(shade);
+    if (!swrDrawFloweyStalkHalf(&swr.base, texture, 4, -2, 1, 1, 6, 4, true, 0xffffff) ||
+        !swrDrawFloweyStalkHalf(&swr.base, texture, 4, 2, 1, 1, 6, 4, false, shade) ||
         actual[0] != colors[1] || actual[1] != colors[0] || actual[2] || actual[3] ||
-        actual[6] != colors[0] || actual[7] != colors[1] ||
-        actual[10] != colors[0] || actual[11] != colors[1]) {
+        actual[6] != tint(tintColor, colors[0]) || actual[7] != tint(tintColor, colors[1]) ||
+        actual[10] != tint(tintColor, colors[0]) || actual[11] != tint(tintColor, colors[1])) {
         fprintf(stderr, "FAIL: Flowey stalk half-size cache and clipping\n");
         exit(1);
     }

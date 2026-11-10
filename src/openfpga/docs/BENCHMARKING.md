@@ -105,6 +105,15 @@ rows. A drawn update can count without a display submission, for example
 when the desktop flip is disabled. The uncapped Speed entry measures the
 cost of drawing every frame. Compare timings within the same entry.
 
+The Flowey opening table uses scripted update numbers so it also includes the
+room transition, which can occur without a display submission. `cold` and
+`return` cover entry through the first backdrop draw. Each is followed by
+separate fade, hold, and TV laugh windows. The second entry is a later
+checkpoint in the same process and can reuse textures from the first.
+`tx-ms` sums texture load time in each window, and `max-ms` is the longest
+update's work time. `warm-ms` averages only drawn updates with no texture
+loads. A dash means there were no such samples. Audio work is still included.
+
 The `45x31 raster` lines show the number of rotated sprite calls on the timed
 frames and the mean microseconds per call. `warm` reuses a cached raster,
 `build` creates and blits one, `pivot` bypasses the cache because the pivot

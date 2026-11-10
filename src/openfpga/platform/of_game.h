@@ -50,6 +50,13 @@ typedef struct {
 } OfBenchSection;
 
 #define OF_BENCH_MAX_SECTIONS 8
+#define OF_BENCH_MAX_OPENING_WINDOWS 8
+
+/* A window in scripted update numbers, including updates with no swap. */
+typedef struct {
+    const char *tag;
+    int firstUpdate, endUpdate;
+} OfBenchOpeningWindow;
 
 typedef struct {
     /* The game's name, and its files on the card, for the loading screen's errors. */
@@ -115,6 +122,8 @@ typedef struct {
     int floweyJumpCount;
     const OfBenchSection *floweySections;
     int floweySectionCount;
+    const OfBenchOpeningWindow *floweyOpening;
+    int floweyOpeningCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

@@ -574,7 +574,7 @@ static void SWRenderer_endGUI(Renderer* renderer)
 }
 
 static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float y,
-                                  float originX, float originY, float xscale)
+                                  float originX, float originY, float xscale, uint32_t color)
 {
     DataWin* dw = swr->base.dataWin;
     const Sprite* sprite = &dw->sprt.sprites[swr->floweyStalkSprite];
@@ -589,7 +589,7 @@ static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float
         return swrDrawFloweyStalkHalf(&swr->base, texture,
             x + (tpag->targetX - originX) * xscale, y + (tpag->targetY - originY),
             tpag->sourceX - texture->originX, tpag->sourceY - texture->originY,
-            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f);
+            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f, color);
     }
     return false;
 }
@@ -693,8 +693,9 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
             if (swr->floweyStalkSprite >= 0 && tpagIndex >= swr->floweyStalkFirst &&
                 tpagIndex <= swr->floweyStalkLast && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
                 (xscale == 1.0f || xscale == -1.0f) && yscale >= 0.98f && yscale <= 1.02f &&
-                angleDeg == 0.0f && color == 0xffffff && alpha == 1.0f &&
-                swrDrawFloweySideStalk(swr, tpagIndex, x, y, originX, originY, xscale)) return;
+                // Keep using the held pose through the grayscale intro fade.
+                angleDeg == 0.0f && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
+                swrDrawFloweySideStalk(swr, tpagIndex, x, y, originX, originY, xscale, color)) return;
         }
         if (tpagIndex == swr->floweyVineItem && swr->blendMode == bm_normal &&
             alpha >= 0.0f && alpha < 1.0f) {

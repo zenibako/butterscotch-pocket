@@ -203,8 +203,8 @@ static void finishChunk(uint64_t now) {
     g_chunkStart = 0;
 }
 
-/* Room and texture loads announce themselves in the log; their time goes
- * into the slow-frame report (see of_perf.h). The host tools share this file
+/* Room loads announce themselves in the log; their time goes into the
+ * slow-frame report (see of_perf.h). The host tools share this file
  * but have no frames to report on. */
 #ifdef OF_HOST_TOOL
 static void trackFrameLoads(const char *format, const char *text, uint64_t now) {
@@ -220,9 +220,6 @@ static void trackFrameLoads(const char *format, const char *text, uint64_t now) 
     } else if (strncmp(format, "Runner: Room loaded:", 20) == 0) {
         if (roomStart != 0) ofPerfAddLoad(OF_LOAD_ROOM, now - roomStart);
         roomStart = 0;
-    } else if (strncmp(format, "SWR: Loaded TXTR", 16) == 0) {
-        const char *took = strstr(text, " took ");
-        if (took != NULL) ofPerfAddLoad(OF_LOAD_TEXTURE, strtoull(took + 6, NULL, 10) * 1000000u);
     }
 }
 #endif

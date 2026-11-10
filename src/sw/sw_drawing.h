@@ -36,7 +36,7 @@ enum { SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3, SWR_FLOWEY_BACKDROP_SHADOW = SWR_FLO
 void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
                                const TexturePageItem* item, unsigned layer);
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
-                           int sx, int sy, int sw, int sh, bool mirrored);
+                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color);
 enum { SWR_FLOWEY_ART_NONE, SWR_FLOWEY_ART_ARM, SWR_FLOWEY_ART_CASE, SWR_FLOWEY_ART_SCREEN };
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
                       int sx, int sy, int sw, int sh, int kind);

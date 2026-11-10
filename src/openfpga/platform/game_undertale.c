@@ -670,9 +670,24 @@ static const OfBenchSection g_saberSections[] = {
 static const char g_floweyScript[] =
     "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z";
 
+enum { FLOWEY_VINE_ENTRY = 900, FLOWEY_FINALE_ENTRY = 1430 };
 static const OfJump g_floweyJumps[] = {
-    { 900, 294, "fplot=3", NULL },
-    { 1430, 294, "fplot=7", NULL },
+    { FLOWEY_VINE_ENTRY, 294, "fplot=3", NULL },
+    { FLOWEY_FINALE_ENTRY, 294, "fplot=7", NULL },
+};
+
+/* The first composite lands at entry + 2. The rest of the fade ends
+ * before +14, and the TV laugh begins at +33 and runs for 180 updates.
+ * Both checkpoints use this same authored intro. */
+static const OfBenchOpeningWindow g_floweyOpening[] = {
+    { "cold",   FLOWEY_VINE_ENTRY,      FLOWEY_VINE_ENTRY + 3 },
+    { "fade",   FLOWEY_VINE_ENTRY + 3,  FLOWEY_VINE_ENTRY + 14 },
+    { "hold",   FLOWEY_VINE_ENTRY + 14, FLOWEY_VINE_ENTRY + 33 },
+    { "laugh",  FLOWEY_VINE_ENTRY + 33, FLOWEY_VINE_ENTRY + 213 },
+    { "return", FLOWEY_FINALE_ENTRY,      FLOWEY_FINALE_ENTRY + 3 },
+    { "fade2",  FLOWEY_FINALE_ENTRY + 3,  FLOWEY_FINALE_ENTRY + 14 },
+    { "hold2",  FLOWEY_FINALE_ENTRY + 14, FLOWEY_FINALE_ENTRY + 33 },
+    { "laugh2", FLOWEY_FINALE_ENTRY + 33, FLOWEY_FINALE_ENTRY + 213 },
 };
 
 static bool floweyPhaseActive(const Runner *runner, GMLReal phase) {
@@ -777,6 +792,8 @@ const OfGame ofGame = {
     .floweyJumpCount = (int) (sizeof(g_floweyJumps) / sizeof(g_floweyJumps[0])),
     .floweySections = g_floweySections,
     .floweySectionCount = (int) (sizeof(g_floweySections) / sizeof(g_floweySections[0])),
+    .floweyOpening = g_floweyOpening,
+    .floweyOpeningCount = (int) (sizeof(g_floweyOpening) / sizeof(g_floweyOpening[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,

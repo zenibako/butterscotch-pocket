@@ -91,6 +91,8 @@ typedef enum { OF_LOAD_ROOM, OF_LOAD_TEXTURE, OF_LOAD_SOUND, OF_LOAD_MIX, OF_LOA
 typedef enum { OF_PHASE_OTHER, OF_PHASE_STEP, OF_PHASE_AUDIO, OF_PHASE_DRAW, OF_PHASE_OUT, OF_PHASES } OfPhase;
 #define OF_PERF_SLOW_FRAME_MS 150
 void ofPerfAddLoad(OfLoadKind kind, uint64_t nanos);
+/* Includes loads on a room transition that has yet to reach a swap. */
+uint64_t ofPerfTextureLoadNanos(void);
 /* The same split, added up over every frame since the last call (or since
  * start), for the benchmark's per-section table. Taking it starts a new sum. */
 typedef struct {

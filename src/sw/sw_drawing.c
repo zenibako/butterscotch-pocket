@@ -4354,7 +4354,7 @@ bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy
 }
 
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
-                           int sx, int sy, int sw, int sh, bool mirrored)
+                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -4376,11 +4376,11 @@ bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, fl
     half.immutable = false; // the stack view cannot own additional caches
     swrTransformPosIfNeeded(swr, &dx, &dy);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), mirrored ? -sw / 2 : sw / 2, sh / 2,
-                          &half, sx, sy, sw / 2, sh / 2, swrConvertPixel(0xffffff), 256, true, SWR_CONTRAST_NONE);
+                          &half, sx, sy, sw / 2, sh / 2, swrConvertPixel(color), 256, true, SWR_CONTRAST_NONE);
     return true;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy;
-    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color;
     return false;
 #endif
 }

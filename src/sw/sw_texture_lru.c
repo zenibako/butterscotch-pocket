@@ -5,6 +5,19 @@
 #include "image/image_decoder.h"
 #include "gettime.h"
 
+#ifdef PLATFORM_PACK_READ
+void platformTextureLoadTime(uint64_t nanos);
+#endif
+
+static unsigned finishTextureLoad(uint64_t start)
+{
+    uint64_t elapsed = nowNanos() - start;
+#ifdef PLATFORM_PACK_READ
+    platformTextureLoadTime(elapsed);
+#endif
+    return (unsigned) (elapsed / 1000000u);
+}
+
 #if defined(OF_NATIVE_SAVESTATES) && !defined(OF_PC)
 /* Only native save-state builds link this port hook. */
 extern int platformHeapCanReserve(size_t bytes);
@@ -270,6 +283,7 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId)
         texture = loadFromDataWin(swr, pageId);
     }
     if (!texture) {
+        finishTextureLoad(loadStart);
         size_t needed = (size_t) packW * packH * sizeof(uintpixel_t);
         logError("SWR: TXTR page %u needs %u KB; largest free block %u KB, cache %u KB\n", pageId, (unsigned) (needed / 1024),
                  (unsigned) (largestFreeBlock(needed ? needed : 16u * 1024u * 1024u) / 1024), (unsigned) (cachedBytes(swr) / 1024));
@@ -284,7 +298,7 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId)
 #endif
     
     logInfo("SWR: Loaded TXTR page %u (%dx%d, %s) took %u ms, cache %u KB\n", pageId, texture->width, texture->height,
-            source, (unsigned)((nowNanos() - loadStart) / 1000000u), (unsigned)(cachedBytes(swr) / 1024));
+            source, finishTextureLoad(loadStart), (unsigned)(cachedBytes(swr) / 1024));
     return true;
 }
 
@@ -396,6 +410,7 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
         bool outOfMemory;
         item = loadItem(swr, tpag, (uint32_t) pageId, pageW, pageH, &outOfMemory);
         if (item == NULL) {
+            finishTextureLoad(loadStart);
             // Out of memory is worth backing off from: making room has cost
             // other textures. A read that failed is tried again on the next
             // draw; that passes (the storage was busy) and holding the page
@@ -421,8 +436,8 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 #ifdef TEXTURE_CACHE_RESERVE_BYTES
         keepHeapReserve(swr);
 #endif
-        // Only the slow ones are worth a line; the platform reads the time off it.
-        uint32_t tookMs = (uint32_t) ((nowNanos() - loadStart) / 1000000u);
+        // Keep the log short. The benchmark counts fast loads too.
+        unsigned tookMs = finishTextureLoad(loadStart);
         if (tookMs >= 20) {
             swrTexturePackTakeStats(&stats);
             logInfo("SWR: Loaded TXTR item %d of page %d (%dx%d, pack) took %u ms, cache %u KB\n", (int) tpagIndex, (int) pageId,

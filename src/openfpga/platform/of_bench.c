@@ -33,6 +33,13 @@ static struct {
     unsigned updates, submitted, micros, rate;
     LiveUpdateTimes times[LIVE_KINDS];
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
+typedef struct {
+    unsigned updates, draws, warmDraws;
+    uint64_t textureNanos, maxWorkNanos, warmWorkNanos;
+} OpeningTimes;
+static OpeningTimes g_opening[OF_BENCH_MAX_OPENING_WINDOWS];
+static int g_openingWindow, g_lastOpeningUpdate;
+static uint64_t g_lastOpeningTexture;
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
 static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_flipNanos = 0; /* time inside the display flip this section */
@@ -112,6 +119,11 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     if (ofGame.floweyScript == NULL) return false;
     benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
                ofGame.floweySections, ofGame.floweySectionCount, true, livePacing);
+    if (ofGame.floweyOpeningCount > OF_BENCH_MAX_OPENING_WINDOWS)
+        ofDiagHalt("Flowey benchmark has too many opening windows");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) g_opening[i] = (OpeningTimes) {0};
+    g_openingWindow = g_lastOpeningUpdate = 0;
+    g_lastOpeningTexture = ofPerfTextureLoadNanos();
     return true;
 }
 
@@ -255,6 +267,27 @@ static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
 
 static void reportWork(void);
 
+static void reportOpening(void) {
+    if (ofGame.floweyOpeningCount == 0) return;
+    ofLogPrint("Flowey opening, separate scripted windows\n");
+    ofLogPrint("scene     upd  draw   tx-ms   max-ms  warm  warm-ms\n");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
+        const OpeningTimes *t = &g_opening[i];
+        char warm[24] = "--";
+        if (t->warmDraws) {
+            uint64_t unit = (uint64_t) t->warmDraws * 100000u;
+            unsigned mean = (unsigned) ((t->warmWorkNanos + unit / 2) / unit);
+            snprintf(warm, sizeof(warm), "%u.%u", mean / 10, mean % 10);
+        }
+        unsigned maxWork = (unsigned) ((t->maxWorkNanos + 50000u) / 100000u);
+        ofLogPrint("%-7s %5u %5u %7u %6u.%u %5u %8s\n", ofGame.floweyOpening[i].tag,
+                   t->updates, t->draws, (unsigned) ((t->textureNanos + 500000u) / 1000000u),
+                   maxWork / 10, maxWork % 10, t->warmDraws, warm);
+    }
+    ofLogPrint("tx-ms = total texture load, max-ms = longest update work\n");
+    ofLogPrint("warm-ms = mean work on draws with no texture loads\n");
+}
+
 static void reportLive(void) {
     ofLogPrint("Full speed: 30 updates/s\n");
     ofLogPrint("phase upd/s updates submit skips other   time-us\n");
@@ -288,6 +321,7 @@ static void reportLive(void) {
         }
     }
     ofLogPrint("wait = time in the frame limiter\n");
+    reportOpening();
 }
 
 static void advanceBenchFrame(Runner *runner, uint64_t now) {
@@ -383,12 +417,38 @@ void ofBenchFrame(Runner *runner, bool skipped) {
     }
 }
 
-void ofBenchPacedFrame(Runner *runner, uint64_t waitStart, uint64_t waitEnd) {
+static void recordOpening(int update, uint64_t work, bool drawn) {
+    if (update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
+    g_lastOpeningUpdate = update;
+    uint64_t totalTexture = ofPerfTextureLoadNanos();
+    uint64_t texture = totalTexture - g_lastOpeningTexture;
+    g_lastOpeningTexture = totalTexture;
+    while (g_openingWindow < ofGame.floweyOpeningCount &&
+           update >= ofGame.floweyOpening[g_openingWindow].endUpdate) ++g_openingWindow;
+    if (g_openingWindow >= ofGame.floweyOpeningCount ||
+        update < ofGame.floweyOpening[g_openingWindow].firstUpdate) return;
+
+    OpeningTimes *t = &g_opening[g_openingWindow];
+    ++t->updates;
+    t->textureNanos += texture;
+    if (work > t->maxWorkNanos) t->maxWorkNanos = work;
+    if (drawn) {
+        ++t->draws;
+        if (texture == 0) {
+            ++t->warmDraws;
+            t->warmWorkNanos += work;
+        }
+    }
+}
+
+void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uint64_t waitEnd) {
     if (!g_running || !g_def.livePacing) return;
     uint64_t updateStart = g_liveLastPaceEnd;
     // Room changes can run an update without reaching the swap path. Move
     // the boundary anyway so the following sample excludes that work.
     g_liveLastPaceEnd = waitEnd;
+    if (updateStart != 0)
+        recordOpening(scriptUpdate, waitStart - updateStart, g_liveFramePending && !g_liveSkipped);
     if (!g_liveFramePending) return;
     g_liveFramePending = false;
     if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
