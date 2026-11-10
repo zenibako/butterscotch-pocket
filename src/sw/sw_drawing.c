@@ -4077,8 +4077,6 @@ void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, i
     static const struct { int16_t x, y, angle; } stamps[] = {
         { 144, 30, 50 }, { 144, 17, 90 }, { 135, 7, 130 }, { 121, 5, 170 },
         { 108, 12, 210 }, { 101, 25, 250 }, { 103, 39, 290 }, { 115, 48, 330 },
-        { 140, 66, 30 }, { 113, 80, 6 }, { 87, 81, 342 }, { 73, 68, 290 },
-        { 77, 52, 234 }, { 97, 47, 190 }, { 125, 56, 146 },
     };
     SWRenderer bake = {0};
     bake.portW = bake.maxX = art->width;
@@ -4136,6 +4134,54 @@ void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy)
     }
 #else
     (void) art; (void) pipe; (void) sx; (void) sy;
+#endif
+}
+
+SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { LEFT = 60, TOP = 29, WIDTH = 200, HEIGHT = 65, SOURCE_W = 45, SOURCE_H = 31 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return NULL;
+    SWTexture* art = calloc(1, sizeof(*art));
+    if (art == NULL) return NULL;
+    art->buffer = calloc(WIDTH * HEIGHT, sizeof(*art->buffer));
+    if (art->buffer == NULL) {
+        free(art);
+        return NULL;
+    }
+    art->width = WIDTH;
+    art->height = HEIGHT;
+    art->originX = LEFT;
+    art->originY = TOP;
+    art->immutable = true;
+
+    // Stock side-stalk surrounds in a held 320x240 pose. The crop stays
+    // above the vine warning lines. Mirror the texture and angle for the right.
+    static const struct { int16_t x, y, angle; } stamps[] = {
+        { 140, 68, 30 }, { 127, 75, 18 }, { 113, 81, 6 }, { 99, 82, -6 },
+        { 87, 80, -18 }, { 78, 74, -30 }, { 73, 66, -70 }, { 73, 57, -90 },
+        { 77, 49, -126 }, { 86, 44, -148 }, { 97, 43, -170 },
+        { 111, 46, -192 }, { 125, 52, -214 },
+    };
+    SWRenderer bake = {0};
+    bake.fb = art->buffer;
+    bake.fbPitch = bake.portW = bake.maxX = WIDTH;
+    bake.portH = bake.maxY = HEIGHT;
+    bake.blendMode = bm_normal;
+    uintpixel_t tintColor = swrConvertPixel(0xc0c0c0);
+    for (int side = 0; side < 2; ++side) {
+        int direction = side == 0 ? 1 : -1;
+        for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
+            int x = side == 0 ? stamps[i].x : 320 - stamps[i].x;
+            swrDrawSpriteRotatedInternal(&bake.base, x - LEFT - direction * 10, stamps[i].y - TOP - 7,
+                                         direction * 23, 14, pipe, sx, sy, SOURCE_W, SOURCE_H,
+                                         tintColor, 256, direction * stamps[i].angle, 10.5f, 7.0f, NULL);
+        }
+    }
+    return art;
+#else
+    (void) pipe; (void) sx; (void) sy;
+    return NULL;
 #endif
 }
 
