@@ -30,6 +30,7 @@ void swrDrawLine(Renderer* renderer, float x1, float y1, float x2, float y2, flo
 bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float dh,
                       float angle, float pivotX, float pivotY, uint32_t color, float alpha);
 SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy);
+void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy);
 enum { SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3 };
 void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
                                const TexturePageItem* item, unsigned layer);

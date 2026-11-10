@@ -616,6 +616,14 @@ static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const Textu
                 swrAddFloweyBackdropVines(swr->floweyPipeBackdrop, vine, vinePage->sourceX - vine->originX,
                                          vinePage->sourceY - vine->originY, vinePage, layer);
         }
+        int32_t segmentItem = swr->floweyPipeSegmentItem;
+        if (segmentItem >= 0) {
+            const TexturePageItem* segmentPage = &swr->base.dataWin->tpag.items[segmentItem];
+            SWTexture* segment = swrTextureForItem(swr, segmentItem);
+            if (segment != NULL)
+                swrAddFloweyBackdropPipeSegments(swr->floweyPipeBackdrop, segment, segmentPage->sourceX - segment->originX,
+                                                segmentPage->sourceY - segment->originY);
+        }
     }
     SWTexture* art = swr->floweyPipeBackdrop;
     uint32_t fade = (shade * 255 + normalShade / 2) / normalShade;
@@ -3288,6 +3296,7 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     DataWin* dw = renderer->dataWin;
     swr->floweyVineItem = -1;
     swr->floweyPipeItem = -1;
+    swr->floweyPipeSegmentItem = -1;
     swr->floweyStalkSprite = -1;
     swr->floweyArmItem = -1;
     swr->floweyTvCaseItem = -1;
@@ -3319,6 +3328,12 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
                 swr->floweyVineItem = item;
         } else if (strcmp(sprite->name, "spr_bgpipe") == 0) {
             swr->floweyPipeItem = item;
+        } else if (strcmp(sprite->name, "spr_pipepart") == 0) {
+            const TexturePageItem* page = &dw->tpag.items[item];
+            if (sprite->originX == 21 && sprite->originY == 19 &&
+                page->sourceWidth == 45 && page->sourceHeight == 31 && page->targetX == 0 && page->targetY == 3 &&
+                page->targetWidth == 45 && page->targetHeight == 31)
+                swr->floweyPipeSegmentItem = item;
         } else if (strcmp(sprite->name, "spr_floweyarm") == 0) {
             swr->floweyArmItem = item;
         } else if (strcmp(sprite->name, "spr_floweyx_tv") == 0) {

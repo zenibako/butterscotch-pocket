@@ -4065,7 +4065,9 @@ static const SWFloweyArtRows* swrFloweyArtRows(SWTexture* texture, int sx, int s
 SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
 {
 #ifdef SW_HAS_PREMUL_BLEND
-    enum { WIDTH = 320, HEIGHT = 163, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
+    // Leave transparent rows under the coils so the composite stays within
+    // the sparse-run cache's half-coverage limit.
+    enum { WIDTH = 320, HEIGHT = 184, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
     if (sx < 0 || sy < 0 || sx + PIPE_WIDTH > pipe->width || sy + PIPE_HEIGHT > pipe->height)
         return NULL;
     SWTexture* art = calloc(1, sizeof(*art));
@@ -4140,6 +4142,47 @@ void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, in
     }
 #else
     (void) art; (void) vine; (void) sx; (void) sy; (void) item; (void) layer;
+#endif
+}
+
+void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { SOURCE_W = 45, SOURCE_H = 31, STAMP_W = 17, STAMP_H = 11, PIVOT_X = 8, PIVOT_Y = 6 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return;
+    // Sample the left coils from the stock vine phase at 320x240 and mirror
+    // them for the right. Smaller stamps keep the scenery away from cues.
+    static const struct { int16_t x, y, angle; } stamps[] = {
+        { 144, 30, 50 }, { 144, 17, 90 }, { 135, 7, 130 }, { 121, 5, 170 },
+        { 108, 12, 210 }, { 101, 25, 250 }, { 103, 39, 290 }, { 115, 48, 330 },
+        { 140, 66, 30 }, { 113, 80, 6 }, { 87, 81, 342 }, { 73, 68, 290 },
+        { 77, 52, 234 }, { 97, 47, 190 }, { 125, 56, 146 },
+        { 116, 92, 30 }, { 105, 106, 70 }, { 105, 123, 110 }, { 117, 135, 150 }, { 135, 137, 190 },
+    };
+    SWRenderer bake = {0};
+    bake.portW = bake.maxX = art->width;
+    bake.portH = bake.maxY = art->height;
+    bake.blendMode = bm_normal;
+    uintpixel_t tintColor = swrConvertPixel(0x777777);
+    for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
+        for (int side = 0; side < 2; ++side) {
+            int direction = side == 0 ? 1 : -1;
+            int x = side == 0 ? stamps[i].x : 321 - stamps[i].x;
+            SWRotatedCapture stamp = {0};
+            swrDrawSpriteRotatedInternal(&bake.base, x - direction * PIVOT_X, stamps[i].y - PIVOT_Y,
+                                         direction * STAMP_W, STAMP_H, pipe, sx, sy, SOURCE_W, SOURCE_H,
+                                         tintColor, 256, direction * stamps[i].angle, PIVOT_X, PIVOT_Y, &stamp);
+            for (int row = 0; row < stamp.height; ++row) {
+                const uintpixel_t* src = stamp.pixels + row * stamp.width;
+                uintpixel_t* dst = art->buffer + (stamp.y + row) * art->width + stamp.x;
+                for (int col = 0; col < stamp.width; ++col)
+                    if (swrIsOpaque(src[col]) && !swrIsOpaque(dst[col])) dst[col] = src[col];
+            }
+            free(stamp.pixels);
+        }
+    }
+#else
+    (void) art; (void) pipe; (void) sx; (void) sy;
 #endif
 }
 
