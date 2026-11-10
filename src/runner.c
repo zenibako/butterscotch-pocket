@@ -3906,6 +3906,16 @@ void Runner_takeCollisionWork(Runner* runner, RunnerCollisionWork* out) {
 }
 #endif
 
+#ifndef ENABLE_VM_TRACING
+static bool collisionHasSolidTarget(Instance* const* targets, const Instance* self) {
+    for (int32_t i = 0; i < arrlen(targets); ++i) {
+        const Instance* other = targets[i];
+        if (other != self && other->active && other->solid) return true;
+    }
+    return false;
+}
+#endif
+
 static void dispatchCollisionEvents(Runner* runner) {
     DataWin* dataWin = runner->dataWin;
     // Iterate only the objects that have any collision event in their parent chain.
@@ -3944,6 +3954,12 @@ static void dispatchCollisionEvents(Runner* runner) {
 
 #ifndef ENABLE_VM_TRACING
                 bool canSkip = evt->codeId == runner->skipCollisionCode && runner->skipCollisionEvent != nullptr;
+                // A read-only no-op test can bypass the snapshot and sort if
+                // there is no solid pair that could run code and wake self.
+                if (canSkip && !self->solid && targetObjIndex >= 0 && (uint32_t) targetObjIndex < dataWin->objt.count &&
+                    runner->skipCollisionEvent(runner, self) &&
+                    !collisionHasSolidTarget(runner->instancesByObject[targetObjIndex], self))
+                    continue;
 #endif
                 // Iterate only the descendant-inclusive list for the target object via a snapshot, so nested user code (collision handlers calling instance_exists, with (...), etc.) can push/pop their own snapshots above ours without corrupting this iteration.
                 int32_t snapBase = Runner_pushInstancesOfObject(runner, targetObjIndex);

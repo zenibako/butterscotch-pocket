@@ -14,7 +14,7 @@
 
 enum { SELF, PARENT, CHILD, UNRELATED, OBJECTS };
 enum { NONE, CREATE, DESTROY, DEACTIVATE, CHANGE_OUT, CHANGE_IN,
-       MOVE, RESIZE, MOVE_SELF, ROOM, QUERY, NESTED };
+       MOVE, RESIZE, MOVE_SELF, ROOM, QUERY, NESTED, WAKE };
 typedef struct { unsigned self, other; int target; } Pair;
 typedef struct Fixture Fixture;
 struct Fixture {
@@ -117,6 +117,9 @@ static bool record(VMContext* ctx) {
     case NESTED:
         dispatchCollisionEvents(&f->nested->runner);
         assert(arrlen(f->nested->runner.instanceSnapshots) == 0);
+        break;
+    case WAKE:
+        self->imageAlpha = 1;
         break;
     default: break;
     }
@@ -291,8 +294,7 @@ static void counts(void) {
 #ifndef ENABLE_VM_TRACING
 static bool fixtureSkipCollision(Runner* runner, Instance* self) {
     (void) runner;
-    (void) self;
-    return true;
+    return self->imageAlpha == 0;
 }
 
 static void nonSolidFilter(void) {
@@ -301,11 +303,34 @@ static void nonSolidFilter(void) {
         Fixture* f = fixture();
         add(f, SELF, 10)->solid = c == 1;
         add(f, PARENT, 1)->solid = c == 2;
+        if (c == 0) {
+            add(f, CHILD, 2);
+            Instance* inactive = add(f, CHILD, 3);
+            inactive->active = false;
+            inactive->solid = true;
+        }
         f->runner.skipCollisionEvent = fixtureSkipCollision;
         f->runner.skipCollisionCode = c == 3 ? -1 : 0;
         run(f, c == 0 ? NULL : hit, c == 0 ? 0 : 1);
+#ifdef OF_COLLISION_WORK_PROFILE
+        RunnerCollisionWork work = take(f);
+        assert(work.sorts == (uint64_t) (c != 0));
+        if (c == 0) assert(work.targets == 0 && work.selfBoxes == 0 && work.otherBoxes == 0);
+#endif
         finish(f);
     }
+
+    // A solid target can run the event and wake self before the next pair.
+    Fixture* f = fixture();
+    f->action = WAKE;
+    f->runner.skipCollisionEvent = fixtureSkipCollision;
+    f->runner.skipCollisionCode = 0;
+    add(f, SELF, 10);
+    add(f, CHILD, 2);
+    add(f, PARENT, 1)->solid = true;
+    const Pair mixed[] = {{10, 1, PARENT}, {10, 2, PARENT}};
+    run(f, mixed, 2);
+    finish(f);
 }
 #endif
 
