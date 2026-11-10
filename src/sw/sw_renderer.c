@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <float.h>
 #include <assert.h>
@@ -594,6 +595,57 @@ static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float
     return false;
 }
 
+static SWTexture* swrBuildFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag)
+{
+    SWTexture* source = swrTextureForItem(swr, item);
+    if (source == NULL) return NULL;
+    SWTexture* art = swrMakeFloweyPipeBackdrop(source, tpag->sourceX - source->originX, tpag->sourceY - source->originY);
+    if (art == NULL) return NULL;
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+    unsigned layers = 0;
+#endif
+    for (unsigned layer = 0; layer < SWR_FLOWEY_BACKDROP_VINE_LAYERS; ++layer) {
+        int32_t vineItem = swr->floweyBackdropItems[layer];
+        if (vineItem < 0) continue;
+        const TexturePageItem* vinePage = &swr->base.dataWin->tpag.items[vineItem];
+        SWTexture* vine = swrTextureForItem(swr, vineItem);
+        if (vine == NULL) continue;
+        swrAddFloweyBackdropVines(art, vine, vinePage->sourceX - vine->originX,
+                                 vinePage->sourceY - vine->originY, vinePage, layer);
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+        ++layers;
+#endif
+    }
+    int32_t segmentItem = swr->floweyPipeSegmentItem;
+    if (segmentItem >= 0) {
+        const TexturePageItem* segmentPage = &swr->base.dataWin->tpag.items[segmentItem];
+        SWTexture* segment = swrTextureForItem(swr, segmentItem);
+        if (segment != NULL) {
+            int sx = segmentPage->sourceX - segment->originX;
+            int sy = segmentPage->sourceY - segment->originY;
+            swrAddFloweyBackdropPipeSegments(art, segment, sx, sy);
+            swrAddFloweyEyePipes(art, segment, sx, sy);
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+            const char* path = getenv("BS_FLOWEY_BACKDROP_OUT");
+            if (path != NULL && layers == SWR_FLOWEY_BACKDROP_VINE_LAYERS) {
+                FILE* out = fopen(path, "wbx");
+                if (out != NULL) {
+                    size_t count = (size_t) art->width * art->height;
+                    size_t written = fwrite(art->buffer, sizeof(*art->buffer), count, out);
+                    if (fclose(out) != 0 || written != count) {
+                        remove(path);
+                        logError("SWR: Could not write Flowey backdrop to %s\n", path);
+                    }
+                } else {
+                    logError("SWR: Could not create Flowey backdrop at %s\n", path);
+                }
+            }
+#endif
+        }
+    }
+    return art;
+}
+
 static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag, uint32_t color)
 {
     // The rear layer's normal tint is 60% white. During the intro it fades
@@ -602,31 +654,10 @@ static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const Textu
     uint32_t shade = color & 0xff;
     if (shade > normalShade || color != shade * 0x010101) return false;
     if (swr->floweyPipeBackdrop == NULL) {
-        SWTexture* source = swrTextureForItem(swr, item);
-        if (source == NULL) return false;
-        swr->floweyPipeBackdrop = swrMakeFloweyPipeBackdrop(source, tpag->sourceX - source->originX,
-                                                          tpag->sourceY - source->originY);
+        swr->floweyPipeBackdrop = swrLoadPackedFloweyBackdrop(swr);
+        if (swr->floweyPipeBackdrop == NULL)
+            swr->floweyPipeBackdrop = swrBuildFloweyPipeBackdrop(swr, item, tpag);
         if (swr->floweyPipeBackdrop == NULL) return false;
-        for (unsigned layer = 0; layer < SWR_FLOWEY_BACKDROP_VINE_LAYERS; ++layer) {
-            int32_t vineItem = swr->floweyBackdropItems[layer];
-            if (vineItem < 0) continue;
-            const TexturePageItem* vinePage = &swr->base.dataWin->tpag.items[vineItem];
-            SWTexture* vine = swrTextureForItem(swr, vineItem);
-            if (vine != NULL)
-                swrAddFloweyBackdropVines(swr->floweyPipeBackdrop, vine, vinePage->sourceX - vine->originX,
-                                         vinePage->sourceY - vine->originY, vinePage, layer);
-        }
-        int32_t segmentItem = swr->floweyPipeSegmentItem;
-        if (segmentItem >= 0) {
-            const TexturePageItem* segmentPage = &swr->base.dataWin->tpag.items[segmentItem];
-            SWTexture* segment = swrTextureForItem(swr, segmentItem);
-            if (segment != NULL) {
-                int sx = segmentPage->sourceX - segment->originX;
-                int sy = segmentPage->sourceY - segment->originY;
-                swrAddFloweyBackdropPipeSegments(swr->floweyPipeBackdrop, segment, sx, sy);
-                swrAddFloweyEyePipes(swr->floweyPipeBackdrop, segment, sx, sy);
-            }
-        }
     }
     SWTexture* art = swr->floweyPipeBackdrop;
     uint32_t fade = (shade * 255 + normalShade / 2) / normalShade;

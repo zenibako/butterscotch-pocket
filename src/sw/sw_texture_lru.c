@@ -367,6 +367,27 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     return texture;
 }
 
+SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr)
+{
+    uint32_t pageId = (uint32_t) swr->textureCount;
+    if (!swrTexturePackHasFloweyBackdrop(pageId)) return NULL;
+
+    const TexturePageItem item = {
+        .sourceWidth = SWR_FLOWEY_BACKDROP_WIDTH, .sourceHeight = SWR_FLOWEY_BACKDROP_HEIGHT
+    };
+    uint64_t start = nowNanos();
+    SwrTexturePackStats stats;
+    swrTexturePackTakeStats(&stats);
+    bool outOfMemory;
+    SWTexture* texture = loadItem(swr, &item, pageId, item.sourceWidth, item.sourceHeight, &outOfMemory);
+    unsigned ms = finishTextureLoad(start);
+    swrTexturePackTakeStats(&stats);
+    if (texture != NULL)
+        logInfo("SWR: Loaded baked Flowey backdrop: %u ms, %u reads, %u bytes\n",
+                ms, (unsigned) stats.reads, (unsigned) stats.bytes);
+    return texture;
+}
+
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 {
     DataWin* dw = swr->base.dataWin;

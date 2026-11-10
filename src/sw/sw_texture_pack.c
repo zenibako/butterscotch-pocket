@@ -134,6 +134,19 @@ bool swrTexturePackGetSize(uint32_t pageId, int* outW, int* outH)
     return true;
 }
 
+bool swrTexturePackHasFloweyBackdrop(uint32_t nativePages)
+{
+    if (!packProbed) packOpen();
+    if (nativePages >= packCount || packCount - nativePages != 1) return false;
+
+    const PackPage* page = &packPages[nativePages];
+    if (page->width != SWR_FLOWEY_BACKDROP_WIDTH || page->height != SWR_FLOWEY_BACKDROP_HEIGHT ||
+        page->firstTile >= packTileCount) return false;
+    uint32_t columns = (page->width + packTile - 1) / packTile;
+    uint32_t rows = (page->height + packTile - 1) / packTile;
+    return packTileCount - page->firstTile == columns * rows;
+}
+
 #ifdef PLATFORM_BUSY_TICK
 // Called between the pieces of a long blocking read, so the platform can keep
 // time-critical work going (feeding its audio queue, for one).
@@ -329,6 +342,7 @@ bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer)
 #else
 
 bool swrTexturePackGetSize(UNUSED uint32_t pageId, UNUSED int* outW, UNUSED int* outH) { return false; }
+bool swrTexturePackHasFloweyBackdrop(UNUSED uint32_t nativePages) { return false; }
 bool swrTexturePackDecode(UNUSED uint32_t pageId, UNUSED uintpixel_t* buffer) { return false; }
 bool swrTexturePackDecodeRect(UNUSED uint32_t pageId, UNUSED int x, UNUSED int y, UNUSED int w, UNUSED int h, UNUSED uintpixel_t* buffer) { return false; }
 const char* swrTexturePackLastError(void) { return ""; }

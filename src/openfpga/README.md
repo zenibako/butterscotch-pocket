@@ -746,6 +746,16 @@ modes, not predictions whose savings can be added together. Profile
 instrumentation changes timing; its script totals are workload rankings, not
 baseline timings.
 
+An optional baked backdrop avoids loading the five source sprites on Flowey's
+first Speed-mode fade draw. With the stock Undertale pack and a desktop build,
+set `BS_FLOWEY_BACKDROP_OUT` to a new file and run `--bench-flowey-smooth`
+through the Photoshop intro. Use
+`python3 tools/flowey_texture_pack.py textures.bin <capture> bs_bullet_music.bin --music music.bin`
+to append the captured neutral-pose art to a private copy of the asset.
+Pass `--baked-flowey-pack` to `tools/mkbullet.py` and place
+`bs_bullet_music.bin` in `Assets/butterscotch/common/` alongside the ordinary
+assets. The package ZIP still contains only the core and launch files.
+
 The Flowey report's `45x31 raster` lines break down rotating pipe draws by
 cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 

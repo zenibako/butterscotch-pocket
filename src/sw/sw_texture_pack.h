@@ -50,6 +50,9 @@
 // Returns false if there is no pack, or it has no entry for this page.
 bool swrTexturePackGetSize(uint32_t pageId, int* outW, int* outH);
 
+// The optional Flowey page follows the game's native texture pages.
+bool swrTexturePackHasFloweyBackdrop(uint32_t nativePages);
+
 // Decodes a page into `buffer`, which must hold width * height pixels.
 bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer);
 

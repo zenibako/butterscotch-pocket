@@ -33,7 +33,7 @@ CORE_FILES = ('audio.json', 'core.json', 'data.json', 'icon.bin', 'info.txt',
               'input.json', 'interact.json', 'variants.json', 'video.json')
 
 
-def package(elf: Path, output: Path, version: str) -> None:
+def package(elf: Path, output: Path, version: str, *, baked_flowey_pack: bool = False) -> None:
     payload = elf.read_bytes()
     if len(payload) < 52 or payload[:6] != b'\x7fELF\x01\x01' or payload[18:20] != b'\xf3\x00':
         raise ValueError('benchmark input must be a little-endian 32-bit RISC-V ELF')
@@ -79,6 +79,8 @@ def package(elf: Path, output: Path, version: str) -> None:
                 slot['filename'] = ini
             elif number == 3:
                 slot['filename'] = 'bs_bullet.elf'
+            elif number == 6 and baked_flowey_pack and mode.startswith('fx_'):
+                slot['filename'] = 'bs_bullet_music.bin'
             elif 10 <= number <= 19:
                 slot['filename'] = f'bs_bullet_{number - 10}.sav'
             if len(slot['filename'].encode('utf-8')) > 23:
@@ -104,8 +106,10 @@ def main():
     parser.add_argument('--elf', type=Path, required=True)
     parser.add_argument('--version', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--baked-flowey-pack', action='store_true',
+                        help='use the separately generated bs_bullet_music.bin for Flowey')
     args = parser.parse_args()
-    package(args.elf, args.output, args.version)
+    package(args.elf, args.output, args.version, baked_flowey_pack=args.baked_flowey_pack)
     print(args.output)
 
 

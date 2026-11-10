@@ -4067,7 +4067,7 @@ SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
 #ifdef SW_HAS_PREMUL_BLEND
     // Leave transparent rows under the coils so the composite stays within
     // the sparse-run cache's half-coverage limit.
-    enum { WIDTH = 320, HEIGHT = 184, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
+    enum { WIDTH = SWR_FLOWEY_BACKDROP_WIDTH, HEIGHT = SWR_FLOWEY_BACKDROP_HEIGHT, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
     if (sx < 0 || sy < 0 || sx + PIPE_WIDTH > pipe->width || sy + PIPE_HEIGHT > pipe->height)
         return NULL;
     SWTexture* art = calloc(1, sizeof(*art));

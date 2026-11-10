@@ -13,6 +13,8 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId);
 // whole page is loaded already, this is the page itself with a zero origin.
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex);
 
+SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr);
+
 // Frees every per-item texture, e.g. before the renderer is destroyed.
 void swrFreeItemTextures(SWRenderer* swr);
 

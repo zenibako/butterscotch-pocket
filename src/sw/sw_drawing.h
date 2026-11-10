@@ -32,7 +32,12 @@ void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy);
 SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy);
 void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const TexturePageItem* item);
 void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy);
-enum { SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3, SWR_FLOWEY_BACKDROP_SHADOW = SWR_FLOWEY_BACKDROP_VINE_LAYERS };
+enum {
+    SWR_FLOWEY_BACKDROP_WIDTH = 320,
+    SWR_FLOWEY_BACKDROP_HEIGHT = 184,
+    SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3,
+    SWR_FLOWEY_BACKDROP_SHADOW = SWR_FLOWEY_BACKDROP_VINE_LAYERS
+};
 void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
                                const TexturePageItem* item, unsigned layer);
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,

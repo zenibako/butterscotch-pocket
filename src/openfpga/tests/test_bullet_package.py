@@ -127,6 +127,25 @@ class BulletPackageTest(unittest.TestCase):
             for name in first.namelist():
                 self.assertEqual(first.read(name), other.read(name), name)
 
+    def test_baked_pack_remaps_only_the_flowey_music_slots(self):
+        self.package()
+        baked = self.root / 'baked.zip'
+        mkbullet.package(self.elf, baked, '1.2.3-rc.4', baked_flowey_pack=True)
+        with zipfile.ZipFile(self.output) as stock, zipfile.ZipFile(baked) as archive:
+            self.assertEqual(stock.namelist(), archive.namelist())
+            changed = set()
+            for label, mode, _ in MODES:
+                if mode.startswith('fx_'):
+                    name = f'Assets/butterscotch/{CORE_ID}/{label}.json'
+                    changed.add(name)
+                    expected = json.loads(stock.read(name))
+                    for slot in expected['instance']['data_slots']:
+                        if slot['id'] == 6:
+                            slot['filename'] = 'bs_bullet_music.bin'
+                    self.assertEqual(json.loads(archive.read(name)), expected)
+            for name in set(stock.namelist()) - changed:
+                self.assertEqual(archive.read(name), stock.read(name), name)
+
     def test_refuses_to_replace_an_existing_output(self):
         # Catches destructive overwrite of a prior package.
         self.output.write_bytes(b'previous package')
