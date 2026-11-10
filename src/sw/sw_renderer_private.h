@@ -6,6 +6,11 @@
 #include "sw_pixel_convert.h"
 
 enum { SWR_FONT_BUBBLE_CONTRAST = 1, SWR_FONT_WHITE_CONTRAST = 2 };
+enum {
+    SWR_FLOWEY_STALK_HOLD = 6,
+    SWR_FLOWEY_STALK_FRAMES = 62,
+    SWR_FLOWEY_STALK_POSES = (SWR_FLOWEY_STALK_FRAMES + SWR_FLOWEY_STALK_HOLD - 1) / SWR_FLOWEY_STALK_HOLD
+};
 
 // Frees the composed tile-run pictures (sw_renderer.c); they are rebuilt on
 // the next draw. Returns false if there were none.
@@ -175,6 +180,8 @@ typedef struct
     uint32_t floweyPipeFrame;
     SWTexture* floweyPipeBackdrop;
     SWTexture* floweyStalkEyePipes;
+    SWTexture* floweyStalkPoses[SWR_FLOWEY_STALK_POSES];
+    uint16_t floweyStalkLoadTried;
     int32_t floweyUprightItems[4];
     unsigned floweyUprightCount;
     int32_t floweyBackdropItems[4];

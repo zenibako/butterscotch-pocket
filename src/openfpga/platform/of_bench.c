@@ -8,6 +8,7 @@
 #include "of_bench_scene.h"
 #include "of_perf.h"
 #include "sw_call_notes.h"
+#include "sw_texture_pack.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,10 +37,12 @@ static struct {
 typedef struct {
     unsigned updates, draws, warmDraws;
     uint64_t textureNanos, maxWorkNanos, warmWorkNanos;
+    SwrTexturePackReadTotals reads;
 } OpeningTimes;
 static OpeningTimes g_opening[OF_BENCH_MAX_OPENING_WINDOWS];
 static int g_openingWindow, g_lastOpeningUpdate;
 static uint64_t g_lastOpeningTexture;
+static SwrTexturePackReadTotals g_lastOpeningReads;
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
 static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_flipNanos = 0; /* time inside the display flip this section */
@@ -124,6 +127,7 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     for (int i = 0; i < ofGame.floweyOpeningCount; ++i) g_opening[i] = (OpeningTimes) {0};
     g_openingWindow = g_lastOpeningUpdate = 0;
     g_lastOpeningTexture = ofPerfTextureLoadNanos();
+    swrTexturePackGetReadTotals(&g_lastOpeningReads);
     return true;
 }
 
@@ -286,6 +290,18 @@ static void reportOpening(void) {
     }
     ofLogPrint("tx-ms = total texture load, max-ms = longest update work\n");
     ofLogPrint("warm-ms = mean work on draws with no texture loads\n");
+
+    ofLogPrint("Flowey opening texture window reads\n");
+    ofLogPrint("scene   direct    ms  decline    ms  stdio    ms  errs\n");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
+        const SwrTexturePackReadTotals *r = &g_opening[i].reads;
+        ofLogPrint("%-7s %6u %5u %8u %5u %6u %5u %5u\n", ofGame.floweyOpening[i].tag,
+                   (unsigned) r->directReads, (unsigned) ((r->directNanos + 500000u) / 1000000u),
+                   (unsigned) r->directDeclines, (unsigned) ((r->declinedNanos + 500000u) / 1000000u),
+                   (unsigned) r->stdioReads, (unsigned) ((r->stdioNanos + 500000u) / 1000000u),
+                   (unsigned) r->stdioErrors);
+    }
+    ofLogPrint("decline = direct unavailable or failed, stdio = fseek/fread attempts\n");
 }
 
 static void reportLive(void) {
@@ -423,6 +439,8 @@ static void recordOpening(int update, uint64_t work, bool drawn) {
     uint64_t totalTexture = ofPerfTextureLoadNanos();
     uint64_t texture = totalTexture - g_lastOpeningTexture;
     g_lastOpeningTexture = totalTexture;
+    SwrTexturePackReadTotals previous = g_lastOpeningReads;
+    swrTexturePackGetReadTotals(&g_lastOpeningReads);
     while (g_openingWindow < ofGame.floweyOpeningCount &&
            update >= ofGame.floweyOpening[g_openingWindow].endUpdate) ++g_openingWindow;
     if (g_openingWindow >= ofGame.floweyOpeningCount ||
@@ -431,6 +449,13 @@ static void recordOpening(int update, uint64_t work, bool drawn) {
     OpeningTimes *t = &g_opening[g_openingWindow];
     ++t->updates;
     t->textureNanos += texture;
+    t->reads.directReads += g_lastOpeningReads.directReads - previous.directReads;
+    t->reads.directDeclines += g_lastOpeningReads.directDeclines - previous.directDeclines;
+    t->reads.stdioReads += g_lastOpeningReads.stdioReads - previous.stdioReads;
+    t->reads.stdioErrors += g_lastOpeningReads.stdioErrors - previous.stdioErrors;
+    t->reads.directNanos += g_lastOpeningReads.directNanos - previous.directNanos;
+    t->reads.declinedNanos += g_lastOpeningReads.declinedNanos - previous.declinedNanos;
+    t->reads.stdioNanos += g_lastOpeningReads.stdioNanos - previous.stdioNanos;
     if (work > t->maxWorkNanos) t->maxWorkNanos = work;
     if (drawn) {
         ++t->draws;

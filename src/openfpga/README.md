@@ -756,6 +756,12 @@ Pass `--baked-flowey-pack` to `tools/mkbullet.py` and place
 `bs_bullet_music.bin` in `Assets/butterscotch/common/` alongside the ordinary
 assets. The package ZIP still contains only the core and launch files.
 
+To bake the held side-stalk poses too, set `BS_FLOWEY_STALKS_OUT` to an empty
+directory on the same desktop run and continue through the TV laugh. Pass
+`--stalks <directory>` to `flowey_texture_pack.py` and write the output as
+`bs_stalk_music.bin`. Install it alongside the ordinary assets and use
+`--baked-stalk-pack` when packaging the benchmark core.
+
 The Flowey report's `45x31 raster` lines break down rotating pipe draws by
 cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 

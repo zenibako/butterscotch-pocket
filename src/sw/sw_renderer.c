@@ -367,6 +367,8 @@ static void SWRenderer_destroy(Renderer* renderer)
     swrFreeItemTextures(swr);
     swrFreeTexture(swr->floweyPipeBackdrop);
     swrFreeTexture(swr->floweyStalkEyePipes);
+    for (unsigned pose = 0; pose < SWR_FLOWEY_STALK_POSES; ++pose)
+        swrFreeTexture(swr->floweyStalkPoses[pose]);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
@@ -583,14 +585,23 @@ static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float
         if (sprite->tpagIndices[frame] != item) continue;
         /* Hold one visual pose for six animation frames, while the draw event
          * continues to advance the authored animation and its position. */
-        int32_t held = sprite->tpagIndices[frame - frame % 6];
+        unsigned pose = frame / SWR_FLOWEY_STALK_HOLD;
+        int32_t held = sprite->tpagIndices[pose * SWR_FLOWEY_STALK_HOLD];
         const TexturePageItem* tpag = &dw->tpag.items[held];
+        float dx = x + (tpag->targetX - originX) * xscale;
+        float dy = y + (tpag->targetY - originY);
+        if (!(swr->floweyStalkLoadTried & (1u << pose))) {
+            swr->floweyStalkLoadTried |= (uint16_t) (1u << pose);
+            swr->floweyStalkPoses[pose] = swrLoadPackedFloweyStalk(swr, pose, tpag->sourceWidth / 2, tpag->sourceHeight / 2);
+        }
+        SWTexture* packed = swr->floweyStalkPoses[pose];
+        if (packed != NULL && swrDrawPackedFloweyStalk(&swr->base, packed, dx, dy, xscale < 0.0f, color))
+            return true;
         SWTexture* texture = swrTextureForItem(swr, held);
         if (texture == NULL) return false;
-        return swrDrawFloweyStalkHalf(&swr->base, texture,
-            x + (tpag->targetX - originX) * xscale, y + (tpag->targetY - originY),
+        return swrDrawFloweyStalkHalf(&swr->base, texture, dx, dy,
             tpag->sourceX - texture->originX, tpag->sourceY - texture->originY,
-            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f, color);
+            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f, color, pose);
     }
     return false;
 }
@@ -3302,7 +3313,7 @@ static bool swrAssetNamed(const char* name, const char* const* names, size_t cou
 
 static bool swrFloweyStalkFrames(const DataWin* dw, const Sprite* sprite)
 {
-    if (sprite->textureCount != 62) return false;
+    if (sprite->textureCount != SWR_FLOWEY_STALK_FRAMES) return false;
     int32_t previous = -1;
     for (uint32_t frame = 0; frame < sprite->textureCount; ++frame) {
         int32_t item = sprite->tpagIndices[frame];

@@ -114,6 +114,11 @@ checkpoint in the same process and can reuse textures from the first.
 update's work time. `warm-ms` averages only drawn updates with no texture
 loads. A dash means there were no such samples. Audio work is still included.
 
+The texture window read table separates successful direct reads, declined
+direct attempts, and the ensuing stdio attempts for the same windows. A
+decline includes an unavailable direct backend. Counts are renderer read
+windows, and the time columns are totals in milliseconds for each backend.
+
 The `45x31 raster` lines show the number of rotated sprite calls on the timed
 frames and the mean microseconds per call. `warm` reuses a cached raster,
 `build` creates and blits one, `pivot` bypasses the cache because the pivot

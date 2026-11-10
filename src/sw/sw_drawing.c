@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <float.h>
+#ifdef OF_PC
+#include <stdio.h>
+#endif
 #include "sw_renderer_private.h"
 #include "sw_call_notes.h"
 
@@ -4353,8 +4356,62 @@ bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy
 #endif
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+static bool swrDrawFloweyStalkPixels(Renderer* renderer, SWTexture* texture, float dx, float dy,
+                                    int sx, int sy, int w, int h, bool mirrored, uint32_t color)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (!isfinite(dx) || !isfinite(dy)) return false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), mirrored ? -w : w, h,
+                          texture, sx, sy, w, h, swrConvertPixel(color), 256, true, SWR_CONTRAST_NONE);
+    return true;
+}
+
+#if defined(OF_PC) && !defined IS_BIG_ENDIAN
+static void swrCaptureFloweyStalk(const SWTexture* half, int sx, int sy, int w, int h, unsigned pose)
+{
+    static uint16_t captured;
+    static bool checked;
+    static const char* dir;
+    if (!checked) {
+        dir = getenv("BS_FLOWEY_STALKS_OUT");
+        checked = true;
+    }
+    if (dir == NULL || (captured & (1u << pose))) return;
+    captured |= (uint16_t) (1u << pose);
+
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%u.rgb555", dir, pose);
+    FILE* out = length >= 0 && length < (int) sizeof(path) ? fopen(path, "wbx") : NULL;
+    if (out == NULL) {
+        logError("SWR: Could not create Flowey stalk capture %u\n", pose);
+        return;
+    }
+    uint16_t shape[2] = {(uint16_t) w, (uint16_t) h};
+    bool ok = fwrite(shape, sizeof(*shape), 2, out) == 2;
+    for (int y = 0; ok && y < h; ++y)
+        ok = fwrite(half->buffer + (size_t) (sy + y) * half->width + sx, sizeof(*half->buffer), (size_t) w, out) == (size_t) w;
+    if (fclose(out) != 0 || !ok) {
+        remove(path);
+        logError("SWR: Could not write Flowey stalk capture %u\n", pose);
+    }
+}
+#endif
+#endif
+
+bool swrDrawPackedFloweyStalk(Renderer* renderer, SWTexture* texture, float dx, float dy, bool mirrored, uint32_t color)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    return swrDrawFloweyStalkPixels(renderer, texture, dx, dy, 0, 0, texture->width, texture->height, mirrored, color);
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) mirrored; (void) color;
+    return false;
+#endif
+}
+
 bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
-                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color)
+                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color, unsigned pose)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -4374,13 +4431,15 @@ bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, fl
     half.height = (texture->height + sy + 1) / 2;
     half.solid = texture->halfSolid;
     half.immutable = false; // the stack view cannot own additional caches
-    swrTransformPosIfNeeded(swr, &dx, &dy);
-    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), mirrored ? -sw / 2 : sw / 2, sh / 2,
-                          &half, sx, sy, sw / 2, sh / 2, swrConvertPixel(color), 256, true, SWR_CONTRAST_NONE);
-    return true;
+#if defined(OF_PC) && !defined IS_BIG_ENDIAN
+    swrCaptureFloweyStalk(&half, sx, sy, sw / 2, sh / 2, pose);
+#else
+    (void) pose;
+#endif
+    return swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy;
-    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color; (void) pose;
     return false;
 #endif
 }

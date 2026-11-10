@@ -53,6 +53,9 @@ bool swrTexturePackGetSize(uint32_t pageId, int* outW, int* outH);
 // The optional Flowey page follows the game's native texture pages.
 bool swrTexturePackHasFloweyBackdrop(uint32_t nativePages);
 
+bool swrTexturePackHasFloweyStalk(unsigned pose, int width, int height);
+bool swrTexturePackDecodeFloweyStalk(unsigned pose, int width, int height, uintpixel_t* buffer);
+
 // Decodes a page into `buffer`, which must hold width * height pixels.
 bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer);
 
@@ -70,6 +73,17 @@ typedef struct
 }
 SwrTexturePackStats;
 void swrTexturePackTakeStats(SwrTexturePackStats* out);
+
+// Cumulative window-read totals, independent of the per-load stats. A
+// declined direct read includes a backend that is unavailable. Stdio time
+// includes every fseek/fread attempt, whether or not it succeeds.
+typedef struct
+{
+    uint32_t directReads, directDeclines, stdioReads, stdioErrors;
+    uint64_t directNanos, declinedNanos, stdioNanos;
+}
+SwrTexturePackReadTotals;
+void swrTexturePackGetReadTotals(SwrTexturePackReadTotals* out);
 
 // Where in its file the pack starts: 0 unless it rides in the host file.
 uint32_t swrTexturePackOffset(void);

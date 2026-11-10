@@ -129,8 +129,12 @@ class BulletPackageTest(unittest.TestCase):
 
     def test_baked_pack_remaps_only_the_flowey_music_slots(self):
         self.package()
+        self.check_flowey_music_slot('bs_bullet_music.bin', baked_flowey_pack=True)
+        self.check_flowey_music_slot('bs_stalk_music.bin', baked_stalk_pack=True)
+
+    def check_flowey_music_slot(self, filename, **options):
         baked = self.root / 'baked.zip'
-        mkbullet.package(self.elf, baked, '1.2.3-rc.4', baked_flowey_pack=True)
+        mkbullet.package(self.elf, baked, '1.2.3-rc.4', **options)
         with zipfile.ZipFile(self.output) as stock, zipfile.ZipFile(baked) as archive:
             self.assertEqual(stock.namelist(), archive.namelist())
             changed = set()
@@ -141,10 +145,11 @@ class BulletPackageTest(unittest.TestCase):
                     expected = json.loads(stock.read(name))
                     for slot in expected['instance']['data_slots']:
                         if slot['id'] == 6:
-                            slot['filename'] = 'bs_bullet_music.bin'
+                            slot['filename'] = filename
                     self.assertEqual(json.loads(archive.read(name)), expected)
             for name in set(stock.namelist()) - changed:
                 self.assertEqual(archive.read(name), stock.read(name), name)
+        baked.unlink()
 
     def test_refuses_to_replace_an_existing_output(self):
         # Catches destructive overwrite of a prior package.

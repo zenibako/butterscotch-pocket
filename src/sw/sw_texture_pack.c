@@ -20,6 +20,19 @@ typedef struct
 }
 PackTile;
 
+// The optional index precedes the UTXT footer. Its offsets are relative to
+// the start of UTX2, so appending poses leaves the native tiles in place.
+typedef struct {
+    uint16_t width, height;
+    PackTile tile;
+} PackStalk;
+
+typedef struct {
+    PackStalk stalks[SWR_FLOWEY_STALK_POSES];
+    char magic[4];
+    uint32_t tail[4];
+} PackHostFooter;
+
 // Any pack's tiles fit these: the builder's tile size can change, and the
 // reader takes the one the pack's header gives.
 #define TILE_MAX 128
@@ -35,6 +48,8 @@ static uint32_t packCount = 0;
 static uint32_t packTileCount = 0;
 static int packTile = 0;
 static bool packProbed = false;
+static PackStalk packStalks[SWR_FLOWEY_STALK_POSES];
+static uint32_t packStalkLimit;
 
 static void packOpen(void);
 
@@ -44,14 +59,26 @@ static FILE* packFind(void)
 #ifdef SW_TEXTURE_PACK_HOST
     FILE* host = fopen(SW_TEXTURE_PACK_HOST, "rb");
     if (host) {
-        uint32_t tail[4] = { 0, 0, 0, 0 }; // offset, size, 0, magic
-        long end = -1;
-        if (fseek(host, -16, SEEK_END) == 0 && (end = ftell(host)) > 0 && fread(tail, sizeof(uint32_t), 4, host) == 4 &&
-            memcmp(&tail[3], SW_TEXTURE_PACK_TAIL_MAGIC, 4) == 0 && tail[2] == 0 && tail[1] > 0 &&
-            (uint64_t) tail[0] + tail[1] == (uint64_t) end && fseek(host, (long) tail[0], SEEK_SET) == 0) {
-            packPath = SW_TEXTURE_PACK_HOST;
-            packBase = tail[0];
-            return host;
+        PackHostFooter footer = {0};
+        if (fseek(host, 0, SEEK_END) == 0) {
+            long end = ftell(host);
+            long size = end < (long) sizeof(footer) ? end : (long) sizeof(footer);
+            if (size >= (long) sizeof(footer.tail) && fseek(host, end - size, SEEK_SET) == 0 &&
+                fread((char*) &footer + sizeof(footer) - size, 1, (size_t) size, host) == (size_t) size) {
+                const uint32_t* tail = footer.tail; // offset, size, reserved, magic
+                if (memcmp(&tail[3], SW_TEXTURE_PACK_TAIL_MAGIC, 4) == 0 && tail[2] == 0 && tail[1] > 0 &&
+                    (uint64_t) tail[0] + tail[1] == (uint64_t) end - sizeof(footer.tail) &&
+                    fseek(host, (long) tail[0], SEEK_SET) == 0) {
+                    packPath = SW_TEXTURE_PACK_HOST;
+                    packBase = tail[0];
+                    size_t indexSize = sizeof(footer) - sizeof(footer.tail);
+                    if (tail[1] > indexSize && memcmp(footer.magic, "UST1", 4) == 0) {
+                        memcpy(packStalks, footer.stalks, sizeof(packStalks));
+                        packStalkLimit = tail[1] - indexSize;
+                    }
+                    return host;
+                }
+            }
         }
         fclose(host);
     }
@@ -99,6 +126,7 @@ static void packOpen(void)
     }
     // Tiles are read into a window by their offsets, so one that runs past
     // the end of the 32-bit file space must not get that far.
+    uint32_t lastTileEnd = 0;
     for (uint32_t i = 0; i < header[2]; i++)
     {
         if ((uint64_t) packBase + tiles[i].offset + tiles[i].size > UINT32_MAX) {
@@ -108,6 +136,24 @@ static void packOpen(void)
             fclose(file);
             return;
         }
+        if (tiles[i].size && tiles[i].offset + tiles[i].size > lastTileEnd)
+            lastTileEnd = tiles[i].offset + tiles[i].size;
+    }
+    if (packStalkLimit != 0) {
+        for (unsigned pose = 0; pose < SWR_FLOWEY_STALK_POSES; ++pose) {
+            const PackStalk* stalk = &packStalks[pose];
+            const PackTile* tile = &stalk->tile;
+            uint64_t end = (uint64_t) tile->offset + tile->size;
+            if (stalk->width != 180 || stalk->height < 75 || stalk->height > 95 ||
+                tile->offset != lastTileEnd || (tile->offset & 1) || (tile->size & 1) ||
+                tile->size == 0 || tile->size > TILE_MAX_WORDS * sizeof(uint16_t) ||
+                end > packStalkLimit || packBase + end > UINT32_MAX) {
+                packStalkLimit = 0;
+                break;
+            }
+            lastTileEnd = (uint32_t) end;
+        }
+        if (lastTileEnd != packStalkLimit) packStalkLimit = 0;
     }
     
     setvbuf(file, NULL, _IONBF, 0);
@@ -147,6 +193,13 @@ bool swrTexturePackHasFloweyBackdrop(uint32_t nativePages)
     return packTileCount - page->firstTile == columns * rows;
 }
 
+bool swrTexturePackHasFloweyStalk(unsigned pose, int width, int height)
+{
+    if (!packProbed) packOpen();
+    return packFile && packStalkLimit && pose < SWR_FLOWEY_STALK_POSES &&
+           width == packStalks[pose].width && height == packStalks[pose].height;
+}
+
 #ifdef PLATFORM_BUSY_TICK
 // Called between the pieces of a long blocking read, so the platform can keep
 // time-critical work going (feeding its audio queue, for one).
@@ -162,11 +215,17 @@ uint64_t platformPackRefusedNanos(void);
 #endif
 
 static SwrTexturePackStats packStats;
+static SwrTexturePackReadTotals packReadTotals;
 
 void swrTexturePackTakeStats(SwrTexturePackStats* out)
 {
     *out = packStats;
     memset(&packStats, 0, sizeof(packStats));
+}
+
+void swrTexturePackGetReadTotals(SwrTexturePackReadTotals* out)
+{
+    *out = packReadTotals;
 }
 
 static const char* packLastError = "";
@@ -193,19 +252,37 @@ static bool readWindow(uint32_t start, uint32_t end)
     uint32_t size = end - start;
     errno = 0;
     uint64_t readStart = nowNanos();
+    uint64_t readEnd = readStart;
+    bool done = false;
 #ifdef PLATFORM_PACK_READ
     uint64_t refusedBefore = platformPackRefusedNanos();
-    bool done = platformPackRead(packPath, packBase + start, size, window);
+    done = platformPackRead(packPath, packBase + start, size, window);
     packStats.refusedNanos += platformPackRefusedNanos() - refusedBefore;
-#else
-    bool done = false;
-#endif
-    if (!done && (fseek(packFile, (long) (packBase + start), SEEK_SET) != 0 || fread(window, 1, size, packFile) != size)) {
-        packLastError = "read";
-        clearerr(packFile);
-        return false;
+    readEnd = nowNanos();
+    if (done) {
+        ++packReadTotals.directReads;
+        packReadTotals.directNanos += readEnd - readStart;
+    } else {
+        ++packReadTotals.directDeclines;
+        packReadTotals.declinedNanos += readEnd - readStart;
     }
-    uint64_t readEnd = nowNanos();
+#endif
+    if (!done) {
+        uint64_t stdioStart = readEnd;
+        bool read = fseek(packFile, (long) (packBase + start), SEEK_SET) == 0 &&
+                    fread(window, 1, size, packFile) == size;
+        int readError = errno;
+        readEnd = nowNanos();
+        ++packReadTotals.stdioReads;
+        packReadTotals.stdioNanos += readEnd - stdioStart;
+        if (!read) {
+            ++packReadTotals.stdioErrors;
+            packLastError = "read";
+            clearerr(packFile);
+            errno = readError;
+            return false;
+        }
+    }
     packStats.reads++;
     packStats.bytes += size;
     packStats.readNanos += readEnd - readStart;
@@ -235,13 +312,13 @@ static bool decodeTile(const PackTile* tile, int tw, int th, uint16_t* out)
         uint16_t control = words[i++];
         if (control & SW_TEXTURE_PACK_RUN_FLAG) {
             size_t run = (size_t) (control & 0x7FFF) + 1;
-            if (i >= count || out + run > end) return false;
+            if (i >= count || run > (size_t) (end - out)) return false;
             uint16_t word = words[i++];
             for (size_t n = 0; n < run; n++) out[n] = word;
             out += run;
         } else {
             size_t literals = (size_t) control + 1;
-            if (i + literals > count || out + literals > end) return false;
+            if (i + literals > count || literals > (size_t) (end - out)) return false;
             memcpy(out, &words[i], literals * sizeof(uint16_t));
             out += literals;
             i += literals;
@@ -250,6 +327,13 @@ static bool decodeTile(const PackTile* tile, int tw, int th, uint16_t* out)
     if (out != end) return false;
     packLastError = "";
     return true;
+}
+
+bool swrTexturePackDecodeFloweyStalk(unsigned pose, int width, int height, uintpixel_t* buffer)
+{
+    if (!swrTexturePackHasFloweyStalk(pose, width, height)) return false;
+    const PackTile* tile = &packStalks[pose].tile;
+    return readWindow(tile->offset, tile->offset + tile->size) && decodeTile(tile, width, height, buffer);
 }
 
 // Reads the window that starts with tile (tx, ty) of the rectangle's tiles
@@ -343,10 +427,13 @@ bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer)
 
 bool swrTexturePackGetSize(UNUSED uint32_t pageId, UNUSED int* outW, UNUSED int* outH) { return false; }
 bool swrTexturePackHasFloweyBackdrop(UNUSED uint32_t nativePages) { return false; }
+bool swrTexturePackHasFloweyStalk(UNUSED unsigned pose, UNUSED int width, UNUSED int height) { return false; }
+bool swrTexturePackDecodeFloweyStalk(UNUSED unsigned pose, UNUSED int width, UNUSED int height, UNUSED uintpixel_t* buffer) { return false; }
 bool swrTexturePackDecode(UNUSED uint32_t pageId, UNUSED uintpixel_t* buffer) { return false; }
 bool swrTexturePackDecodeRect(UNUSED uint32_t pageId, UNUSED int x, UNUSED int y, UNUSED int w, UNUSED int h, UNUSED uintpixel_t* buffer) { return false; }
 const char* swrTexturePackLastError(void) { return ""; }
 uint32_t swrTexturePackOffset(void) { return 0; }
 void swrTexturePackTakeStats(SwrTexturePackStats* out) { memset(out, 0, sizeof(*out)); }
+void swrTexturePackGetReadTotals(SwrTexturePackReadTotals* out) { memset(out, 0, sizeof(*out)); }
 
 #endif

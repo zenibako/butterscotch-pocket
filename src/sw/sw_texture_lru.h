@@ -14,6 +14,7 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId);
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex);
 
 SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr);
+SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, int height);
 
 // Frees every per-item texture, e.g. before the renderer is destroyed.
 void swrFreeItemTextures(SWRenderer* swr);

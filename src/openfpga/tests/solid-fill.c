@@ -103,15 +103,25 @@ static void checkFloweyStalkHalf(void)
     swr.blendMode = bm_normal;
     const uint32_t shade = 0x999999;
     uintpixel_t tintColor = swrConvertPixel(shade);
-    if (!swrDrawFloweyStalkHalf(&swr.base, texture, 4, -2, 1, 1, 6, 4, true, 0xffffff) ||
-        !swrDrawFloweyStalkHalf(&swr.base, texture, 4, 2, 1, 1, 6, 4, false, shade) ||
+    if (!swrDrawFloweyStalkHalf(&swr.base, texture, 4, -2, 1, 1, 6, 4, true, 0xffffff, 0) ||
+        !swrDrawFloweyStalkHalf(&swr.base, texture, 4, 2, 1, 1, 6, 4, false, shade, 0) ||
         actual[0] != colors[1] || actual[1] != colors[0] || actual[2] || actual[3] ||
         actual[6] != tint(tintColor, colors[0]) || actual[7] != tint(tintColor, colors[1]) ||
         actual[10] != tint(tintColor, colors[0]) || actual[11] != tint(tintColor, colors[1])) {
         fprintf(stderr, "FAIL: Flowey stalk half-size cache and clipping\n");
         exit(1);
     }
-    checks += WIDTH * HEIGHT;
+    uintpixel_t packedPixels[] = { colors[0], colors[1], colors[2], colors[0], colors[1], colors[2] };
+    SWTexture packed = { .buffer = packedPixels, .width = 3, .height = 2, .solid = 2 };
+    uintpixel_t baked[WIDTH * HEIGHT] = {0};
+    swr.fb = swr.mainFb = baked;
+    if (!swrDrawPackedFloweyStalk(&swr.base, &packed, 4, -2, true, 0xffffff) ||
+        !swrDrawPackedFloweyStalk(&swr.base, &packed, 4, 2, false, shade) ||
+        memcmp(actual, baked, sizeof(actual)) != 0) {
+        fprintf(stderr, "FAIL: baked Flowey stalk differs from runtime sampling\n");
+        exit(1);
+    }
+    checks += 2 * WIDTH * HEIGHT;
     swrFreeTexture(texture);
 }
 

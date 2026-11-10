@@ -388,6 +388,27 @@ SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr)
     return texture;
 }
 
+SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, int height)
+{
+    if (!swrTexturePackHasFloweyStalk(pose, width, height)) return NULL;
+
+    uint64_t start = nowNanos();
+    size_t bytes = (size_t) width * height * sizeof(uintpixel_t);
+    makeRoomFor(swr, bytes);
+    SWTexture* texture = (SWTexture*) allocOrEvict(swr, sizeof(*texture));
+    uintpixel_t* pixels = texture ? (uintpixel_t*) allocOrEvict(swr, bytes) : NULL;
+    if (!pixels || !swrTexturePackDecodeFloweyStalk(pose, width, height, pixels)) {
+        free(pixels);
+        free(texture);
+        finishTextureLoad(start);
+        return NULL;
+    }
+    *texture = (SWTexture) { .buffer = pixels, .width = (uint16_t) width, .height = (uint16_t) height, .solid = 2 };
+    unsigned ms = finishTextureLoad(start);
+    logInfo("SWR: Loaded baked Flowey stalk pose %u in %u ms\n", pose, ms);
+    return texture;
+}
+
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 {
     DataWin* dw = swr->base.dataWin;
