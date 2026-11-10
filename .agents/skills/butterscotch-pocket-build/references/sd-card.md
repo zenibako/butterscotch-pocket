@@ -1,55 +1,79 @@
 # SD-card deployment and layout
 
-## Getting it onto the SD card
+## Local or remote card access
 
-Three routes, in order of preference:
+Run [pocket_card.py](../../../../src/openfpga/tools/pocket_card.py) from the
+checkout with Python 3.10 or later. Use the absolute mount on the card host,
+such as `/Volumes/Pocket SD`. Omit `--host` for a card mounted on the
+session host. For another machine, use its established SSH alias with
+`--host`. The helper sends its code for the operation, so that host needs
+Python, noninteractive SSH authentication and authorized access to the
+mounted card. If its login PATH lacks Python, pass the existing absolute
+executable with `--remote-python`.
 
-1. **Card in the machine that has the checkout:** `make -C src/openfpga compare-copy`
-   (or `copy` for the single core). This runs `tools/sdcopy.sh`, which waits
-   for the card, mounts it, copies, removes `._*` sidecar files, verifies,
-   and unmounts. It prints a specific message on each failure.
-2. **Card in a second Mac:** SSH from the build machine
-   cannot touch the card (macOS blocks removable volumes for remote
-   logins; that restriction is the user's and is not to be worked around).
-   Give the user these to run in a Terminal on that Mac:
+Reuse the host and mount already supplied in the conversation. Ask only for
+missing details. Perform the requested transfer and verification when access
+works. A build ZIP request alone does not authorize writing to the card.
 
-   ```bash
-   rsync -rc --exclude '._*' --exclude '.DS_Store' "$CHECKOUT/src/openfpga/out/build/pocket/butterscotch/" "$CARD/"
-   dot_clean -m "$CARD/Assets/butterscotch" "$CARD/Cores" "$CARD/Platforms"
-   diskutil unmount "$CARD"
-   ```
+If macOS denies removable-volume access over SSH, use an already authorized
+interactive agent session on the card host or an existing authorized mount.
+For a card-side session, transfer the finished ZIP through ordinary host
+storage first, or transfer the privately collected save back through it.
+Ask for a session with card access if neither route exists. Leave OS access
+settings and privileges alone.
 
-   - `dot_clean -m "$CARD"` on the whole card prints "Operation
-     not permitted" for `.Spotlight-V100`, `.Trashes` and
-     `.TemporaryItems`. Those are macOS's own folders and the lines are
-     harmless; the narrower paths above avoid them.
-   - If the unmount is "dissented by" a `com.apple.Virtualization`
-     process, the Claude desktop app has the card open for a session that
-     was reading it. Once the copy has finished,
-     `diskutil unmount force "$CARD"` is safe.
-   - The rsync never deletes, so old benchmark ELFs and instance files
-     stay on the card. That is harmless.
-   - If `$CHECKOUT` is on a work branch, the user builds main
-     with `git fetch <fork remote> && git switch --detach <fork remote>/main` after checking `git status` is
-     clean, and switches back afterwards.
-3. **Manual:** `cp -R src/openfpga/out/build/pocket/butterscotch/{Cores,Assets,Platforms} "$CARD/"`
+## Install a finished build
 
-**Checking what is on a card.** Every core's `core.json` says version
-0.1.0, so it cannot tell builds apart. Compare file times against when the
-change merged, `cmp` the ELF against a fresh build, or look for a string
-the change added (`strings "$CARD/Assets/butterscotch/common/undertale.elf" | grep "Music only"`).
+Use the specific packaged ZIP the user asked to install. For a ZIP on a
+separate build host, first copy it to private storage the session can read
+and compare it with the build's SHA-256. The install command accepts standard
+Butterscotch and Bullet Hell core ZIPs.
 
-Plain `copy` after a `compare-copy` leaves stale v0.9 cores on the card; use
-`compare-copy` again if those cores should stay current.
+```sh
+python3 src/openfpga/tools/pocket_card.py install \
+  --host "$CARD_HOST" --card "$CARD" --zip "$ZIP" --sha256 "$BUILD_SHA256"
+```
 
-Unmount, never eject (`diskutil unmount`, as `sdcopy.sh` does): after an
-eject a Mac does not see the card again until it is reseated, and
-sometimes not then, and the user asked on 2026-10-09 for unmount to be
-used so the card is found next time.
+Pass the build's published checksum when available, otherwise omit
+`--sha256`. The helper verifies the same ZIP at both ends, stages the
+overlay, and checks file contents on the card. It reports the package hash,
+core versions and verified file count. It preserves Saves, Memories, game
+data and unrelated cores. Use the build label and hash to identify the
+exact ZIP when versions are reused.
 
-A card reader on an idle, headless Mac can fail to notice a card inserted
-while the machine is idle. `sdcopy.sh` declares user activity to
-wake it; if no disk appears at all, the card needs reseating.
+When asked to collect and install together, collect and verify the snapshot
+before installing. Use `--unmount` when the user is done with the card. A normal unmount keeps
+the card discoverable by the Mac next time. If verification fails, keep the
+card mounted. If an interrupted install leaves `.pocket-card-install`,
+inspect the staging directory and its `recovery.json`, if present, before
+retrying. If verification
+succeeds but unmount fails, report both outcomes. The verified files are
+already installed.
+
+The legacy `make copy` and `compare-copy` targets assemble a tree before
+copying and can remove stale core folders or move the platform cache. Use
+them for a requested build-and-copy workflow. An idle Mac reader may need
+the user to reseat the card when the OS cannot see it.
+
+## Collect a benchmark save
+
+After the user finishes the run and quits through the Analogue menu to flush
+save RAM, collect the selected log into a fresh private directory. Use
+`bs_bullet` for all Bullet Hell, Chaos Saber and Flowey modes,
+`deltarune_tiles` for the focused tiles log, or `undertale` or `deltarune`
+for standard game logs.
+
+```sh
+SNAPSHOT_DIR=$(mktemp -d)
+python3 src/openfpga/tools/pocket_card.py collect \
+  --host "$CARD_HOST" --card "$CARD" --log bs_bullet --out "$SNAPSHOT_DIR/bs_bullet_1.sav"
+python3 src/openfpga/tools/inspect_bench_save.py "$SNAPSHOT_DIR/bs_bullet_1.sav"
+```
+
+The snapshot keeps every byte, including NUL padding, and prints the
+verified size and SHA-256. It leaves the source save in place and refuses
+an existing output path. Pass earlier snapshots to the history checker to
+separate new runs from older accumulated reports.
 
 ## What is on the card
 

@@ -154,9 +154,12 @@ menu after each focused or bullet-hell mode to flush save RAM, then mount the
 card. Standard logs are `Saves/butterscotch/common/undertale_1.sav` or
 `deltarune_1.sav`; focused tiles reports accumulate in `deltarune_tiles_1.sav`.
 Each bullet-hell entry reports to `bs_bullet_1.sav` in that same directory:
-preserve and rename the file after its Analogue-menu quit and before launching
-the next entry. Preserve the original NUL-padded file. Use the local
-[log history check](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md#reading-the-log-off-the-card)
+collect a fresh, private snapshot after the Analogue-menu quit and before
+launching the next entry. Preserve the NUL padding in the snapshot. Use
+`pocket_card.py collect` with the local mount or the authorized SSH host.
+[Card collection commands](../../../.agents/skills/butterscotch-pocket-build/references/sd-card.md#collect-a-benchmark-save)
+
+Use the local [log history check](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md#reading-the-log-off-the-card)
 to identify complete report blocks and exact copies across files.
 
 For formats recognized by the shared collector, inspect the chosen file and

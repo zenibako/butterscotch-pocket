@@ -1,7 +1,6 @@
 ---
 name: butterscotch-pocket-perf
-description: Use when investigating Butterscotch Undertale or Deltarune performance on the Analogue Pocket, interpreting benchmark logs, diagnosing battle text or flashing-tile slowdowns, comparing optimization candidates, or assessing os20/os25 timing claims.
-argument-hint: "[card: SD mount path] [harness: path or host:path of a zenibako/pocket-harness checkout, if any]"
+description: Use when investigating Butterscotch Undertale or Deltarune performance on the Analogue Pocket, collecting benchmark saves from a local or remote card, diagnosing slowdowns, comparing optimization candidates, or assessing os20/os25 timing claims.
 ---
 
 # Performance work on the Pocket
@@ -29,18 +28,14 @@ Prefer the log file to screenshots: it is the whole log, not the last 21
 lines. It is written to the game's spare save slot when the core halts
 (benchmark end, fatal error), from the menu's "Save log to SD card" and on Select +
 Y with the debug buttons on, and reaches
-the card when the user leaves the core through the Analogue menu:
+the card when the user leaves the core through the Analogue menu.
 
-Set `GAME` to `undertale` or `deltarune` for the game under investigation:
-
-```bash
-GAME=undertale # or deltarune
-LOG="$CARD/Saves/butterscotch/common/${GAME}_1.sav"
-python3 -c 'import sys; sys.stdout.buffer.write(open(sys.argv[1], "rb").read().split(b"\0", 1)[0])' "$LOG"
-```
-
-For focused tiles measurements, select `deltarune_tiles_1.sav` instead; follow
-[focused benchmarks](references/focused-benchmarks.md) for that workflow.
+If the card is accessible, collect the selected save for the user with
+`pocket_card.py collect` and inspect the resulting local snapshot. The card
+can be on the session host or an authorized SSH host. Select `bs_bullet`
+for Flowey, Chaos Saber and the Bullet Hell tour. Select `deltarune_tiles`
+for focused tiles, or `undertale` and `deltarune` for the standard logs.
+[Card collection commands and remote access](../butterscotch-pocket-build/references/sd-card.md#collect-a-benchmark-save)
 
 For a returned benchmark save, run this read-only history check from the
 checkout root. Pass any earlier originals available for comparison.

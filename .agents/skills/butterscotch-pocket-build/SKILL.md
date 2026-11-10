@@ -1,7 +1,6 @@
 ---
 name: butterscotch-pocket-build
-description: Use when building, packaging or deploying the Butterscotch Analogue Pocket port, preparing Undertale and Deltarune update ZIPs, staging dependencies or save-state runtimes, committing Pocket changes, handling Pocket Sync plugin icons, or handling the port's build and CI review feedback.
-argument-hint: "[checkout: path or host:path with game data + toolchain] [card: SD mount path, and which machine]"
+description: Use when building, packaging or deploying the Butterscotch Analogue Pocket port, installing a finished core ZIP on a local or remote SD card, staging dependencies or save-state runtimes, committing Pocket changes, handling Pocket Sync plugin icons, or handling the port's build and CI review feedback.
 ---
 
 # Building and deploying the Undertale Pocket port
@@ -80,10 +79,11 @@ which takes a minute or more. Rebuilding mid-copy hands them a mixed tree.
 ## SD-card deployment
 
 Before copying, verifying or troubleshooting a card, read
-[SD-card procedures and layout](references/sd-card.md). Use the supplied checkout
-and card hosts; keep the tree frozen through the copy and verification.
-Progress saves are outside the build tree; replace them only when asked, and
-preserve newer progress during migration. Unmount the card after copying.
+[SD-card procedures and layout](references/sd-card.md). Use `pocket_card.py install`
+for an already-built ZIP and run the transfer for the user when they request
+installation. The card can be mounted on the session host or an authorized
+SSH host. Reuse the established host and mount. Keep the source ZIP frozen
+through verification. Progress saves live outside the build tree.
 Keep the SDK runtime and its os25 bitstream matched; switching that runtime to
 os20 boot-loops before the OS banner.
 
