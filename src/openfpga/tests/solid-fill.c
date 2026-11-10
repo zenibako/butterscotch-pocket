@@ -446,8 +446,14 @@ static void checkGrowingVine(void)
 {
     enum { WIDTH = 112, HEIGHT = 96, SRC_W = 511, SRC_H = 33 };
     uintpixel_t source[SRC_W * SRC_H], actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
-    for (int i = 0; i < SRC_W * SRC_H; ++i)
-        source[i] = i % 9 < 3 ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
+    for (int i = 0; i < SRC_W * SRC_H; ++i) {
+        int x = i % SRC_W, y = i / SRC_W;
+        // Vary the opaque rows by column and leave whole empty blocks.
+        // Keep a lone opaque texel in the last, partial column block.
+        bool opaque = (x / 32) % 3 != 1 && y >= x / 32 && y < x / 32 + 13 && i % 9 >= 3;
+        opaque |= x == SRC_W - 1 && y == SRC_H - 1;
+        source[i] = opaque ? (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff)) : 0;
+    }
     SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
     SWRenderer swr = {0};
     swr.fbPitch = WIDTH;

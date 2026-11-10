@@ -2085,9 +2085,42 @@ typedef struct {
     int16_t left[2 * SWR_GROWTH_ROW_RADIUS + 1];
 } SWVineGrowthRows;
 
+enum { SWR_VINE_BLOCK_SHIFT = 5, SWR_VINE_BLOCKS = (SWR_VINE_W >> SWR_VINE_BLOCK_SHIFT) + 1 };
+typedef struct { uint8_t first, end; } SWVineCoverage;
 typedef struct SWVineGrowthCache {
     SWVineGrowthRows entries[SWR_GROWTH_CACHE_SLOTS];
+    const uintpixel_t* coverageSource;
+    SWVineCoverage coverage[SWR_VINE_BLOCKS][SWR_VINE_BLOCKS];
 } SWVineGrowthCache;
+
+static void swrVineCoverage(SWVineGrowthCache* cache, const uintpixel_t* src, int pitch)
+{
+    if (cache->coverageSource == src) return;
+    SWVineCoverage blocks[SWR_VINE_BLOCKS];
+    for (int block = 0; block < SWR_VINE_BLOCKS; ++block) {
+        SWVineCoverage bounds = { SWR_VINE_H, 0 };
+        int first = block << SWR_VINE_BLOCK_SHIFT;
+        int end = swrMin(first + (1 << SWR_VINE_BLOCK_SHIFT), SWR_VINE_W);
+        for (int y = 0; y < SWR_VINE_H; ++y) {
+            for (int x = first; x < end; ++x) {
+                if (!swrIsOpaque(src[y * pitch + x])) continue;
+                if (bounds.first > y) bounds.first = y;
+                bounds.end = y + 1;
+                break;
+            }
+        }
+        blocks[block] = bounds;
+    }
+    for (int first = 0; first < SWR_VINE_BLOCKS; ++first) {
+        SWVineCoverage bounds = { SWR_VINE_H, 0 };
+        for (int end = first; end < SWR_VINE_BLOCKS; ++end) {
+            bounds.first = swrMin(bounds.first, blocks[end].first);
+            bounds.end = swrMax(bounds.end, blocks[end].end);
+            cache->coverage[first][end] = bounds;
+        }
+    }
+    cache->coverageSource = src;
+}
 
 static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation rotation, int first, int end)
 {
@@ -2126,7 +2159,7 @@ static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation 
 // constant per row as well as per column. Re-anchor every 16 rows and use the
 // float sampler at texel boundaries to retain its edge and colour rounding.
 static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
-                                  const uintpixel_t* src, int pitch, int dx, int dy, int dw,
+                                  const uintpixel_t* src, int pitch, SWVineGrowthCache* cache, int dx, int dy, int dw,
                                   float pxa, float pya, int minX, int minY, int maxX, int maxY,
                                   SWRotatedCapture* capture)
 {
@@ -2138,9 +2171,15 @@ static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows
     const int32_t acrossV = swrFloor((-s * yScale) * 65536.0f + 0.5f);
     const int32_t downU = swrFloor((s * xScale) * 65536.0f + 0.5f);
     const int32_t downV = swrFloor((c * yScale) * 65536.0f + 0.5f);
+    const bool descending = acrossV < 0;
+    const uint32_t vStep = descending ? -acrossV : acrossV;
+    // The sine gate keeps vStep above one texel per pixel. A 29-bit
+    // reciprocal with a 4-bit distance shift fits the row bounds in 32 bits.
+    const uint32_t inverseStep = (1u << 29) / vStep;
     // At most 16 rows and 29 pixels across a row, with scales below eight.
     // 512 fixed-point units cover the step rounding and the float transform.
     enum { texelBand = 512 };
+    swrVineCoverage(cache, src, pitch);
     int previousY = minY - 2, previousX = 0;
     int32_t startU = 0, startV = 0;
     for (int y = minY; y < maxY; ++y) {
@@ -2161,7 +2200,35 @@ static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows
         }
         previousY = y;
         previousX = from;
-        int32_t u = startU, v = startV;
+        // Alpha is binary. For every texture column this screen row could
+        // sample, find a conservative span of opaque source rows. Leave the
+        // exact sampler in charge near the fixed-point rounding margin.
+        int count = to - from;
+        int32_t endU = startU + (count - 1) * acrossU;
+        int firstTx = (swrMin(startU, endU) - texelBand) >> 16;
+        int lastTx = (swrMax(startU, endU) + texelBand) >> 16;
+        if (lastTx < 0 || firstTx >= SWR_VINE_W) continue;
+        int firstBlock = swrMax(firstTx, 0) >> SWR_VINE_BLOCK_SHIFT;
+        int lastBlock = swrMin(lastTx, SWR_VINE_W - 1) >> SWR_VINE_BLOCK_SHIFT;
+        SWVineCoverage opaque = cache->coverage[firstBlock][lastBlock];
+        if (opaque.first >= opaque.end) continue;
+        int32_t low = (opaque.first << 16) - texelBand, high = (opaque.end << 16) + texelBand - 1;
+        int32_t rowStart = startV, rowEnd = startV + (count - 1) * acrossV;
+        if (descending) {
+            int32_t save = low;
+            low = -high;
+            high = -save;
+            rowStart = -rowStart;
+            rowEnd = -rowEnd;
+        }
+        // Round the reciprocal and distance down. Any leftover edge pixels
+        // are tested normally; rounding cannot cut an opaque pixel.
+        int skipLeft = rowStart < low ? ((uint32_t) ((low - rowStart) >> 4) * inverseStep) >> 25 : 0;
+        int skipRight = rowEnd > high ? ((uint32_t) ((rowEnd - high) >> 4) * inverseStep) >> 25 : 0;
+        if (skipLeft + skipRight >= count) continue;
+        from += skipLeft;
+        to -= skipRight;
+        int32_t u = startU + skipLeft * acrossU, v = startV + skipLeft * acrossV;
         uintpixel_t* dst;
         if (capture != NULL) {
             int row = y - minY;
@@ -2286,7 +2353,7 @@ static void swrDrawSpriteRotatedInternal(
         sw == SWR_VINE_W && sh == SWR_VINE_H && sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
         !flipX && !flipY && swr->blendMode == bm_normal && (tintColor & 0x7fff) == 0x7fff && alpha > 253) {
         swrDrawGrowingVineRows(swr, growthRows, rotation, texture->buffer + sy * texture->width + sx,
-                              texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, capture);
+                              texture->width, texture->vineGrowthRows, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, capture);
         return;
     }
 #endif
