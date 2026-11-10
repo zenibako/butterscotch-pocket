@@ -293,8 +293,6 @@ static bool floweyPipeDraw(VMContext *ctx, int pipe) {
     if (rightRescued || swell <= epsilon) Instance_setSelfVar(self, pipeVars[PIPE_SWELL2], RValue_makeReal(0));
     else setNativeReal(self, pipeVars[PIPE_SWELL2], swell / (GMLReal)3);
     if (pipe == 1) setNativeReal(self, pipeVars[PIPE_ANGLE2], (GMLReal)(20 * last) + angleOffset);
-    if (pipe == 0 && self->x == 272 && self->y == 226 && mirrorOffset == (GMLReal)100)
-        SWRenderer_drawFloweyEyePipes(runner->renderer);
     return true;
 }
 

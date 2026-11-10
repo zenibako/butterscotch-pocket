@@ -365,7 +365,6 @@ static void SWRenderer_destroy(Renderer* renderer)
     }
     swrFreeItemTextures(swr);
     swrFreeTexture(swr->floweyPipeBackdrop);
-    swrFreeTexture(swr->floweyEyePipes);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
@@ -620,9 +619,12 @@ static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const Textu
         if (segmentItem >= 0) {
             const TexturePageItem* segmentPage = &swr->base.dataWin->tpag.items[segmentItem];
             SWTexture* segment = swrTextureForItem(swr, segmentItem);
-            if (segment != NULL)
-                swrAddFloweyBackdropPipeSegments(swr->floweyPipeBackdrop, segment, segmentPage->sourceX - segment->originX,
-                                                segmentPage->sourceY - segment->originY);
+            if (segment != NULL) {
+                int sx = segmentPage->sourceX - segment->originX;
+                int sy = segmentPage->sourceY - segment->originY;
+                swrAddFloweyBackdropPipeSegments(swr->floweyPipeBackdrop, segment, sx, sy);
+                swrAddFloweyEyePipes(swr->floweyPipeBackdrop, segment, sx, sy);
+            }
         }
     }
     SWTexture* art = swr->floweyPipeBackdrop;
@@ -3354,26 +3356,6 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
 void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active)
 {
     ((SWRenderer*) renderer)->floweySpeedRoom = active;
-}
-
-void SWRenderer_drawFloweyEyePipes(Renderer* renderer)
-{
-    if (renderer == NULL || renderer->vtable != &swrVtable) return;
-    SWRenderer* swr = (SWRenderer*) renderer;
-    if (SWR_SKIPPED(swr) || !swr->floweySpeedRoom || !swrSmoothMinify ||
-        swr->drawingToSurface || swr->fb != swr->mainFb || swr->blendMode != bm_normal ||
-        swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->floweyPipeSegmentItem < 0) return;
-    if (swr->floweyEyePipes == NULL) {
-        int32_t item = swr->floweyPipeSegmentItem;
-        const TexturePageItem* page = &renderer->dataWin->tpag.items[item];
-        SWTexture* pipe = swrTextureForItem(swr, item);
-        if (pipe == NULL) return;
-        swr->floweyEyePipes = swrMakeFloweyEyePipes(pipe, page->sourceX - pipe->originX, page->sourceY - pipe->originY);
-        if (swr->floweyEyePipes == NULL) return;
-    }
-    SWTexture* art = swr->floweyEyePipes;
-    swrDrawSprite(renderer, art->originX * 2, art->originY * 2, art->width * 2, art->height * 2,
-                  art, 0, 0, art->width, art->height, 0xffffff, 1.0f);
 }
 
 bool SWRenderer_isSkippingScreen(const Renderer* renderer)

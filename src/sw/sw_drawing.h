@@ -28,7 +28,7 @@ bool swrMirrorHoldFill(Renderer* renderer, float x1, float y1, float x2, float y
 void swrPlotPixel(Renderer* renderer, float x, float y, uintpixel_t color, float alpha);
 void swrDrawLine(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uintpixel_t color, uintpixel_t color2, float alpha, int alignment);
 SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy);
-SWTexture* swrMakeFloweyEyePipes(SWTexture* pipe, int sx, int sy);
+void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy);
 void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy);
 enum { SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3 };
 void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,

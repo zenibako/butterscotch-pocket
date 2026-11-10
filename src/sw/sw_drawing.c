@@ -4107,26 +4107,14 @@ void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, i
 #endif
 }
 
-SWTexture* swrMakeFloweyEyePipes(SWTexture* pipe, int sx, int sy)
+void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy)
 {
 #ifdef SW_HAS_PREMUL_BLEND
-    enum { LEFT = 92, TOP = 80, WIDTH = 136, HEIGHT = 66, SOURCE_W = 45, SOURCE_H = 31 };
-    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return NULL;
-    SWTexture* art = calloc(1, sizeof(*art));
-    if (art == NULL) return NULL;
-    art->buffer = calloc(WIDTH * HEIGHT, sizeof(*art->buffer));
-    if (art->buffer == NULL) {
-        free(art);
-        return NULL;
-    }
-    art->width = WIDTH;
-    art->height = HEIGHT;
-    art->immutable = true;
-    art->originX = LEFT;
-    art->originY = TOP;
+    enum { SOURCE_W = 45, SOURCE_H = 31 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return;
 
-    // The ordinary lower eye pipes from a stock 320x240 pose. Draw the
-    // texture once at their original depth so the eye cues stay above it.
+    // Bake the lower eye pipes from a stock 320x240 pose behind the
+    // foreground sprites, especially the attack warning lines.
     static const struct { int16_t x, y, angle; } stamps[] = {
         { 105, 84, 30 }, { 98, 90, 50 }, { 94, 98, 70 }, { 92, 106, 90 },
         { 94, 114, 110 }, { 99, 121, 130 }, { 106, 125, 150 }, { 115, 127, 170 },
@@ -4134,22 +4122,20 @@ SWTexture* swrMakeFloweyEyePipes(SWTexture* pipe, int sx, int sy)
     };
     SWRenderer bake = {0};
     bake.fb = art->buffer;
-    bake.fbPitch = bake.portW = bake.maxX = WIDTH;
-    bake.portH = bake.maxY = HEIGHT;
+    bake.fbPitch = bake.portW = bake.maxX = art->width;
+    bake.portH = bake.maxY = art->height;
     bake.blendMode = bm_normal;
     uintpixel_t tintColor = swrConvertPixel(0x808080);
     for (int side = 0; side < 2; ++side) {
         for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
             int x = side == 0 ? stamps[i].x : 300 - stamps[i].x;
             int angle = side == 0 ? stamps[i].angle : 180 - stamps[i].angle;
-            swrDrawSpriteRotatedInternal(&bake.base, x - LEFT, stamps[i].y - TOP, 23, 16,
+            swrDrawSpriteRotatedInternal(&bake.base, x, stamps[i].y, 23, 16,
                                          pipe, sx, sy, SOURCE_W, SOURCE_H, tintColor, 256, angle, 10.5f, 8.0f, NULL);
         }
     }
-    return art;
 #else
-    (void) pipe; (void) sx; (void) sy;
-    return NULL;
+    (void) art; (void) pipe; (void) sx; (void) sy;
 #endif
 }
 
