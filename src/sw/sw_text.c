@@ -324,7 +324,7 @@ void swrDrawText(SWRenderer* swr, const char* text, float x, float y, float xsca
                                 float ndy = sinA * dx + cosA * dy;
                                 ndx += x;
                                 ndy += y;
-                                swrDrawSpriteRotated(renderer, ndx, ndy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, 0.0f, 0.0f);
+                                swrDrawSpriteRotated(renderer, ndx, ndy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, 0.0f, 0.0f, false);
                             }
                             else
                             {

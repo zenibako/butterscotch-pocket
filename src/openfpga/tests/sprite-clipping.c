@@ -138,7 +138,7 @@ static bool checkRotatedDraw(SWRenderer* renderer, SWTexture* texture, float ang
     swrFillPixels(renderer->fb, FRAME_SIZE * FRAME_SIZE, background);
     swrDrawSpriteRotated((Renderer*) renderer, (float) (left + (flipX ? width : 0)), (float) top,
                          (float) (flipX ? -width : width), (float) height, texture, sx, sy, sw, sh,
-                         color, alpha, angle, flipX ? width - px : px, py);
+                         color, alpha, angle, flipX ? width - px : px, py, false);
 
     // Scalar inverse transform and ordinary compositing at each pixel center.
     for (int y = 0; y < FRAME_SIZE; y++) {

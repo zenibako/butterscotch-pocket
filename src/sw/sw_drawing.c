@@ -3694,6 +3694,7 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 enum { SWR_RASTER_SLOTS = 64,
        SWR_RASTER_BYTES = 192 * 1024, SWR_RASTER_BUILDS = 8,
        SWR_VINE_W = 511, SWR_VINE_H = 33, SWR_VINE_SLOTS = 12, SWR_VINE_BYTES = 256 * 1024,
+       SWR_SPEED_VINE_SLOTS = 16, SWR_SPEED_VINE_BUILDS = 2,
        SWR_EYE_SIZE = 40, SWR_EYE_BYTES = 128 * 1024, SWR_EYE_BUILDS = 2,
        SWR_TOTAL_RASTER_BYTES = SWR_RASTER_BYTES + SWR_VINE_BYTES + SWR_EYE_BYTES };
 typedef struct {
@@ -3730,7 +3731,7 @@ static void swrDropRotatedRaster(SWRotatedRasterCache* cache)
 
 static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCache* cache,
                                               SWTexture* texture, const SWRasterKey* key,
-                                              int radius, bool stationary, size_t limit)
+                                              int radius, bool stationary, int slots, size_t limit)
 {
     SWRotatedCapture raster = {0};
     if (stationary) {
@@ -3768,12 +3769,11 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
         }
     }
     size_t bytes = sizeof(SWRotatedRaster) + spans * sizeof(SWRasterSpan) + opaque * sizeof(*raster.pixels);
-    int slots = stationary ? SWR_VINE_SLOTS : SWR_RASTER_SLOTS;
     if (opaque > UINT16_MAX || bytes > limit - sizeof(*cache)) {
         free(raster.pixels);
         return NULL;
     }
-    while (cache->count > 0 && (cache->count == slots || bytes > limit - cache->bytes ||
+    while (cache->count > 0 && (cache->count >= slots || bytes > limit - cache->bytes ||
                                 bytes > SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes))
         swrDropRotatedRaster(cache);
     SWRotatedRaster* entry = bytes <= SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes ? malloc(bytes) : NULL;
@@ -3805,7 +3805,8 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
 }
 
 static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int y,
-                                         const SWRasterKey* key, bool stationary)
+                                         const SWRasterKey* key, bool stationary, bool speedVine,
+                                         uintpixel_t replayTint)
 {
     if (x < -4096 || x > 4096 || y < -4096 || y > 4096 || !isfinite(key->angle)) return SWR_RASTER_OTHER;
     // With a half-grid pivot and bounded integer positions, translating the
@@ -3842,19 +3843,22 @@ static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, in
             cache->frame = swr->frameCounter;
             cache->builds = 0;
         }
-        int buildLimit = stationary ? 1 : eye ? SWR_EYE_BUILDS : SWR_RASTER_BUILDS;
-        if (cache->builds == buildLimit) return SWR_RASTER_OTHER;
+        int buildLimit = speedVine ? SWR_SPEED_VINE_BUILDS : stationary ? 1 :
+                         eye ? SWR_EYE_BUILDS : SWR_RASTER_BUILDS;
+        if (cache->builds >= buildLimit) return SWR_RASTER_OTHER;
         // The Manhattan extent bounds the rotated corners in both axes.
         int radius = stationary ? 0 : swrCeiling(fmaxf(key->px, w - key->px) + fmaxf(key->py, h - key->py)) + 2;
         if (radius > 64) return SWR_RASTER_OTHER;
         cache->builds++;
+        int slots = speedVine ? SWR_SPEED_VINE_SLOTS : stationary ? SWR_VINE_SLOTS : SWR_RASTER_SLOTS;
         size_t limit = stationary ? SWR_VINE_BYTES : eye ? SWR_EYE_BYTES : SWR_RASTER_BYTES;
-        entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, limit);
+        entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, slots, limit);
         if (entry == NULL) return SWR_RASTER_OTHER;
         path = SWR_RASTER_BUILT;
     }
     int right = swr->portX + swr->portW, bottom = swr->portY + swr->portH;
     const uintpixel_t* colors = (const uintpixel_t*) (entry->spans + entry->count);
+    bool tinted = (replayTint & 0x7fff) != 0x7fff;
     for (int i = 0; i < entry->count; ++i) {
         SWRasterSpan span = entry->spans[i];
         int row = y + span.y;
@@ -3863,7 +3867,14 @@ static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, in
         int first = swrMax(col, swr->portX), last = swrMin(col + span.count, right);
         if (first >= last) continue;
         swrDirtyRow(swr, row, first, last);
-        swrCopyPixels(swr->fb + row * swr->fbPitch + first, colors + span.offset + first - col, last - first);
+        uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
+        const uintpixel_t* src = colors + span.offset + first - col;
+        int count = last - first;
+        if (tinted) {
+            for (int i = 0; i < count; ++i) dst[i] = tint(replayTint, src[i]);
+        } else {
+            swrCopyPixels(dst, src, count);
+        }
     }
     return path;
 }
@@ -4190,7 +4201,8 @@ void swrDrawSpriteRotated(
     uint32_t tintColor, float alpha,
     float angleDeg,
     float pivotX,
-    float pivotY
+    float pivotY,
+    bool floweyVine
 )
 {
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -4206,7 +4218,7 @@ void swrDrawSpriteRotated(
     bool pipe = sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H;
     bool eye = sw == SWR_EYE_SIZE && sh == SWR_EYE_SIZE && (packed & 0x7fff) == 0x7fff &&
                w >= -SWR_EYE_SIZE && w <= SWR_EYE_SIZE && h >= -SWR_EYE_SIZE && h <= SWR_EYE_SIZE;
-    bool vine = sw == SWR_VINE_W && sh == SWR_VINE_H && (packed & 0x7fff) == 0x7fff &&
+    bool vine = sw == SWR_VINE_W && sh == SWR_VINE_H && (floweyVine || (packed & 0x7fff) == 0x7fff) &&
                 ((w == SWR_VINE_W && h == SWR_VINE_H) ||
                  (w == (SWR_VINE_W + 1) / 2 && h == (SWR_VINE_H + 1) / 2)) &&
                 swr->portX >= 0 && swr->portY >= 0 && swr->maxX <= 640 && swr->maxY <= 480 &&
@@ -4221,12 +4233,19 @@ void swrDrawSpriteRotated(
             key.portX = swr->portX; key.portY = swr->portY;
             key.portW = swr->portW; key.portH = swr->portH;
         }
-        SWRasterPath path = swrDrawRotatedRaster(swr, texture, x, y, &key, vine);
+        // The fully extended Speed vine briefly changes tint without changing
+        // its texture samples. Store them once and tint the covered pixels.
+        bool speedVine = vine && floweyVine;
+        if (speedVine) key.tint = swrConvertPixel(0xffffff);
+        SWRasterPath path = swrDrawRotatedRaster(swr, texture, x, y, &key, vine, speedVine,
+                                               speedVine ? packed : swrConvertPixel(0xffffff));
 #ifdef SW_DRAW_PROFILE
         if (pipe && swrCallNotes && swrDrawTimed) swrLastPipeRasterPath = path;
 #endif
         if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
     }
+#else
+    (void) floweyVine;
 #endif
     
     swrDrawSpriteRotatedInternal(

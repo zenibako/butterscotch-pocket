@@ -749,7 +749,8 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
             pivotY *= (float)tpag->targetHeight/ tpag->sourceHeight;
         
         swrOverlayFlush(swr);
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY,
+                             floweySpeed && tpagIndex == swr->floweyVineItem);
     }
     else
     {
@@ -823,7 +824,7 @@ static void SWRenderer_drawSpritePart(Renderer* renderer, int32_t tpagIndex,
     
     if (UNLIKELY(swrMustRotate(angleDeg)))
     {
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX * dw, pivotY * dh);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX * dw, pivotY * dh, false);
     }
     else
     {
@@ -1653,7 +1654,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
         if (th != sh)
             pivotY *= (float)th / sh;
         
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, surface, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, surface, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY, false);
     }
     else
     {

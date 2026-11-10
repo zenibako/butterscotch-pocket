@@ -320,7 +320,7 @@ static void checkTranslatedRotation(int sourceWidth, int sourceHeight, bool eye)
             float px = eye ? 10.0f : 10.5f, py = eye ? 10.0f : 8.0f;
             swr.fb = actual;
             swrDrawSpriteRotated(&swr.base, x, y, width, h, &texture, 1, 1, sourceWidth, sourceHeight,
-                                 color, 1.0f, 37.0f, px, py);
+                                 color, 1.0f, 37.0f, px, py, false);
             swr.fb = expected;
             swrDrawSpriteRotatedInternal(&swr.base, x, y, width, h, &texture, 1, 1, sourceWidth, sourceHeight,
                                          swrConvertPixel(color), 256, 37.0f, px, py, NULL);
@@ -345,7 +345,7 @@ static void checkTranslatedRotation(int sourceWidth, int sourceHeight, bool eye)
     if (texture.rotatedRasters != NULL || texture.eyeRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
 }
 
-static void checkStationaryVine(void)
+static void checkStationaryVine(bool speedVine)
 {
     enum { WIDTH = 112, HEIGHT = 96, SRC_W = 513, SRC_H = 35 };
     uintpixel_t source[SRC_W * SRC_H], actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
@@ -357,6 +357,7 @@ static void checkStationaryVine(void)
     swr.scaleX = swr.scaleY = 1.0f;
     swr.blendMode = bm_normal;
     swr.portH = swr.maxY = HEIGHT;
+    const uint32_t tints[] = {0xffffff, 0xffa0a0, 0xffcfcf, 0xffeaea};
     for (int frame = 0; frame < 4; ++frame) {
         swr.frameCounter = (uint32_t) frame;
         swr.portX = swr.viewX = frame < 2 ? 0 : 15;
@@ -365,14 +366,15 @@ static void checkStationaryVine(void)
         for (int i = 0; i < WIDTH * HEIGHT; ++i)
             actual[i] = expected[i] = (uintpixel_t) (0x8000 | ((i * 7919) & 0x7fff));
         swr.fb = swr.mainFb = actual;
+        uint32_t color = speedVine ? tints[frame] : 0xffffff;
         swrDrawSpriteRotated(&swr.base, -10, 70, 256, 17, &texture, 1, 1, 511, 33,
-                             0xffffff, 1.0f, 37.2f, 6.5f, 5.5f);
+                             color, 1.0f, 37.2f, 6.5f, 5.5f, speedVine);
         swr.fb = expected;
         swrDrawSpriteRotatedInternal(&swr.base, -10, 70, 256, 17, &texture, 1, 1, 511, 33,
-                                     swrConvertPixel(0xffffff), 256, 37.2f, 6.5f, 5.5f, NULL);
+                                     swrConvertPixel(color), 256, 37.2f, 6.5f, 5.5f, NULL);
         if (memcmp(actual, expected, sizeof(actual)) || texture.stationaryRasters == NULL ||
             texture.stationaryRasters->count != 1 + frame / 2) {
-            fprintf(stderr, "FAIL: stationary vine frame=%d\n", frame);
+            fprintf(stderr, "FAIL: stationary vine speed=%d frame=%d\n", speedVine, frame);
             exit(1);
         }
         checks += WIDTH * HEIGHT;
@@ -509,7 +511,8 @@ int main(int argc, char** argv)
     checkPointSampleSpan();
     checkTranslatedRotation(45, 31, false);
     checkTranslatedRotation(40, 40, true);
-    checkStationaryVine();
+    checkStationaryVine(false);
+    checkStationaryVine(true);
     checkHalfTint();
     checkDoubledSprite();
     checkHalfBlend();
