@@ -606,9 +606,18 @@ static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const Textu
         if (source == NULL) return false;
         swr->floweyPipeBackdrop = swrMakeFloweyPipeBackdrop(source, tpag->sourceX - source->originX,
                                                           tpag->sourceY - source->originY);
+        if (swr->floweyPipeBackdrop == NULL) return false;
+        for (unsigned layer = 0; layer < SWR_FLOWEY_BACKDROP_VINE_LAYERS; ++layer) {
+            int32_t vineItem = swr->floweyBackdropItems[layer];
+            if (vineItem < 0) continue;
+            const TexturePageItem* vinePage = &swr->base.dataWin->tpag.items[vineItem];
+            SWTexture* vine = swrTextureForItem(swr, vineItem);
+            if (vine != NULL)
+                swrAddFloweyBackdropVines(swr->floweyPipeBackdrop, vine, vinePage->sourceX - vine->originX,
+                                         vinePage->sourceY - vine->originY, vinePage, layer);
+        }
     }
     SWTexture* art = swr->floweyPipeBackdrop;
-    if (art == NULL) return false;
     uint32_t fade = (shade * 255 + normalShade / 2) / normalShade;
     // Keep the static backdrop in screen space through the TV's camera shake.
     swrDrawSprite(&swr->base, swr->viewX, swr->viewY, art->width * 2, art->height * 2, art,
@@ -3270,7 +3279,7 @@ static bool swrFloweyStalkFrames(const DataWin* dw, const Sprite* sprite)
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
 {
     static const char* const backdrop[] = {
-        "spr_vines_flowey", "spr_vines_flowey_2", "spr_vines_flowey_3", "spr_floweyx_behind"
+        "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey", "spr_floweyx_behind"
     };
     static const char* const upright[] = {
         "spr_floweyx_mouthedge", "spr_floweyx_mouthl", "spr_flipeye_holder", "spr_flipeye_bg"
@@ -3286,6 +3295,8 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     swr->floweyOuterEyeShadow = -1;
     swr->floweyUprightCount = 0;
     swr->floweyBackdropCount = 0;
+    for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i)
+        swr->floweyBackdropItems[i] = -1;
     if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
     for (uint32_t i = 0; i < dw->sprt.count; ++i) {
         const Sprite* sprite = &dw->sprt.sprites[i];
@@ -3317,9 +3328,13 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
         } else if (swr->floweyUprightCount < sizeof(swr->floweyUprightItems) / sizeof(swr->floweyUprightItems[0]) &&
                    swrAssetNamed(sprite->name, upright, sizeof(upright) / sizeof(upright[0]))) {
             swr->floweyUprightItems[swr->floweyUprightCount++] = item;
-        } else if (swr->floweyBackdropCount < sizeof(swr->floweyBackdropItems) / sizeof(swr->floweyBackdropItems[0]) &&
-                   swrAssetNamed(sprite->name, backdrop, sizeof(backdrop) / sizeof(backdrop[0]))) {
-            swr->floweyBackdropItems[swr->floweyBackdropCount++] = item;
+        } else {
+            for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i) {
+                if (strcmp(sprite->name, backdrop[i]) != 0) continue;
+                swr->floweyBackdropItems[i] = item;
+                if (swr->floweyBackdropCount <= i) swr->floweyBackdropCount = i + 1;
+                break;
+            }
         }
     }
 }

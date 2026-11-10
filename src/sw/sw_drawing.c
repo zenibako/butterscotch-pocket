@@ -439,6 +439,34 @@ MAYBE_UNUSED static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint3
     marks[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
 }
 
+// The fixed Flowey backdrop is applied over clean or retained tiles. Walk its
+// opaque runs directly so the gap between the left and right art costs nothing.
+MAYBE_UNUSED static uint32_t swrCopyBackdropRuns(uintpixel_t* dst, const uintpixel_t* src,
+                                                const uint32_t* run, const uint32_t* end,
+                                                int sx, int dx, int width, uint32_t keep)
+{
+    uint32_t wrote = 0;
+    for (; run < end; ++run) {
+        int first = swrMax(0, (int)(*run >> 16) - sx);
+        int last = swrMin(width, (int)(*run & 0xffff) - sx);
+        if (first >= last) continue;
+        uint32_t tiles = swrDirtyMask(dx + first, dx + last);
+        uint32_t needed = tiles & ~keep;
+        wrote |= needed;
+        if (needed == tiles) {
+            swrCopyPixels(dst + first, src + first, last - first);
+        } else {
+            for (; needed != 0; needed &= needed - 1) {
+                int tile = swrLowestBit(needed);
+                int left = swrMax(first, (tile << SWR_DIRTY_TILE_W_SHIFT) - dx);
+                int right = swrMin(last, ((tile + 1) << SWR_DIRTY_TILE_W_SHIFT) - dx);
+                swrCopyPixels(dst + left, src + left, right - left);
+            }
+        }
+    }
+    return wrote;
+}
+
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
 {
     SWRenderer *swr = (SWRenderer*) renderer;
@@ -1866,6 +1894,8 @@ static void swrDrawSpriteInternal(
         // The buffer's first draw (see SWBaseKey) marks baseRows, and stays kept only if every row went through the runs.
         bool asBase = swr->baseMode != 0 && clear != NULL && clear == swr->dirty;
         bool baseWhole = asBase;
+        bool floweyBackdrop = asBase && texture == swr->floweyPipeBackdrop;
+        bool cleanBackdropRow = false;
         uint32_t* marks = clear == NULL ? NULL : asBase ? clear->baseRows : clear->rows;
         
         fixedp_t ys2 = iys2;
@@ -1883,6 +1913,12 @@ static void swrDrawSpriteInternal(
                     uint32_t mask = swrDirtyMask(dx, dx + dw);
                     clean = ~(clear->rows[tileRow] | clear->baseRows[tileRow]) & mask;
                     keep = swr->baseMode == 2 && asBase ? clear->keep[tileRow] & mask : 0;
+                    cleanBackdropRow = floweyBackdrop && (clean | keep) == mask;
+                }
+                if (cleanBackdropRow) {
+                    marks[tileRow] |= swrCopyBackdropRuns(dstline, srcline, &spans->runs[spans->rows[srcRow]],
+                                                        &spans->runs[spans->rows[srcRow + 1]], sx, dx, dw, keep);
+                    continue;
                 }
                 if ((clean | keep) != 0) {
                     int from = 0, to = dw;
@@ -4029,7 +4065,7 @@ static const SWFloweyArtRows* swrFloweyArtRows(SWTexture* texture, int sx, int s
 SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
 {
 #ifdef SW_HAS_PREMUL_BLEND
-    enum { WIDTH = 320, HEIGHT = 128, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
+    enum { WIDTH = 320, HEIGHT = 163, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
     if (sx < 0 || sy < 0 || sx + PIPE_WIDTH > pipe->width || sy + PIPE_HEIGHT > pipe->height)
         return NULL;
     SWTexture* art = calloc(1, sizeof(*art));
@@ -4066,6 +4102,44 @@ SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
 #else
     (void) pipe; (void) sx; (void) sy;
     return NULL;
+#endif
+}
+
+void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
+                               const TexturePageItem* item, unsigned layer)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    // Back to front, using each stock layer's neutral pose at 320x240.
+    static const struct { int w, h, trimX, trimY, left, right, top; } poses[SWR_FLOWEY_BACKDROP_VINE_LAYERS] = {
+        { 298, 131, 2, 14, -44, 227, 95 },
+        { 298, 102, 2, 12, -64, 207, 94 },
+        { 297, 150, 3,  0, -55, 217, 88 },
+    };
+    if (layer >= SWR_FLOWEY_BACKDROP_VINE_LAYERS) return;
+    int sw = poses[layer].w, sh = poses[layer].h;
+    if (item->sourceWidth != sw || item->sourceHeight != sh || item->targetWidth != sw || item->targetHeight != sh ||
+        item->targetX != poses[layer].trimX || item->targetY != poses[layer].trimY ||
+        sx < 0 || sy < 0 || sx + sw > vine->width || sy + sh > vine->height) return;
+    int width = (sw + 1) / 2, top = poses[layer].top;
+    int height = swrMin((sh + 1) / 2, art->height - top);
+    for (int side = 0; side < 2; ++side) {
+        int left = side == 0 ? poses[layer].left : poses[layer].right;
+        for (int row = 0; row < height; ++row) {
+            int v = 2 * row;
+            uintpixel_t* dst = art->buffer + (top + row) * art->width;
+            for (int x = swrMax(0, left); x < swrMin(art->width, left + width); ++x) {
+                int col = x - left;
+                int u = 2 * (side == 0 ? width - 1 - col : col);
+                uintpixel_t color = swrFloweyArtBlock(vine, sx + u, sy + v, sw - u, sh - v);
+                // Keep the pipes where the two decorations meet. Half-bright
+                // vines sit behind all of the live sprites and warning cues.
+                if (swrIsOpaque(color) && (top + row >= 91 || !swrIsOpaque(dst[x])))
+                    dst[x] = 0x8000u | ((color & 0x7bdeu) >> 1);
+            }
+        }
+    }
+#else
+    (void) art; (void) vine; (void) sx; (void) sy; (void) item; (void) layer;
 #endif
 }
 
