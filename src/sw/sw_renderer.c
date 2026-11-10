@@ -365,7 +365,6 @@ static void SWRenderer_destroy(Renderer* renderer)
     }
     swrFreeItemTextures(swr);
     swrFreeTexture(swr->floweyPipeBackdrop);
-    free(swr->floweyVineCache);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
@@ -693,16 +692,12 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
                 angleDeg == 0.0f && color == 0xffffff && alpha == 1.0f &&
                 swrDrawFloweySideStalk(swr, tpagIndex, x, y, originX, originY, xscale)) return;
         }
-        if (tpagIndex == swr->floweyVineItem && xscale > 0.0f && xscale <= 2.0f &&
-            yscale > 0.0f && yscale <= 4.0f) {
-            float dx = (float)(tpag->targetX - originX);
-            float dy = (float)(tpag->targetY - originY);
-            dx *= xscale; dy *= yscale;
-            dx += x; dy += y;
-            int dw = (int)(xscale * tpag->targetWidth);
-            int dh = (int)(yscale * tpag->targetHeight);
-            if (swrDrawFloweyVine(renderer, dx, dy, dw, dh, angleDeg, x - dx, y - dy, color, alpha))
-                return;
+        if (tpagIndex == swr->floweyVineItem && swr->blendMode == bm_normal &&
+            alpha >= 0.0f && alpha < 1.0f) {
+            // Keep the original art and reach. The vine can deal damage
+            // while its alpha exceeds 0.3, so draw it solid until that ends.
+            if (alpha <= 0.3f) return;
+            alpha = 1.0f;
         }
     }
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);

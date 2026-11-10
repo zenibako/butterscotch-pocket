@@ -275,7 +275,6 @@ typedef struct
     bool primitiveOverflow;
 
     SWRotation rotationCache[SWR_ROTATION_CACHE_SIZE];
-    struct SWFloweyVineCache* floweyVineCache;
     int32_t floweyPipeSegmentItem;
 }
 SWRenderer;

@@ -538,11 +538,10 @@ readability at half resolution. Both games use the shared sampler in
 assets and active battle context. Accuracy and non-battle screens keep their
 ordinary sampling.
 
-In the Photoshop Flowey fight, Speed mode also hides the rotating decorative
-pipe segments during ordinary animation. Flash and debug branches retain the
-original artwork. Speed mode combines the large background pipes into a
-static backdrop, omits the layered background vines, and renders the long
-attacking vines as flat silhouettes. The side stalks animate
+In the Photoshop Flowey fight, Speed mode uses a static backdrop for the
+decorative pipes and layered background vines. The long attacking vines use
+the original artwork, with a sharp disappearance when they stop dealing damage.
+The side stalks animate
 in fewer poses, and the mouth and eye surrounds have simpler motion and
 shading. The idle arms and TV casing have coarser shading, and the animated TV
 face uses a steadier width. The arm windups, strikes, TV warnings, and vine
