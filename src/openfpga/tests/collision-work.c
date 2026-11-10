@@ -288,6 +288,27 @@ static void counts(void) {
 }
 #endif
 
+#ifndef ENABLE_VM_TRACING
+static bool fixtureSkipCollision(Runner* runner, Instance* self) {
+    (void) runner;
+    (void) self;
+    return true;
+}
+
+static void nonSolidFilter(void) {
+    const Pair hit[] = {{10, 1, PARENT}};
+    for (int c = 0; c < 4; ++c) {
+        Fixture* f = fixture();
+        add(f, SELF, 10)->solid = c == 1;
+        add(f, PARENT, 1)->solid = c == 2;
+        f->runner.skipCollisionEvent = fixtureSkipCollision;
+        f->runner.skipCollisionCode = c == 3 ? -1 : 0;
+        run(f, c == 0 ? NULL : hit, c == 0 ? 0 : 1);
+        finish(f);
+    }
+}
+#endif
+
 static void nested(void) {
     Fixture* outer = fixture(); Fixture* inner = fixture();
     outer->action = NESTED; outer->nested = inner;
@@ -317,6 +338,9 @@ static void nested(void) {
 
 int main(void) {
     ordering(); mutations(); nested();
+#ifndef ENABLE_VM_TRACING
+    nonSolidFilter();
+#endif
 #ifdef OF_COLLISION_WORK_PROFILE
     counts();
 #endif

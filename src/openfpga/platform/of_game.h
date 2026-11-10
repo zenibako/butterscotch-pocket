@@ -70,6 +70,7 @@ typedef struct {
     size_t nativeScriptCount;
     /* Called for each new VM (a game_change gives one), to forget its ids (or NULL). */
     void (*nativesForgetVm)(void);
+    void (*installCollisionFilter)(Runner *runner);
 
     /* Derived battle appearance: selected assets and whether the scene is active. */
     void (*battleUiInstall)(Runner *runner);

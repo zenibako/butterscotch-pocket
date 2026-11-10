@@ -39,6 +39,7 @@ void SWRenderer_setHintedGlyphAssets(Renderer* renderer, const SWHintedGlyphAsse
 void SWRenderer_setContrastEnabled(Renderer* renderer, bool enabled);
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer);
 void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active);
+void SWRenderer_drawFloweyEyePipes(Renderer* renderer);
 // The renderer clears a platform display buffer only where it drew since that
 // buffer's last clear. A platform that writes into one of those buffers itself
 // (an overlay, a menu, a copy) calls this, so the next clear is a whole one.

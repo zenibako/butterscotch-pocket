@@ -936,6 +936,9 @@ struct Runner {
 
     // GMS legacy (pre 2022.1) collision behavior: AABB overlap treats touching edges as overlap.
     bool collisionCompatibilityMode;
+    // Optional game hook for a verified no-op collision event on non-solid pairs.
+    bool (*skipCollisionEvent)(Runner* runner, Instance* self);
+    int32_t skipCollisionCode, skipCollisionVar;
 
     // GameMaker surface "stack".
     int32_t surfaceStack[MAX_SURFACES];

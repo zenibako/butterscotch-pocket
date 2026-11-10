@@ -3942,6 +3942,9 @@ static void dispatchCollisionEvents(Runner* runner) {
                 if (0 > evt->codeId)
                     continue;
 
+#ifndef ENABLE_VM_TRACING
+                bool canSkip = evt->codeId == runner->skipCollisionCode && runner->skipCollisionEvent != nullptr;
+#endif
                 // Iterate only the descendant-inclusive list for the target object via a snapshot, so nested user code (collision handlers calling instance_exists, with (...), etc.) can push/pop their own snapshots above ours without corrupting this iteration.
                 int32_t snapBase = Runner_pushInstancesOfObject(runner, targetObjIndex);
                 int32_t snapEnd = (int32_t) arrlen(runner->instanceSnapshots);
@@ -3966,6 +3969,10 @@ static void dispatchCollisionEvents(Runner* runner) {
                     if (!other->active) continue;
                     if (other == self) continue;
 
+#ifndef ENABLE_VM_TRACING
+                    if (canSkip && !self->solid && !other->solid && runner->skipCollisionEvent(runner, self))
+                        continue;
+#endif
                     if (mostSpecificCollisionTarget(runner, self, other) != targetObjIndex)
                         continue;
 

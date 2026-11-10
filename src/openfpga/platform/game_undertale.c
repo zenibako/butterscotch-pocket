@@ -171,6 +171,35 @@ static bool readNativeNumber(Instance *instance, int32_t id, GMLReal *out) {
     return isfinite(*out);
 }
 
+static bool skipDormantVineCollision(Runner *runner, Instance *self) {
+    GMLReal active, epsilon = runner->mathEpsilon;
+    if (!ofPlatformSpeedMode() || !(epsilon >= 0 && epsilon < (GMLReal)0.5) ||
+        !readNativeNumber(self, runner->skipCollisionVar, &active)) return false;
+
+    // The stock handler only calls event_inherited when active == 1 and
+    // image_alpha > 0.3. Match the VM's epsilon comparisons.
+    if (GMLReal_fabs(active - (GMLReal)1) > epsilon) return true;
+    GMLReal opacity = (GMLReal)self->imageAlpha;
+    return isfinite(opacity) && opacity - (GMLReal)0.3 <= epsilon;
+}
+
+static void installVineCollisionFilter(Runner *runner) {
+    static const char name[] = "gml_Object_obj_gigavine_Collision_1587";
+    DataWin *dw = runner->dataWin;
+    if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
+    uint32_t length = 0;
+    uint64_t hash = VM_codeHash(runner->vmContext, name, &length);
+    if (length != 68 || hash != 0xbb9e9d11ca6b3d04ull) return;
+    for (uint32_t i = 0; i < dw->code.count; ++i) {
+        const char *entry = dw->code.entries[i].name;
+        if (entry == NULL || strcmp(entry, name) != 0) continue;
+        runner->skipCollisionCode = (int32_t)i;
+        runner->skipCollisionVar = VM_getOrAllocateVarID(runner->vmContext, "active");
+        runner->skipCollisionEvent = skipDormantVineCollision;
+        return;
+    }
+}
+
 static bool pipeNumber(Instance *instance, int field, GMLReal *out) {
     return readNativeNumber(instance, pipeVars[field], out);
 }
@@ -264,6 +293,8 @@ static bool floweyPipeDraw(VMContext *ctx, int pipe) {
     if (rightRescued || swell <= epsilon) Instance_setSelfVar(self, pipeVars[PIPE_SWELL2], RValue_makeReal(0));
     else setNativeReal(self, pipeVars[PIPE_SWELL2], swell / (GMLReal)3);
     if (pipe == 1) setNativeReal(self, pipeVars[PIPE_ANGLE2], (GMLReal)(20 * last) + angleOffset);
+    if (pipe == 0 && self->x == 272 && self->y == 226 && mirrorOffset == (GMLReal)100)
+        SWRenderer_drawFloweyEyePipes(runner->renderer);
     return true;
 }
 
@@ -664,6 +695,7 @@ const OfGame ofGame = {
     .natives = g_natives,
     .nativeCount = sizeof(g_natives) / sizeof(g_natives[0]),
     .nativesForgetVm = forgetNativeVm,
+    .installCollisionFilter = installVineCollisionFilter,
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,
     .speedFullResBattles = true,

@@ -173,6 +173,7 @@ typedef struct
     int32_t floweyPipeItem;
     uint32_t floweyPipeFrame;
     SWTexture* floweyPipeBackdrop;
+    SWTexture* floweyEyePipes;
     int32_t floweyUprightItems[4];
     unsigned floweyUprightCount;
     int32_t floweyBackdropItems[4];
