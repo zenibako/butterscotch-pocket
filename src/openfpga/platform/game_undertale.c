@@ -91,7 +91,7 @@ enum {
     BACKDROP_PHASE, BACKDROP_FROZEN, BACKDROP_I, BACKDROP_LAYER_PHASE, BACKDROP_BLEND,
     BACKDROP_GROWTH, BACKDROP_GROWTH2, BACKDROP_GROWTH3,
     BACKDROP_MSIN, BACKDROP_MSIN2, BACKDROP_MSIN3, BACKDROP_YSIN, BACKDROP_YSIN2, BACKDROP_YSIN3,
-    BACKDROP_SSX, BACKDROP_SSX2, BACKDROP_SSX3, BACKDROP_FIELD_COUNT
+    BACKDROP_SSX, BACKDROP_SSX2, BACKDROP_SSX3, BACKDROP_SSY, BACKDROP_FIELD_COUNT
 };
 static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
@@ -378,15 +378,14 @@ static bool floweyPipeDraw1(VMContext *ctx) { return floweyPipeDraw(ctx, 0); }
 static bool floweyPipeDraw2(VMContext *ctx) { return floweyPipeDraw(ctx, 1); }
 static bool floweyPipeDraw3(VMContext *ctx) { return floweyPipeDraw(ctx, 2); }
 
-static Instance *floweyBackdropInstance(VMContext *ctx, bool skipOnly) {
+static Instance *floweyBackdropInstance(VMContext *ctx) {
     Runner *runner = ctx->runner;
     if (!ofPlatformSpeedMode() || runner == NULL || runner->currentRoom == NULL ||
-        runner->currentRoom->name == NULL || strcmp(runner->currentRoom->name, "room_floweyx") != 0 ||
-        (skipOnly && !SWRenderer_isSkippingScreen(runner->renderer))) return NULL;
+        runner->currentRoom->name == NULL || strcmp(runner->currentRoom->name, "room_floweyx") != 0) return NULL;
     if (!backdropVarsResolved) {
         static const char *const names[BACKDROP_FIELD_COUNT] = {
             "siner", "frozen", "i", "siner2", "blend3", "growth", "growth2", "growth3",
-            "msin", "msin2", "msin3", "ysin", "ysin2", "ysin3", "ssx", "ssx2", "ssx3"
+            "msin", "msin2", "msin3", "ysin", "ysin2", "ysin3", "ssx", "ssx2", "ssx3", "ssy"
         };
         for (int i = 0; i < BACKDROP_FIELD_COUNT; i++) backdropVars[i] = VM_getOrAllocateVarID(ctx, names[i]);
         backdropVarsResolved = true;
@@ -403,7 +402,7 @@ static bool floweyBackgroundMotion(VMContext *ctx) {
 #ifdef __clang__
 #pragma clang fp contract(off)
 #endif
-    Instance *self = floweyBackdropInstance(ctx, false);
+    Instance *self = floweyBackdropInstance(ctx);
     if (self == NULL) return false;
     RValue phase = Instance_getSelfVar(self, backdropVars[BACKDROP_PHASE]);
     if (phase.type != RVALUE_REAL || !isfinite(phase.real) ||
@@ -441,24 +440,53 @@ static inline GMLReal backdropSin(GMLReal angle) {
     return GMLReal_sin(separateAngle);
 }
 
-/* These sprites use the original events on drawn updates and on surfaces.
- * On a skipped screen update, retain every animation field they write. */
+static bool floweySceneryPose(const Instance* self) {
+    return self != NULL && isfinite(self->x) && isfinite(self->y) &&
+           isfinite(self->imageXscale) && isfinite(self->imageIndex) &&
+           self->imageIndex > INT32_MIN && self->imageIndex < INT32_MAX;
+}
+
+static void floweyScenerySprite(Renderer* renderer, const Instance* self, int sprite,
+                               GMLReal x, GMLReal y, GMLReal sx, GMLReal sy, uint32_t tint) {
+    if (renderer == NULL || SWRenderer_isSkippingScreen(renderer)) return;
+    int frame = RValue_toInt32(RValue_makeReal((GMLReal)self->imageIndex));
+    if (frame < 0) frame = (int)self->imageIndex;
+    Renderer_drawSpriteExt(renderer, sprite, frame, x, y, sx, sy, 0, tint, 1);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
 static bool floweyBackdropPipes(VMContext *ctx) {
-    Instance *self = floweyBackdropInstance(ctx, true);
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance *self = floweyBackdropInstance(ctx);
     GMLReal phase;
-    if (!floweyBackdropPhase(ctx, self, &phase)) return false;
+    if (!floweySceneryPose(self) || !floweyBackdropPhase(ctx, self, &phase)) return false;
     GMLReal wave = backdropSin(phase / (GMLReal)9);
-    setNativeReal(self, backdropVars[BACKDROP_MSIN], wave * (GMLReal)2);
-    setNativeReal(self, backdropVars[BACKDROP_YSIN], GMLReal_cos(phase / (GMLReal)8));
-    setNativeReal(self, backdropVars[BACKDROP_GROWTH], GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.012);
-    setNativeReal(self, backdropVars[BACKDROP_MSIN2], backdropSin(phase / (GMLReal)10) * (GMLReal)1.5);
-    setNativeReal(self, backdropVars[BACKDROP_YSIN2], GMLReal_cos(phase / (GMLReal)9) * (GMLReal)0.8);
-    setNativeReal(self, backdropVars[BACKDROP_GROWTH2], backdropSin(phase / (GMLReal)8) * (GMLReal)0.01);
-    setNativeReal(self, backdropVars[BACKDROP_MSIN3], GMLReal_sin(phase / (GMLReal)11));
-    setNativeReal(self, backdropVars[BACKDROP_YSIN3], GMLReal_cos(phase / (GMLReal)10) * (GMLReal)0.5);
-    setNativeReal(self, backdropVars[BACKDROP_GROWTH3], wave * (GMLReal)0.005);
+    GMLReal xs[] = { wave * (GMLReal)2, backdropSin(phase / (GMLReal)10) * (GMLReal)1.5,
+                     GMLReal_sin(phase / (GMLReal)11) };
+    GMLReal ys[] = { GMLReal_cos(phase / (GMLReal)8), GMLReal_cos(phase / (GMLReal)9) * (GMLReal)0.8,
+                     GMLReal_cos(phase / (GMLReal)10) * (GMLReal)0.5 };
+    GMLReal growth[] = { GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.012,
+                         backdropSin(phase / (GMLReal)8) * (GMLReal)0.01, wave * (GMLReal)0.005 };
+    for (int i = 0; i < 3; ++i) {
+        setNativeReal(self, backdropVars[BACKDROP_MSIN + i], xs[i]);
+        setNativeReal(self, backdropVars[BACKDROP_YSIN + i], ys[i]);
+        setNativeReal(self, backdropVars[BACKDROP_GROWTH + i], growth[i]);
+    }
     uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
-    setNativeReal(self, backdropVars[BACKDROP_BLEND], (GMLReal)Color_lerp((int32_t)tint, 0, 0.4f));
+    uint32_t shadow = Color_lerp((int32_t)tint, 0, 0.4f);
+    setNativeReal(self, backdropVars[BACKDROP_BLEND], (GMLReal)shadow);
+    Renderer* renderer = ctx->runner->renderer;
+    GMLReal x = self->x, y = self->y, scale = self->imageXscale;
+    floweyScenerySprite(renderer, self, self->spriteIndex, x + (xs[2] - (GMLReal)60) * scale,
+                       (y + ys[2]) - (GMLReal)20, growth[2] + scale, 1, shadow);
+    floweyScenerySprite(renderer, self, self->spriteIndex, x + (xs[1] - (GMLReal)40) * scale,
+                       (y + ys[1]) - (GMLReal)10, growth[1] + scale, 1, shadow);
+    floweyScenerySprite(renderer, self, self->spriteIndex, x + xs[0] * scale,
+                       y + ys[0], growth[0] + scale, 1, tint);
     return true;
 }
 
@@ -475,17 +503,67 @@ static bool floweyBackdropVines(VMContext *ctx) {
 #ifdef __clang__
 #pragma clang fp contract(off)
 #endif
-    Instance *self = floweyBackdropInstance(ctx, true);
+    Instance *self = floweyBackdropInstance(ctx);
     GMLReal phase;
-    if (!floweyBackdropPhase(ctx, self, &phase)) return false;
+    if (!floweySceneryPose(self) || !floweyBackdropPhase(ctx, self, &phase)) return false;
     GMLReal cosine = GMLReal_cos(phase / (GMLReal)6);
     GMLReal scale = (GMLReal)self->imageXscale;
-    setBackdropVineGrowth(self, BACKDROP_GROWTH, (GMLReal)1 + backdropSin(phase / (GMLReal)6) * (GMLReal)0.05);
-    setBackdropVineGrowth(self, BACKDROP_GROWTH2, (GMLReal)1 + cosine * (GMLReal)0.05);
-    setBackdropVineGrowth(self, BACKDROP_GROWTH3, (GMLReal)1 - GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.05);
-    setNativeReal(self, backdropVars[BACKDROP_SSX], GMLReal_sin(phase / (GMLReal)4) * (GMLReal)2 * scale);
-    setNativeReal(self, backdropVars[BACKDROP_SSX2], GMLReal_sin(phase / (GMLReal)5) * scale);
-    setNativeReal(self, backdropVars[BACKDROP_SSX3], cosine * (GMLReal)0.5 * scale);
+    GMLReal growth[] = { (GMLReal)1 + backdropSin(phase / (GMLReal)6) * (GMLReal)0.05,
+                         (GMLReal)1 + cosine * (GMLReal)0.05,
+                         (GMLReal)1 - GMLReal_sin(phase / (GMLReal)7) * (GMLReal)0.05 };
+    GMLReal xs[] = { GMLReal_sin(phase / (GMLReal)4) * (GMLReal)2 * scale,
+                     GMLReal_sin(phase / (GMLReal)5) * scale, cosine * (GMLReal)0.5 * scale };
+    for (int i = 0; i < 3; ++i)
+        setBackdropVineGrowth(self, BACKDROP_GROWTH + i, growth[i]);
+    for (int i = 0; i < 3; ++i)
+        setNativeReal(self, backdropVars[BACKDROP_SSX + i], xs[i]);
+    Renderer* renderer = ctx->runner->renderer;
+    uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
+    GMLReal x = self->x, y = self->y;
+    floweyScenerySprite(renderer, self, 2298, (x - xs[2]) + (GMLReal)20, y, scale, growth[2], tint);
+    floweyScenerySprite(renderer, self, 2297, (x - xs[1]) - (GMLReal)20, y, scale, growth[1], tint);
+    floweyScenerySprite(renderer, self, 2296, x - xs[0], y, scale, growth[0], tint);
+    return true;
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweySideStalk(VMContext* ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance* self = floweyBackdropInstance(ctx);
+    GMLReal frozen;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    if (!floweySceneryPose(self) || !readNativeNumber(self, backdropVars[BACKDROP_FROZEN], &frozen) ||
+        !(epsilon >= 0 && epsilon < (GMLReal)0.5)) return false;
+    RValue state = Instance_getSelfVar(self, backdropVars[BACKDROP_PHASE]);
+    bool advancing = GMLReal_fabs(frozen) <= epsilon;
+    if (state.type == RVALUE_INT32) {
+        if (advancing && state.int32 == INT32_MAX) return false;
+        if (advancing) ++state.int32;
+    } else if (state.type == RVALUE_REAL && isfinite(state.real)) {
+        if (advancing) state.real += (GMLReal)1;
+    } else {
+        return false;
+    }
+    GMLReal phase = RValue_toReal(state);
+    if (advancing) {
+        state.gmlStackType = GML_TYPE_VARIABLE;
+        Instance_setSelfVar(self, backdropVars[BACKDROP_PHASE], state);
+    }
+    GMLReal scale = self->imageXscale;
+    GMLReal growth = (GMLReal)1 + GMLReal_cos(phase / (GMLReal)5) * (GMLReal)0.01;
+    GMLReal ssx = backdropSin(phase / (GMLReal)3) * (GMLReal)2 * scale;
+    GMLReal ssy = GMLReal_cos(phase / (GMLReal)3) * (GMLReal)2;
+    setBackdropVineGrowth(self, BACKDROP_GROWTH, growth);
+    setNativeReal(self, backdropVars[BACKDROP_SSX], ssx);
+    setNativeReal(self, backdropVars[BACKDROP_SSY], ssy);
+    self->imageSpeed = advancing ? 3.0f : 1.0f;
+    uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
+    floweyScenerySprite(ctx->runner->renderer, self, self->spriteIndex, (GMLReal)self->x - ssx,
+                       (GMLReal)self->y + ssy, scale, growth, tint);
     return true;
 }
 
@@ -595,6 +673,7 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_floweypipetest_2_Draw_0", 2496, 0xc784a157fab0292eull, floweyPipeDraw2 },
     { "gml_Object_obj_floweypipetest_3_Draw_0", 2148, 0x543e2f97612cf23cull, floweyPipeDraw3 },
     { "gml_Object_obj_flowey_bgdraw_Draw_0", 272, 0x746a6e5ff0305b36ull, floweyBackgroundMotion },
+    { "gml_Object_obj_sidestalk_Draw_0", 376, 0xe8f07e7abe5af547ull, floweySideStalk },
     { "gml_Object_obj_bgpipe_Draw_0", 964, 0x12bf9b0542ba714cull, floweyBackdropPipes },
     { "gml_Object_obj_vines_flowey_Draw_0", 704, 0xec70756e7a99f41aull, floweyBackdropVines },
 };
