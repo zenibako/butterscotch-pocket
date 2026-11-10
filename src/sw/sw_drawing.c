@@ -1196,7 +1196,6 @@ void swrOverlayFlushForState(SWRenderer* swr)
 
 void swrOverlayFlush(SWRenderer* swr)
 {
-    if (swr->floweyVinesPending) swrFlushFloweyVines(swr);
     swrTrailEnd();
 #ifdef SW_HAS_PREMUL_BLEND
     // Held tile pictures are older than anything else held, so they go first,
@@ -3917,90 +3916,9 @@ typedef struct {
     uint32_t redBlue, green;
 } SWFloweyVinePaint;
 
-enum { SWR_VINE_BATCH_W = 320, SWR_VINE_BATCH_H = 240 };
-
-typedef struct {
-    uint16_t first, end;
-    uintpixel_t color;
-} SWFloweyVineRow;
-
-typedef struct SWFloweyVineBatch {
-    SWFloweyVineRow rows[SWR_VINE_BATCH_H];
-    int top, bottom;
-} SWFloweyVineBatch;
-
-FORCE_INLINE void swrWriteOpaqueVineSpan(SWRenderer* swr, int row, const SWFloweyVineRow* span)
-{
-    swrDirtyRow(swr, row, span->first, span->end);
-    uintpixel_t* dst = swr->fb + row * swr->fbPitch + span->first;
-    swrFillPixels(dst, (size_t) (span->end - span->first), span->color);
-}
-
-FORCE_INLINE void swrQueueVineSpan(SWRenderer* swr, SWFloweyVineBatch* batch, int row,
-                                  int first, int end, uintpixel_t color)
-{
-    SWFloweyVineRow* pending = &batch->rows[row];
-    if (pending->end != 0) {
-        if (pending->color == color && first <= pending->end && end >= pending->first) {
-            pending->first = swrMin(first, pending->first);
-            pending->end = swrMax(end, pending->end);
-            return;
-        }
-        swrWriteOpaqueVineSpan(swr, row, pending);
-    } else {
-        batch->top = swrMin(batch->top, row);
-        batch->bottom = swrMax(batch->bottom, row + 1);
-    }
-    *pending = (SWFloweyVineRow) { first, end, color };
-}
-#endif
-
-void swrFlushFloweyVines(SWRenderer* swr)
-{
-#ifdef SW_HAS_PREMUL_BLEND
-    if (!swr->floweyVinesPending) return;
-    SWFloweyVineBatch* batch = swr->floweyVineBatch;
-    swr->floweyVinesPending = false;
-    for (int row = batch->top; row < batch->bottom; ++row) {
-        SWFloweyVineRow* pending = &batch->rows[row];
-        if (pending->end == 0) continue;
-        swrWriteOpaqueVineSpan(swr, row, pending);
-        pending->end = 0;
-    }
-#else
-    (void) swr;
-#endif
-}
-
-#ifdef SW_HAS_PREMUL_BLEND
-// Consecutive opaque vines can only overwrite one another. Merge same-ink
-// overlaps per row. A different ink or a gap commits the older span.
-static void swrBeginFloweyVineDraw(SWRenderer* swr, int opacity)
-{
-    bool eligible = opacity > 253 && swr->floweySpeedRoom && !swr->drawingToSurface && swr->fb == swr->mainFb &&
-                    swr->mainWidth == SWR_VINE_BATCH_W && swr->mainHeight == SWR_VINE_BATCH_H &&
-                    swr->portX == 0 && swr->portY == 0 && swr->maxX == SWR_VINE_BATCH_W && swr->maxY == SWR_VINE_BATCH_H;
-    SWFloweyVineBatch* batch = swr->floweyVineBatch;
-    if (eligible && swr->floweyVinesPending) return;
-    swrOverlayFlush(swr);
-    if (!eligible) return;
-    if (batch == NULL) {
-        batch = calloc(1, sizeof(*batch));
-        if (batch == NULL) return;
-        swr->floweyVineBatch = batch;
-    }
-    batch->top = SWR_VINE_BATCH_H;
-    batch->bottom = 0;
-    swr->floweyVinesPending = true;
-}
-
 FORCE_INLINE void swrPaintVineSpan(SWRenderer* swr, int row, int first, int end,
                                   const SWFloweyVinePaint* paint, int alpha)
 {
-    if (swr->floweyVinesPending) {
-        swrQueueVineSpan(swr, swr->floweyVineBatch, row, first, end, paint->color);
-        return;
-    }
     swrDirtyRow(swr, row, first, end);
     uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
     if (alpha > 253) swrFillPixels(dst, (size_t) (end - first), paint->color);
@@ -4370,23 +4288,24 @@ bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float d
     if (!(dw > 0 && dw <= 1024 && dh > 0 && dh <= 256 && fabsf(dx) < 8192 && fabsf(dy) < 8192 &&
           fabsf(pivotX) < 1024 && fabsf(pivotY) < 256)) return false;
 
-    /* These bands enclose the stock cropped art, with an extra texel where
-     * possible at their top and bottom. The last band retains the warm tip.
-     * Collision and the preview lines are handled by their original events. */
-    static const int edge[] = { 0, 112, 224, 336, 448, 511 };
-    static const int top[] = { 0, 0, 0, 2, 0 }, bottom[] = { 28, 25, 25, 28, 33 };
+    /* The olive body keeps individual strikes distinct from the yellow
+     * preview lines. Keep the full length and the warm tip of the stock art.
+     * Collision and preview lines still run through the original events. */
+    static const struct { int left, right, top, bottom; uint32_t color; } bands[] = {
+        { 0, 448, 5, 21, 0x349576 },
+        { 448, 511, 0, 33, 0x285cff },
+    };
+    enum { BAND_COUNT = sizeof(bands) / sizeof(bands[0]) };
     int left = swrFloor(dx), topRow = swrFloor(dy);
     int width = swrCeiling(dw), height = swrCeiling(dh);
     uintpixel_t packed = swrConvertPixel(color);
-    SWFloweyVinePaint paint[2] = {
-        { .color = tint(packed, swrConvertPixel(0x329ec1)) },
-        { .color = tint(packed, swrConvertPixel(0x285cff)) }
-    };
-    for (int i = 0; i < 2; ++i) {
+    SWFloweyVinePaint paint[BAND_COUNT];
+    for (int i = 0; i < BAND_COUNT; ++i) {
+        paint[i].color = tint(packed, swrConvertPixel(bands[i].color));
         paint[i].redBlue = swrSpreadRedBlue(paint[i].color) * opacity;
         paint[i].green = swrGreen(paint[i].color) * opacity;
     }
-    swrBeginFloweyVineDraw(swr, opacity);
+    swrOverlayFlush(swr);
 
     // Full-size stock vines hold their exact pose over several updates. Keep
     // only their clipped spans, in band order, so overlaps still blend twice.
@@ -4425,17 +4344,16 @@ bool swrDrawFloweyVine(Renderer* renderer, float dx, float dy, float dw, float d
     SWRotation rotation = swrMustRotate(angle) ? swrSpriteRotation(swr, angle) : (SWRotation){ 0, 1.0f, 0.0f };
     float x = left + pivotX, y = topRow + pivotY;
     float sx = (float) width / 511.0f, sy = (float) height / 33.0f;
-    for (int band = 0; band < 5; ++band) {
-        float x0 = edge[band] * sx - pivotX, x1 = edge[band + 1] * sx - pivotX;
-        float y0 = top[band] * sy - pivotY, y1 = bottom[band] * sy - pivotY;
+    for (int band = 0; band < BAND_COUNT; ++band) {
+        float x0 = bands[band].left * sx - pivotX, x1 = bands[band].right * sx - pivotX;
+        float y0 = bands[band].top * sy - pivotY, y1 = bands[band].bottom * sy - pivotY;
         float u[4] = { x0, x1, x1, x0 }, v[4] = { y0, y0, y1, y1 };
         float xx[4], yy[4];
         for (int j = 0; j < 4; ++j) {
             xx[j] = rotation.cosine * u[j] - rotation.sine * v[j] + x;
             yy[j] = rotation.sine * u[j] + rotation.cosine * v[j] + y;
         }
-        unsigned ink = band == 4;
-        swrFillVineBand(swr, xx, yy, &paint[ink], opacity, pose, ink);
+        swrFillVineBand(swr, xx, yy, &paint[band], opacity, pose, band);
     }
     return true;
 #else

@@ -366,7 +366,6 @@ static void SWRenderer_destroy(Renderer* renderer)
     swrFreeItemTextures(swr);
     swrFreeTexture(swr->floweyPipeBackdrop);
     free(swr->floweyVineCache);
-    free(swr->floweyVineBatch);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
@@ -666,8 +665,6 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     }
     bool floweySpeed = swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface;
     if (floweySpeed) {
-        if (swr->floweyVinesPending && tpagIndex != swr->floweyVineItem)
-            swrFlushFloweyVines(swr);
         if (tpagIndex == swr->floweyPipeItem) {
             // Submit at the first ordinary back-pipe call, in its original
             // place behind the boss and projectiles. Later layers are baked in.
@@ -707,8 +704,6 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
             if (swrDrawFloweyVine(renderer, dx, dy, dw, dh, angleDeg, x - dx, y - dy, color, alpha))
                 return;
         }
-        if (swr->floweyVinesPending && tpagIndex == swr->floweyVineItem)
-            swrFlushFloweyVines(swr);
     }
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);
     if (!texture) {
@@ -1978,7 +1973,7 @@ bool SWRenderer_snapshotGetState(Renderer* renderer, SWRendererSnapshotState* st
     memset(state, 0, sizeof(*state));
     if (renderer->vtable != &swrVtable) return true;
     SWRenderer* swr = (SWRenderer*)renderer;
-    if (swrPendingCount || swr->viewActive || swr->primitiveBegun || swr->vertexCount || swr->overlayCount || swr->floweyVinesPending ||
+    if (swrPendingCount || swr->viewActive || swr->primitiveBegun || swr->vertexCount || swr->overlayCount ||
         swr->mirrorLayers || swr->mirrorStage || swr->tiledHeldCount ||
         swr->pendingClear || swr->clearHeld || swr->drawingToSurface)
         return false;
