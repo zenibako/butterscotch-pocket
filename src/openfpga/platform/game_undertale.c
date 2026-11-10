@@ -76,6 +76,8 @@ static void installPrompts(Runner *runner) {
 enum { PARTICLE_GOAL, PARTICLE_SIZE, PARTICLE_PHASE, PARTICLE_DIVISOR, PARTICLE_X_WAVE, PARTICLE_Y_WAVE, PARTICLE_FIELD_COUNT };
 static int32_t particleVars[PARTICLE_FIELD_COUNT];
 static bool particleVarsResolved;
+static int32_t floweyVineActive, floweyVineCon, floweyEyeShotSize;
+static bool floweyStepVarsResolved;
 
 enum {
     PIPE_FROZEN, PIPE_PHASE, PIPE_FLASH, PIPE_TINT, PIPE_I, PIPE_MIRROR_OFFSET,
@@ -95,20 +97,28 @@ static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
 
 #ifndef ENABLE_VM_TRACING
-enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832, FLOWEY_MOUTH_DRAW_LENGTH = 4992 };
+enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832, FLOWEY_MOUTH_DRAW_LENGTH = 4992,
+       FLOWEY_PREVIEW_DRAW_LENGTH = 672, FLOWEY_LEFT_EYE_DRAW_LENGTH = 6356 };
 static uint32_t flipeyeSkippedWords[FLOWEY_FLIPEYE_DRAW_LENGTH / 4];
 static uint32_t mouthSkippedWords[FLOWEY_MOUTH_DRAW_LENGTH / 4];
 static bool flipeyeSkippedReady;
 static bool mouthSkippedReady;
+static uint32_t previewSkippedWords[FLOWEY_PREVIEW_DRAW_LENGTH / 4];
+static bool previewSkippedReady;
+static uint32_t leftEyeSkippedWords[FLOWEY_LEFT_EYE_DRAW_LENGTH / 4];
+static bool leftEyeSkippedReady;
 #endif
 
 static void forgetNativeVm(void) {
     particleVarsResolved = false;
+    floweyStepVarsResolved = false;
     pipeVarsResolved = false;
     backdropVarsResolved = false;
 #ifndef ENABLE_VM_TRACING
     flipeyeSkippedReady = false;
     mouthSkippedReady = false;
+    previewSkippedReady = false;
+    leftEyeSkippedReady = false;
 #endif
 }
 
@@ -183,6 +193,58 @@ static bool readNativeNumber(Instance *instance, int32_t id, GMLReal *out) {
     if (value.type != RVALUE_REAL && value.type != RVALUE_INT32) return false;
     *out = RValue_toReal(value);
     return isfinite(*out);
+}
+
+static bool floweyStepContext(VMContext *ctx) {
+    if (!ofPlatformSpeedMode() || ctx->runner == NULL ||
+        ctx->currentCallFrame->eventType != EVENT_STEP || ctx->currentCallFrame->eventSubtype != STEP_NORMAL ||
+        ctx->currentCallFrame->self == NULL) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    if (!(epsilon >= 0 && epsilon < (GMLReal)0.5)) return false;
+    if (!floweyStepVarsResolved) {
+        floweyVineActive = VM_getOrAllocateVarID(ctx, "active");
+        floweyVineCon = VM_getOrAllocateVarID(ctx, "con");
+        floweyEyeShotSize = VM_getOrAllocateVarID(ctx, "size");
+        floweyStepVarsResolved = true;
+    }
+    return true;
+}
+
+static bool floweyVineStep(VMContext *ctx) {
+    if (!floweyStepContext(ctx)) return false;
+    Instance *self = ctx->currentCallFrame->self;
+    GMLReal epsilon = ctx->runner->mathEpsilon, active, con;
+    if (!readNativeNumber(self, floweyVineActive, &active)) return false;
+    if (GMLReal_fabs(active - (GMLReal)1) > epsilon) return true;
+    if (!readNativeNumber(self, floweyVineCon, &con) || !isfinite(self->imageXscale)) return false;
+    bool held = GMLReal_fabs(con - (GMLReal)2) <= epsilon;
+    if (!held && GMLReal_fabs(con) > epsilon) return false;
+    if ((GMLReal)self->imageXscale - (GMLReal)1 >= -epsilon) return held;
+
+    // The stock Step event also tests the stored float scale before making
+    // the growing strike visible. Leave the alarm and fade branches in GML.
+    GMLReal scale = (GMLReal)self->imageXscale + (GMLReal)0.08;
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_XSCALE, "image_xscale", RValue_makeReal(scale), -1);
+    if ((GMLReal)self->imageXscale - (GMLReal)0.2 > epsilon) self->visible = true;
+    return true;
+}
+
+static bool floweyEyeShotStep(VMContext *ctx) {
+    if (!floweyStepContext(ctx)) return false;
+    Instance *self = ctx->currentCallFrame->self;
+    GMLReal size;
+    if (!isfinite(self->imageAngle) || !readNativeNumber(self, floweyEyeShotSize, &size)) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_ANGLE, "image_angle",
+                          RValue_makeReal(self->imageAngle + (GMLReal)10), -1);
+    if (size - (GMLReal)1 < -epsilon) {
+        size += (GMLReal)0.1;
+        setNativeReal(self, floweyEyeShotSize, size);
+    }
+    RValue scale = RValue_makeReal(size);
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_XSCALE, "image_xscale", scale, -1);
+    VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_YSCALE, "image_yscale", scale, -1);
+    return true;
 }
 
 static bool skipDormantVineCollision(Runner *runner, Instance *self) {
@@ -479,13 +541,55 @@ static bool floweyMouthDraw(VMContext *ctx, RValue *args, int32_t argCount, RVal
     return true;
 }
 
+static bool floweyVinePreviewDraw(VMContext *ctx, RValue *args, int32_t argCount, RValue *result) {
+    (void)args;
+    (void)argCount;
+    if (!floweySkippingDraw(ctx)) return false;
+    uint8_t *bytecode = (uint8_t *)previewSkippedWords;
+    if (!previewSkippedReady) {
+        if (ctx->ip != 0) return false;
+        memcpy(bytecode, ctx->bytecodeBase, sizeof(previewSkippedWords));
+        // Keep the colour, direction, timer and spawn logic. Skip only the
+        // two warning-line draws when their destination is held.
+        skipFloweyDrawSpan(bytecode, 0x010c, 0x01c4);
+        previewSkippedReady = true;
+    }
+    *result = VM_executeCurrentBytecode(ctx, bytecode);
+    return true;
+}
+
+static bool floweyLeftEyeDraw(VMContext *ctx, RValue *args, int32_t argCount, RValue *result) {
+    (void)args;
+    (void)argCount;
+    if (!floweySkippingDraw(ctx)) return false;
+    uint8_t *bytecode = (uint8_t *)leftEyeSkippedWords;
+    if (!leftEyeSkippedReady) {
+        if (ctx->ip != 0) return false;
+        memcpy(bytecode, ctx->bytecodeBase, sizeof(leftEyeSkippedWords));
+        // The alternate path at 0x0e0c still consumes both random draws.
+        // Preserve the attack logic and the op write at 0x11ec.
+        skipFloweyDrawSpan(bytecode, 0x0b7c, 0x0ce8);
+        skipFloweyDrawSpan(bytecode, 0x0d2c, 0x0f18);
+        skipFloweyDrawSpan(bytecode, 0x0f18, 0x11e8);
+        skipFloweyDrawSpan(bytecode, 0x1010, 0x11e8);
+        skipFloweyDrawSpan(bytecode, 0x11f4, FLOWEY_LEFT_EYE_DRAW_LENGTH);
+        leftEyeSkippedReady = true;
+    }
+    *result = VM_executeCurrentBytecode(ctx, bytecode);
+    return true;
+}
+
 static const OfNativeScript g_nativeScripts[] = {
+    { "gml_Object_obj_floweyx_lefteye_Draw_0", FLOWEY_LEFT_EYE_DRAW_LENGTH, 0x1cd174a60c76f9a2ull, floweyLeftEyeDraw },
+    { "gml_Object_obj_gigavine_preview_Draw_0", FLOWEY_PREVIEW_DRAW_LENGTH, 0xc4b29d651d8f182full, floweyVinePreviewDraw },
     { "gml_Object_obj_floweyx_flipeye_Draw_0", FLOWEY_FLIPEYE_DRAW_LENGTH, 0x2ffb1453038ba855ull, floweyFlipeyeDraw },
     { "gml_Object_obj_floweyx_mouth_Draw_0", FLOWEY_MOUTH_DRAW_LENGTH, 0xee4dc253c9466abbull, floweyMouthDraw },
 };
 #endif
 
 static const OfNativeCode g_natives[] = {
+    { "gml_Object_obj_gigavine_Step_0", 540, 0x4097e114074c9429ull, floweyVineStep },
+    { "gml_Object_obj_eyeshot_a_Step_0", 108, 0x18f12b40727b60b2ull, floweyEyeShotStep },
     { "gml_Object_obj_orangeparticle_Step_0", 392, 0x85cd9b4f052c0694ull, orangeParticleStep },
     { "gml_Object_obj_floweypipetest_Draw_0", 2292, 0xd060939f37f20db1ull, floweyPipeDraw1 },
     { "gml_Object_obj_floweypipetest_2_Draw_0", 2496, 0xc784a157fab0292eull, floweyPipeDraw2 },

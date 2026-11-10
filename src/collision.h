@@ -47,6 +47,26 @@ static inline Sprite* Collision_getSprite(DataWin* dataWin, Instance* inst) {
     return &dataWin->sprt.sprites[sprIdx];
 }
 
+// Bounds and precise masks may test the same angle several times during
+// an update. Cache the original rounded trig results, keyed by the angle.
+static inline CollisionRotation Collision_rotation(Runner* runner, GMLReal angle) {
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+    uint32_t bits;
+    memcpy(&bits, &angle, sizeof(bits));
+    uint32_t hash = (bits ^ (bits >> 16)) * 0x9e3779b9u;
+    CollisionRotation* entry = &runner->collisionRotations[hash >> 26];
+    if (entry->angle == angle && angle != 0) return *entry;
+#else
+    (void)runner;
+#endif
+    GMLReal radians = angle * M_PI / 180.0;
+    CollisionRotation rotation = {angle, GMLReal_cos(radians), GMLReal_sin(radians)};
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+    if (isfinite(angle)) *entry = rotation;
+#endif
+    return rotation;
+}
+
 // Computes the axis-aligned bounding box for an instance using its collision sprite
 static inline InstanceBBox Collision_computeBBox(Runner* runner, Instance* inst) {
     InstanceBBox ret;
@@ -66,9 +86,9 @@ static inline InstanceBBox Collision_computeBBox(Runner* runner, Instance* inst)
     GMLReal left, right, top, bottom;
     if (GMLReal_fabs(inst->imageAngle) > GML_ANGLE_EPSILON) {
         // Compute rotated AABB: transform the 4 corners of the unrotated bbox
-        GMLReal rad = inst->imageAngle * M_PI / 180.0;
-        GMLReal cs = GMLReal_cos(rad);
-        GMLReal sn = GMLReal_sin(rad);
+        CollisionRotation rotation = Collision_rotation(runner, inst->imageAngle);
+        GMLReal cs = rotation.cosine;
+        GMLReal sn = rotation.sine;
 
         // Local-space corners relative to origin, scaled
         GMLReal lx0 = inst->imageXscale * (marginL - originX);
@@ -136,7 +156,7 @@ typedef struct {
     bool rotated; // true if abs(imageAngle) > epsilon.
 } InstanceOBB;
 
-static inline InstanceOBB Collision_instanceOBB(Sprite* spr, Instance* inst) {
+static inline InstanceOBB Collision_instanceOBB(Runner* runner, Sprite* spr, Instance* inst) {
     InstanceOBB obb;
     obb.x = inst->x;
     obb.y = inst->y;
@@ -154,9 +174,9 @@ static inline InstanceOBB Collision_instanceOBB(Sprite* spr, Instance* inst) {
     if (obb.ly0 > obb.ly1) { GMLReal t = obb.ly0; obb.ly0 = obb.ly1; obb.ly1 = t; }
     obb.rotated = GMLReal_fabs(inst->imageAngle) > GML_ANGLE_EPSILON;
     if (obb.rotated) {
-        GMLReal rad = inst->imageAngle * M_PI / 180.0;
-        obb.cs = GMLReal_cos(rad);
-        obb.sn = GMLReal_sin(rad);
+        CollisionRotation rotation = Collision_rotation(runner, inst->imageAngle);
+        obb.cs = rotation.cosine;
+        obb.sn = rotation.sine;
     } else {
         obb.cs = 1.0;
         obb.sn = 0.0;
@@ -187,7 +207,7 @@ static inline bool Collision_rectOverlapsInstance(Runner* runner, Instance* inst
     if (!Collision_obbNeedsSAT(spr, inst)) return true;
 
     // OBB-vs-AABB SAT for sepMasks==2 with rotation. Native uses SeparatingAxisCollisionBox here.
-    InstanceOBB obb = Collision_instanceOBB(spr, inst);
+    InstanceOBB obb = Collision_instanceOBB(runner, spr, inst);
 
     // Project the 4 world-rect corners onto the OBB's local axes; if they don't overlap the local rect on either axis, no collision.
     GMLReal corners[4][2] = { {rx1, ry1}, {rx2, ry1}, {rx1, ry2}, {rx2, ry2} };
@@ -215,7 +235,7 @@ static inline bool Collision_pointInsideInstanceBox(Runner* runner, Instance* in
     Sprite* spr = Collision_getSprite(runner->dataWin, inst);
     if (!Collision_obbNeedsSAT(spr, inst)) return true;
 
-    InstanceOBB obb = Collision_instanceOBB(spr, inst);
+    InstanceOBB obb = Collision_instanceOBB(runner, spr, inst);
     GMLReal lx, ly;
     Collision_obbWorldToLocal(&obb, px, py, &lx, &ly);
     return lx >= obb.lx0 && obb.lx1 > lx && ly >= obb.ly0 && obb.ly1 > ly;
@@ -245,7 +265,7 @@ static inline bool Collision_circleOverlapsInstance(Runner* runner, Instance* in
     if (qx1 >= bbox.right || bbox.left >= qx2 || qy1 >= bbox.bottom || bbox.top >= qy2) return false;
 
     // Transform circle center into OBB local frame; clamp to local rect; squared distance.
-    InstanceOBB obb = Collision_instanceOBB(spr, inst);
+    InstanceOBB obb = Collision_instanceOBB(runner, spr, inst);
     GMLReal lx, ly;
     Collision_obbWorldToLocal(&obb, cx, cy, &lx, &ly);
     GMLReal closestX = lx;
@@ -311,7 +331,7 @@ static inline bool Collision_ellipseOverlapsInstance(Runner* runner, Instance* i
     Sprite* spr = Collision_getSprite(runner->dataWin, inst);
     if (!Collision_obbNeedsSAT(spr, inst)) return true;
 
-    InstanceOBB obb = Collision_instanceOBB(spr, inst);
+    InstanceOBB obb = Collision_instanceOBB(runner, spr, inst);
     GMLReal lcx, lcy;
     Collision_obbWorldToLocal(&obb, cx, cy, &lcx, &lcy);
 
@@ -390,7 +410,7 @@ static inline bool Collision_lineOverlapsInstance(Runner* runner, Instance* inst
     }
 
     // For rotated OBB: transform line endpoints into local frame and clip against local rect.
-    InstanceOBB obb = Collision_instanceOBB(spr, inst);
+    InstanceOBB obb = Collision_instanceOBB(runner, spr, inst);
     GMLReal lx1, ly1, lx2, ly2;
     Collision_obbWorldToLocal(&obb, x1, y1, &lx1, &ly1);
     Collision_obbWorldToLocal(&obb, x2, y2, &lx2, &ly2);
@@ -466,7 +486,7 @@ typedef struct {
     bool transformReady, validScale, rotated, maskBoundsReady, maskReady;
 } CollisionPairPoint;
 
-static inline bool Collision_pairPointInInstance(Sprite* spr, Instance* inst, bool precise,
+static inline bool Collision_pairPointInInstance(Runner* runner, Sprite* spr, Instance* inst, bool precise,
                                                  CollisionPairPoint* prepared, GMLReal px, GMLReal py) {
     if (!prepared->transformReady) {
         prepared->transformReady = true;
@@ -476,9 +496,9 @@ static inline bool Collision_pairPointInInstance(Sprite* spr, Instance* inst, bo
         if (prepared->validScale) {
             prepared->rotated = GMLReal_fabs(inst->imageAngle) > GML_ANGLE_EPSILON;
             if (prepared->rotated) {
-                GMLReal rad = inst->imageAngle * M_PI / 180.0;
-                prepared->cs = GMLReal_cos(rad);
-                prepared->sn = GMLReal_sin(rad);
+                CollisionRotation rotation = Collision_rotation(runner, inst->imageAngle);
+                prepared->cs = rotation.cosine;
+                prepared->sn = rotation.sine;
             }
             prepared->originX = (GMLReal) spr->originX;
             prepared->originY = (GMLReal) spr->originY;
@@ -557,8 +577,8 @@ static inline bool Collision_instancesOverlapPrecise(Runner* runner, Instance* a
         bool needSatB = Collision_obbNeedsSAT(sprB, b);
         if (!needSatA && !needSatB) return true;
 
-        InstanceOBB obbA = Collision_instanceOBB(sprA, a);
-        InstanceOBB obbB = Collision_instanceOBB(sprB, b);
+        InstanceOBB obbA = Collision_instanceOBB(runner, sprA, a);
+        InstanceOBB obbB = Collision_instanceOBB(runner, sprB, b);
 
         // Compute the 4 world corners of each OBB. Indices: 0=(lx0,ly0), 1=(lx1,ly0), 2=(lx0,ly1), 3=(lx1,ly1).
         GMLReal ax[4], ay[4], bx[4], by[4];
@@ -624,8 +644,8 @@ static inline bool Collision_instancesOverlapPrecise(Runner* runner, Instance* a
             GMLReal wpx = (GMLReal) px + sampleOffset;
             GMLReal wpy = (GMLReal) py + sampleOffset;
 
-            if (!Collision_pairPointInInstance(sprA, a, preciseA, &preparedA, wpx, wpy)) continue;
-            if (!Collision_pairPointInInstance(sprB, b, preciseB, &preparedB, wpx, wpy)) continue;
+            if (!Collision_pairPointInInstance(runner, sprA, a, preciseA, &preparedA, wpx, wpy)) continue;
+            if (!Collision_pairPointInInstance(runner, sprB, b, preciseB, &preparedB, wpx, wpy)) continue;
             return true;
         }
     }
