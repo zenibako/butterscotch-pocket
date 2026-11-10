@@ -8,8 +8,10 @@
 
 #include <string.h>
 
+#include "binary_utils.h"
 #include "log.h"
 #include "of_state_requests.h"
+#include "op.h"
 #include "stb_ds.h"
 #include "utils.h"
 #include "vm_builtins.h"
@@ -92,10 +94,19 @@ enum {
 static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
 
+#ifndef ENABLE_VM_TRACING
+enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832 };
+static uint32_t flipeyeSkippedWords[FLOWEY_FLIPEYE_DRAW_LENGTH / 4];
+static bool flipeyeSkippedReady;
+#endif
+
 static void forgetNativeVm(void) {
     particleVarsResolved = false;
     pipeVarsResolved = false;
     backdropVarsResolved = false;
+#ifndef ENABLE_VM_TRACING
+    flipeyeSkippedReady = false;
+#endif
 }
 
 static void setNativeReal(Instance *self, int32_t id, GMLReal number) {
@@ -413,6 +424,38 @@ static bool floweyBackdropVines(VMContext *ctx) {
     return true;
 }
 
+#ifndef ENABLE_VM_TRACING
+static bool floweyFlipeyeDraw(VMContext *ctx, RValue *args, int32_t argCount, RValue *result) {
+    (void)args;
+    (void)argCount;
+    Runner *runner = ctx->runner;
+    if (runner == NULL || !SWRenderer_isSkippingScreen(runner->renderer) || !ofPlatformSpeedMode() ||
+        runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
+        strcmp(runner->currentRoom->name, "room_floweyx") != 0 ||
+        ctx->dataWin->gen8.wadVersion != 16 || ctx->dataWin->gen8.gameID != 864738521u ||
+        ctx->currentCallFrame->eventType != EVENT_DRAW || ctx->currentCallFrame->eventSubtype != DRAW_NORMAL)
+        return false;
+
+    uint8_t *bytecode = (uint8_t *)flipeyeSkippedWords;
+    if (!flipeyeSkippedReady) {
+        if (ctx->ip != 0) return false;
+        memcpy(bytecode, ctx->bytecodeBase, sizeof(flipeyeSkippedWords));
+        /* Both blocks only compute arguments and draw eye sprites. Keep
+         * the original update/spawn logic and the op = 126 write between
+         * the blocks. Linked operands keep their original byte offsets. */
+        BinaryUtils_writeUint32(bytecode + 0x0c38, ((uint32_t)OP_B << 24) | ((0x151c - 0x0c38) / 4));
+        BinaryUtils_writeUint32(bytecode + 0x1528, ((uint32_t)OP_B << 24) | ((FLOWEY_FLIPEYE_DRAW_LENGTH - 0x1528) / 4));
+        flipeyeSkippedReady = true;
+    }
+    *result = VM_executeCurrentBytecode(ctx, bytecode);
+    return true;
+}
+
+static const OfNativeScript g_nativeScripts[] = {
+    { "gml_Object_obj_floweyx_flipeye_Draw_0", FLOWEY_FLIPEYE_DRAW_LENGTH, 0x2ffb1453038ba855ull, floweyFlipeyeDraw },
+};
+#endif
+
 static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_orangeparticle_Step_0", 392, 0x85cd9b4f052c0694ull, orangeParticleStep },
     { "gml_Object_obj_floweypipetest_Draw_0", 2292, 0xd060939f37f20db1ull, floweyPipeDraw1 },
@@ -694,6 +737,10 @@ const OfGame ofGame = {
     .installPrompts = installPrompts,
     .natives = g_natives,
     .nativeCount = sizeof(g_natives) / sizeof(g_natives[0]),
+#ifndef ENABLE_VM_TRACING
+    .nativeScripts = g_nativeScripts,
+    .nativeScriptCount = sizeof(g_nativeScripts) / sizeof(g_nativeScripts[0]),
+#endif
     .nativesForgetVm = forgetNativeVm,
     .installCollisionFilter = installVineCollisionFilter,
     .battleUiInstall = battleUiInstall,

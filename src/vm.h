@@ -330,6 +330,9 @@ uint64_t VM_codeHash(VMContext* ctx, const char* codeName, uint32_t* length);
 // VM_codeHash). Returns whether it was installed.
 bool VM_setNativeCode(VMContext* ctx, const char* codeName, uint32_t length, uint64_t hash, VMNativeCode native);
 bool VM_setNativeScript(VMContext* ctx, const char* codeName, uint32_t length, uint64_t hash, VMNativeScript native);
+// A native script may run verified, already-linked bytecode in the current
+// frame. The replacement must have the same offset, length and call semantics.
+RValue VM_executeCurrentBytecode(VMContext* ctx, uint8_t* replacement);
 
 // Writes to the VMContext's scriptArgs, resizing the underlying array if needed
 // The "val" will be RValue_makeIndependent(val), it won't be freed

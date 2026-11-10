@@ -2858,7 +2858,6 @@ static RValue executeBytecodeInstructions(VMContext* ctx, CodeEntry* code) {
     // codeLength and bytecodeBase are invariant for the lifetime of this executeBytecodeInstructions call, so let's hoist them to avoid the compiler emitting code to
     // reload the values at the end of every iteration.
     const uint32_t codeLength = code->length;
-    ctx->bytecodeBase = ctx->dataWin->bytecodeBuffer + (code->bytecodeAbsoluteOffset - ctx->dataWin->bytecodeBufferBase);
     const uint8_t* const bytecodeBase = ctx->bytecodeBase;
 #if defined(ENABLE_VM_GML_PROFILER) && defined(OF_FAST_LOOP)
     // Pocket applies Script times toggles between frames. Its profiler stays alive
@@ -3776,6 +3775,12 @@ bool VM_setNativeScript(VMContext* ctx, const char* codeName, uint32_t length, u
     if (ctx->nativeScript == nullptr) ctx->nativeScript = (VMNativeScript*) safeCalloc(ctx->dataWin->code.count, sizeof(VMNativeScript));
     ctx->nativeScript[findCodeIndexByName(ctx, codeName)] = native;
     return true;
+}
+
+RValue VM_executeCurrentBytecode(VMContext* ctx, uint8_t* replacement) {
+    CodeEntry* code = &ctx->dataWin->code.entries[ctx->currentCallFrame->codeIndex];
+    ctx->bytecodeBase = replacement;
+    return executeBytecodeInstructions(ctx, code);
 }
 
 RValue VM_executeCode(VMContext* ctx, int32_t codeIndex, Instance* selfInstance, Instance* otherInstance, int32_t eventObjectIndex, int32_t eventType, int32_t eventSubtype, RValue* args, int32_t argCount) {
