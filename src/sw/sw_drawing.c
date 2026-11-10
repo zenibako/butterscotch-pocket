@@ -2127,7 +2127,8 @@ static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation 
 // float sampler at texel boundaries to retain its edge and colour rounding.
 static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
                                   const uintpixel_t* src, int pitch, int dx, int dy, int dw,
-                                  float pxa, float pya, int minX, int minY, int maxX, int maxY)
+                                  float pxa, float pya, int minX, int minY, int maxX, int maxY,
+                                  SWRotatedCapture* capture)
 {
     const float c = rotation.cosine, s = rotation.sine;
     const float xScale = (float) SWR_VINE_W / dw, yScale = (float) SWR_VINE_H / SWR_GROWTH_HEIGHT;
@@ -2161,8 +2162,16 @@ static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows
         previousY = y;
         previousX = from;
         int32_t u = startU, v = startV;
-        uintpixel_t* dst = swr->fb + y * swr->fbPitch + from;
-        swrDirtyRow(swr, y, from, to);
+        uintpixel_t* dst;
+        if (capture != NULL) {
+            int row = y - minY;
+            capture->bounds[2 * row] = (uint16_t) (from - minX);
+            capture->bounds[2 * row + 1] = (uint16_t) (to - minX);
+            dst = capture->pixels + row * capture->width + from - minX;
+        } else {
+            dst = swr->fb + y * swr->fbPitch + from;
+            swrDirtyRow(swr, y, from, to);
+        }
         for (int x = from; x < to; ++x, ++dst, u += acrossU, v += acrossV) {
             int tx, ty;
             if ((uint32_t) ((u & 0xffff) - texelBand) < 65536 - 2 * texelBand &&
@@ -2258,13 +2267,6 @@ static void swrDrawSpriteRotatedInternal(
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
     const SWVineGrowthRows* growthRows = floweyGrowth ? swrVineGrowthRows(texture, rotation, minYc - dy, maxYc - dy) : NULL;
     cachedRows = growthRows != NULL;
-    if (cachedRows && capture == NULL && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH && dh == SWR_GROWTH_HEIGHT &&
-        sw == SWR_VINE_W && sh == SWR_VINE_H && sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
-        !flipX && !flipY && swr->blendMode == bm_normal && (tintColor & 0x7fff) == 0x7fff && alpha > 253) {
-        swrDrawGrowingVineRows(swr, growthRows, rotation, texture->buffer + sy * texture->width + sx,
-                              texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc);
-        return;
-    }
     int growthLeft = cachedRows ? swrFloor(pxa) - 1 : 0;
 #else
     (void) floweyGrowth;
@@ -2279,6 +2281,16 @@ static void swrDrawSpriteRotatedInternal(
         *capture = (SWRotatedCapture) { pixels, (uint16_t*) (pixels + count), minXc, minYc, width, height };
     }
     
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    if (cachedRows && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH && dh == SWR_GROWTH_HEIGHT &&
+        sw == SWR_VINE_W && sh == SWR_VINE_H && sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        !flipX && !flipY && swr->blendMode == bm_normal && (tintColor & 0x7fff) == 0x7fff && alpha > 253) {
+        swrDrawGrowingVineRows(swr, growthRows, rotation, texture->buffer + sy * texture->width + sx,
+                              texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, capture);
+        return;
+    }
+#endif
+
     int sox = flipX ? sw - 1 : 0;
     int soy = flipY ? sh - 1 : 0;
     int six = flipX ? -1 : 1;
@@ -3868,6 +3880,23 @@ typedef struct SWRotatedRasterCache {
 
 static size_t swrRotatedRasterBytes;
 
+static bool swrFloweyVineAnchor(const SWRenderer* swr, SWRasterKey* key, int x, int y)
+{
+    enum { margin = 4 };
+    if (key->dw != (SWR_VINE_W + 1) / 2 || key->dh != SWR_GROWTH_HEIGHT || key->px != 6.5f || key->py != 5.5f ||
+        swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->portX != 0 || swr->portY != 0 ||
+        swr->portW != 320 || swr->portH != 240 || swr->viewX < -2 * margin || swr->viewX > 2 * margin ||
+        swr->viewY < -2 * margin || swr->viewY > 2 * margin) return false;
+    // Half-grid pivots preserve the sampler's offsets under integer shifts.
+    // Cover the pixels a shake can expose, then clip at the actual viewport on replay.
+    key->screenX = x + swrFloor(swr->viewX * 0.5f);
+    key->screenY = y + swrFloor(swr->viewY * 0.5f);
+    key->portX = key->portY = -margin;
+    key->portW = 320 + 2 * margin;
+    key->portH = 240 + 2 * margin;
+    return true;
+}
+
 static void swrDropRotatedRaster(SWRotatedRasterCache* cache)
 {
     SWRotatedRaster* entry = cache->entries[cache->first];
@@ -3880,14 +3909,16 @@ static void swrDropRotatedRaster(SWRotatedRasterCache* cache)
 
 static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCache* cache,
                                               SWTexture* texture, const SWRasterKey* key,
-                                              int radius, bool stationary, int slots, size_t limit)
+                                              int radius, bool stationary, bool speedVine, int slots, size_t limit)
 {
     SWRotatedCapture raster = {0};
-    if (stationary) {
+    if (stationary && key->portX >= 0) {
         // Keep the real viewport and coordinates for the long vine's sampler.
         swrDrawSpriteRotatedInternal(&swr->base, key->screenX, key->screenY, key->dw, key->dh, texture,
                                      key->sx, key->sy, key->sw, key->sh,
-                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, false);
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster,
+                                     speedVine && key->dw == (SWR_VINE_W + 1) / 2 && key->dh == SWR_GROWTH_HEIGHT &&
+                                     key->py == 5.5f);
         if (raster.pixels == NULL) return NULL;
         raster.x -= key->screenX;
         raster.y -= key->screenY;
@@ -3898,9 +3929,20 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
         SWRenderer scratch = {0};
         scratch.portW = scratch.maxX = scratch.portH = scratch.maxY = side;
         scratch.blendMode = bm_normal;
+        if (stationary) {
+            // The negative clip starts mark a vine captured with a shake margin.
+            x = key->screenX;
+            y = key->screenY;
+            scratch.portX = key->portX;
+            scratch.portY = key->portY;
+            scratch.portW = key->portW;
+            scratch.portH = key->portH;
+            scratch.maxX = scratch.portX + scratch.portW;
+            scratch.maxY = scratch.portY + scratch.portH;
+        }
         swrDrawSpriteRotatedInternal(&scratch.base, x, y, key->dw, key->dh, texture,
                                      key->sx, key->sy, key->sw, key->sh,
-                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, false);
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, stationary);
         if (raster.pixels == NULL) return NULL;
         raster.x -= x;
         raster.y -= y;
@@ -4001,7 +4043,7 @@ static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, in
         cache->builds++;
         int slots = speedVine ? SWR_SPEED_VINE_SLOTS : stationary ? SWR_VINE_SLOTS : SWR_RASTER_SLOTS;
         size_t limit = stationary ? SWR_VINE_BYTES : eye ? SWR_EYE_BYTES : SWR_RASTER_BYTES;
-        entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, slots, limit);
+        entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, speedVine, slots, limit);
         if (entry == NULL) return SWR_RASTER_OTHER;
         path = SWR_RASTER_BUILT;
     }
@@ -4548,14 +4590,14 @@ void swrDrawSpriteRotated(
         swr->blendMode == bm_normal && opacity > 253) {
         SWRasterKey key = { .sx = sx, .sy = sy, .sw = sw, .sh = sh, .dw = w, .dh = h, .angle = angleDeg,
                             .px = pivotX, .py = pivotY, .tint = packed };
-        if (vine) {
+        bool speedVine = vine && floweyVine;
+        if (vine && !(speedVine && swrFloweyVineAnchor(swr, &key, x, y))) {
             key.screenX = x; key.screenY = y;
             key.portX = swr->portX; key.portY = swr->portY;
             key.portW = swr->portW; key.portH = swr->portH;
         }
         // The fully extended Speed vine briefly changes tint without changing
         // its texture samples. Store them once and tint the covered pixels.
-        bool speedVine = vine && floweyVine;
         if (speedVine) key.tint = swrConvertPixel(0xffffff);
         SWRasterPath path = swrDrawRotatedRaster(swr, texture, x, y, &key, vine, speedVine,
                                                speedVine ? packed : swrConvertPixel(0xffffff));
@@ -4565,7 +4607,7 @@ void swrDrawSpriteRotated(
         if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
     }
     floweyGrowth = floweyVine && texture->immutable && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
-                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH && w != (SWR_VINE_W + 1) / 2 &&
+                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH &&
                    h == SWR_GROWTH_HEIGHT && pivotY == 5.5f &&
                    pivotX >= 0.0f && pivotX <= w && x >= -4096 && x <= 4096 && y >= -4096 && y <= 4096;
 #else

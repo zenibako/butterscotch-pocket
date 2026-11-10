@@ -395,6 +395,53 @@ static void checkStationaryVine(bool speedVine)
     if (texture.stationaryRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
 }
 
+static void checkShakenVine(void)
+{
+    enum { WIDTH = 320, HEIGHT = 240, SRC_W = 513, SRC_H = 35 };
+    uintpixel_t* source = malloc(SRC_W * SRC_H * sizeof(*source));
+    uintpixel_t* actual = malloc(WIDTH * HEIGHT * sizeof(*actual));
+    uintpixel_t* expected = malloc(WIDTH * HEIGHT * sizeof(*expected));
+    if (source == NULL || actual == NULL || expected == NULL) exit(1);
+    for (int i = 0; i < SRC_W * SRC_H; ++i)
+        source[i] = i % 9 < 3 ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
+    SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
+    SWRenderer swr = {0};
+    swr.fbPitch = WIDTH;
+    swr.scaleX = swr.scaleY = 0.5f;
+    swr.blendMode = bm_normal;
+    swr.portW = swr.maxX = WIDTH;
+    swr.portH = swr.maxY = HEIGHT;
+    const int offsets[] = { 0, 4, -4, 3, -3, 8, -8, 0 };
+    const uint32_t tints[] = {0xffffff, 0xffa0a0, 0xffcfcf, 0xffeaea};
+    for (unsigned frame = 0; frame < sizeof(offsets) / sizeof(offsets[0]); ++frame) {
+        swr.frameCounter = frame;
+        swr.viewX = offsets[frame];
+        swr.viewY = offsets[sizeof(offsets) / sizeof(offsets[0]) - 1 - frame];
+        for (int i = 0; i < WIDTH * HEIGHT; ++i)
+            actual[i] = expected[i] = (uintpixel_t) (0x8000 | ((i * 7919) & 0x7fff));
+        const uint32_t color = tints[frame % 4];
+        const float angle = 263.271f;
+        swr.fb = swr.mainFb = actual;
+        swrDrawSpriteRotated(&swr.base, 17.0f, 181.0f, 511, 33, &texture, 1, 1, 511, 33,
+                             color, 1.0f, angle, 13.0f, 11.0f, true);
+        swr.fb = expected;
+        swrDrawSpriteRotatedInternal(&swr.base, swrFloor((17.0f - swr.viewX) * 0.5f),
+                                     swrFloor((181.0f - swr.viewY) * 0.5f), 256, 17, &texture, 1, 1, 511, 33,
+                                     swrConvertPixel(color), 256, angle, 6.5f, 5.5f, NULL, false);
+        if (memcmp(actual, expected, WIDTH * HEIGHT * sizeof(*actual)) ||
+            texture.stationaryRasters == NULL || texture.stationaryRasters->count != 1) {
+            fprintf(stderr, "FAIL: shaken vine output or cache reuse on frame %u\n", frame);
+            exit(1);
+        }
+        checks += WIDTH * HEIGHT;
+    }
+    swrFreeRotatedRasters(&texture);
+    if (texture.stationaryRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
+    free(expected);
+    free(actual);
+    free(source);
+}
+
 static void checkGrowingVine(void)
 {
     enum { WIDTH = 112, HEIGHT = 96, SRC_W = 511, SRC_H = 33 };
@@ -572,6 +619,7 @@ int main(int argc, char** argv)
     checkTranslatedRotation(40, 40, true);
     checkStationaryVine(false);
     checkStationaryVine(true);
+    checkShakenVine();
     checkGrowingVine();
     checkHalfTint();
     checkDoubledSprite();
