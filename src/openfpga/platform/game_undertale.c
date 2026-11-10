@@ -91,7 +91,7 @@ enum {
     BACKDROP_PHASE, BACKDROP_FROZEN, BACKDROP_I, BACKDROP_LAYER_PHASE, BACKDROP_BLEND,
     BACKDROP_GROWTH, BACKDROP_GROWTH2, BACKDROP_GROWTH3,
     BACKDROP_MSIN, BACKDROP_MSIN2, BACKDROP_MSIN3, BACKDROP_YSIN, BACKDROP_YSIN2, BACKDROP_YSIN3,
-    BACKDROP_SSX, BACKDROP_SSX2, BACKDROP_SSX3, BACKDROP_SSY, BACKDROP_FIELD_COUNT
+    BACKDROP_SSX, BACKDROP_SSX2, BACKDROP_SSX3, BACKDROP_SSY, BACKDROP_DESPERATE, BACKDROP_ARM_STATE, BACKDROP_ARM_MIRROR, BACKDROP_FIELD_COUNT
 };
 static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
@@ -385,7 +385,7 @@ static Instance *floweyBackdropInstance(VMContext *ctx) {
     if (!backdropVarsResolved) {
         static const char *const names[BACKDROP_FIELD_COUNT] = {
             "siner", "frozen", "i", "siner2", "blend3", "growth", "growth2", "growth3",
-            "msin", "msin2", "msin3", "ysin", "ysin2", "ysin3", "ssx", "ssx2", "ssx3", "ssy"
+            "msin", "msin2", "msin3", "ysin", "ysin2", "ysin3", "ssx", "ssx2", "ssx3", "ssy", "desperate", "acon", "xr"
         };
         for (int i = 0; i < BACKDROP_FIELD_COUNT; i++) backdropVars[i] = VM_getOrAllocateVarID(ctx, names[i]);
         backdropVarsResolved = true;
@@ -567,6 +567,85 @@ static bool floweySideStalk(VMContext* ctx) {
     return true;
 }
 
+// Both variants of the idle arm have the same draw order and writes. Leave
+// active arm reaches and their attack spawns in the original bytecode.
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweyIdleArm(VMContext* ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance* self = floweyBackdropInstance(ctx);
+    if (!floweySceneryPose(self)) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    GMLReal state, frozen, phase, desperate;
+    if (!(epsilon >= 0 && epsilon < (GMLReal)0.5) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_ARM_STATE], &state) || GMLReal_fabs(state) > epsilon ||
+        !readNativeNumber(self, backdropVars[BACKDROP_FROZEN], &frozen) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_PHASE], &phase) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_DESPERATE], &desperate)) return false;
+    bool faster = GMLReal_fabs(desperate - (GMLReal)1) <= epsilon;
+    if (!faster && GMLReal_fabs(desperate) > epsilon) return false;
+
+    if (GMLReal_fabs(frozen) <= epsilon) {
+        phase += faster ? (GMLReal)1.2 : (GMLReal)0.8;
+        setNativeReal(self, backdropVars[BACKDROP_PHASE], phase);
+    }
+    GMLReal scale = self->imageXscale;
+    GMLReal growth = (GMLReal)1 + GMLReal_cos(phase / (GMLReal)6) * (GMLReal)0.03;
+    GMLReal ssx = backdropSin(phase / (GMLReal)3) * (faster ? (GMLReal)5 : (GMLReal)4) * scale;
+    GMLReal ssy = GMLReal_cos(phase / (GMLReal)3) * (faster ? (GMLReal)8 : (GMLReal)4);
+    setBackdropVineGrowth(self, BACKDROP_GROWTH, growth);
+    setNativeReal(self, backdropVars[BACKDROP_SSX], ssx);
+    setNativeReal(self, backdropVars[BACKDROP_SSY], ssy);
+    GMLReal y = (GMLReal)self->y + ssy;
+    if (faster) y += (GMLReal)2;
+    uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
+    floweyScenerySprite(ctx->runner->renderer, self, self->spriteIndex,
+                       (GMLReal)self->x - ssx, y, scale, growth, tint);
+    setNativeReal(self, backdropVars[BACKDROP_ARM_MIRROR], -scale);
+    return true;
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool floweyFleshFace(VMContext* ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Instance* self = floweyBackdropInstance(ctx);
+    if (!floweySceneryPose(self)) return false;
+    GMLReal epsilon = ctx->runner->mathEpsilon;
+    GMLReal phase, frozen, desperate;
+    if (!(epsilon >= 0 && epsilon < (GMLReal)0.5) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_FROZEN], &frozen) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_PHASE], &phase) ||
+        !readNativeNumber(self, backdropVars[BACKDROP_DESPERATE], &desperate)) return false;
+    bool faster = GMLReal_fabs(desperate - (GMLReal)1) <= epsilon;
+    if (!faster && GMLReal_fabs(desperate) > epsilon) return false;
+    if (phase < (GMLReal)INT32_MIN || phase > (GMLReal)INT32_MAX) return false;
+
+    bool advancing = GMLReal_fabs(frozen) <= epsilon;
+    if (advancing) phase += (GMLReal)1.2;
+    if (!faster) phase -= (GMLReal)0.2;
+    if (advancing || !faster) setNativeReal(self, backdropVars[BACKDROP_PHASE], phase);
+
+    Renderer* renderer = ctx->runner->renderer;
+    if (renderer == NULL || SWRenderer_isSkippingScreen(renderer)) return true;
+    GMLReal sway = GMLReal_sin(phase / (GMLReal)2);
+    GMLReal x = self->x, y = self->y;
+    uint32_t tint = RValue_toColour(RValue_makeReal((GMLReal)self->imageBlend));
+    floweyScenerySprite(renderer, self, self->spriteIndex, x, y + sway * (GMLReal)3, 1, 1, tint);
+    int frame = (int)(phase / (GMLReal)8);
+    if (frame < 0) frame = (int)self->imageIndex;
+    GMLReal noseY = (y + (faster ? (GMLReal)14 : (GMLReal)12)) +
+                    sway * (faster ? (GMLReal)7 : (GMLReal)6);
+    Renderer_drawSpriteExt(renderer, 2260, frame, x + (GMLReal)32, noseY, 1, 1, 0, tint, 1);
+    return true;
+}
+
 #ifndef ENABLE_VM_TRACING
 static bool floweySkippingDraw(const VMContext *ctx) {
     const Runner *runner = ctx->runner;
@@ -673,6 +752,8 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_floweypipetest_2_Draw_0", 2496, 0xc784a157fab0292eull, floweyPipeDraw2 },
     { "gml_Object_obj_floweypipetest_3_Draw_0", 2148, 0x543e2f97612cf23cull, floweyPipeDraw3 },
     { "gml_Object_obj_flowey_bgdraw_Draw_0", 272, 0x746a6e5ff0305b36ull, floweyBackgroundMotion },
+    { "gml_Object_obj_floweyarm_Draw_0", 1824, 0x92efb78232475f92ull, floweyIdleArm },
+    { "gml_Object_obj_fleshface_Draw_0", 676, 0x8f63731ba96dfb2bull, floweyFleshFace },
     { "gml_Object_obj_sidestalk_Draw_0", 376, 0xe8f07e7abe5af547ull, floweySideStalk },
     { "gml_Object_obj_bgpipe_Draw_0", 964, 0x12bf9b0542ba714cull, floweyBackdropPipes },
     { "gml_Object_obj_vines_flowey_Draw_0", 704, 0xec70756e7a99f41aull, floweyBackdropVines },
