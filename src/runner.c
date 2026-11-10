@@ -847,11 +847,81 @@ static void refreshDrawableDepths(Runner* runner, Drawable* drawables, int32_t c
 // Rebuilds runner->cachedDrawables when invalidated. Two-tier strategy:
 //   structureDirty - the SET of entries changed (instance/layer create or destroy, room change). Drop the cache and re-add every instance/tile/runtime-layer, then qsort.
 //   sortDirty only - the entries are the same but .depth values may have shifted. Refresh depths from the live sources and only qsort if the order actually broke.
+// In a legacy room without tiles or automatic particle systems, every
+// drawable is an unlayered instance. With a small depth range, build the
+// descending-depth groups directly and sort only the IDs within each group.
+static bool rebuildLegacyInstanceDrawables(Runner* runner) {
+    enum { depthSlots = 128, maxInstances = 256, maxShifts = 256 };
+    int32_t count = (int32_t)arrlen(runner->instances);
+    if (count < 8 || count > maxInstances) return false;
+    repeat(arrlen(runner->particleSystemPool), i) {
+        const ParticleSystem* system = &runner->particleSystemPool[i];
+        if (system->used && system->automaticDraw) return false;
+    }
+
+    int32_t highest = runner->instances[0]->depth, lowest = highest;
+    for (int32_t i = 1; i < count; ++i) {
+        int32_t depth = runner->instances[i]->depth;
+        if (depth > highest) highest = depth;
+        if (depth < lowest) lowest = depth;
+    }
+    uint32_t range = (uint32_t)highest - (uint32_t)lowest;
+    if (range >= depthSlots) return false;
+
+    uint16_t cursor[depthSlots] = {0};
+    repeat(count, i) ++cursor[highest - runner->instances[i]->depth];
+    uint16_t next = 0;
+    for (uint32_t group = 0; group <= range; ++group) {
+        uint16_t size = cursor[group];
+        cursor[group] = next;
+        next += size;
+    }
+
+    arrsetlen(runner->cachedDrawables, count);
+    Drawable* drawables = runner->cachedDrawables;
+    repeat(count, i) {
+        Instance* inst = runner->instances[i];
+        uint16_t slot = cursor[highest - inst->depth]++;
+        drawables[slot] = (Drawable){ .type = DRAWABLE_INSTANCE, .depth = inst->depth, .instance = inst };
+    }
+
+    // Spawned IDs usually arrive in order. Persistent instances can arrive
+    // out of order, so enforce the original signed ID tie break as well.
+    int shifts = 0, first = 0;
+    for (uint32_t group = 0; group <= range; ++group) {
+        int end = cursor[group];
+        for (int i = first + 1; i < end; ++i) {
+            Drawable current = drawables[i];
+            int32_t id = (int32_t)current.instance->instanceId;
+            int j = i;
+            while (j > first && (int32_t)drawables[j - 1].instance->instanceId > id) {
+                drawables[j] = drawables[j - 1];
+                --j;
+                if (++shifts == maxShifts) {
+                    drawables[j] = current;
+                    qsort(drawables, count, sizeof(*drawables), compareDrawables);
+                    return true;
+                }
+            }
+            drawables[j] = current;
+        }
+        first = end;
+    }
+    return true;
+}
+
 static void rebuildDrawableCacheIfDirty(Runner* runner) {
     if (runner->drawableListStructureDirty) {
         arrsetlen(runner->cachedDrawables, 0);
         Room* room = runner->currentRoom;
         if (room == nullptr) {
+            runner->drawableListStructureDirty = false;
+            runner->drawableListSortDirty = false;
+            return;
+        }
+
+        bool legacy = !DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0);
+        if (legacy && room->tileCount == 0 && rebuildLegacyInstanceDrawables(runner)) {
             runner->drawableListStructureDirty = false;
             runner->drawableListSortDirty = false;
             return;
@@ -865,11 +935,11 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
             d.type = DRAWABLE_INSTANCE;
             d.depth = inst->depth;
             d.instance = inst;
-            refreshDrawableLayerOrder(runner, &d);
+            if (!legacy) refreshDrawableLayerOrder(runner, &d);
             arrput(runner->cachedDrawables, d);
         }
 
-        if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) {
+        if (legacy) {
             repeat(room->tileCount, i) {
                 RoomTile* tile = &room->tiles[i];
                 Drawable d;
