@@ -323,7 +323,7 @@ static void checkTranslatedRotation(int sourceWidth, int sourceHeight, bool eye)
                                  color, 1.0f, 37.0f, px, py, false);
             swr.fb = expected;
             swrDrawSpriteRotatedInternal(&swr.base, x, y, width, h, &texture, 1, 1, sourceWidth, sourceHeight,
-                                         swrConvertPixel(color), 256, 37.0f, px, py, NULL);
+                                         swrConvertPixel(color), 256, 37.0f, px, py, NULL, false);
             SWRotatedRasterCache* cache = eye ? texture.eyeRasters : texture.rotatedRasters;
             if (memcmp(actual, expected, sizeof(actual)) || cache == NULL || cache->count != flip + 1) {
                 fprintf(stderr, "FAIL: translated raster flip=%d placement=%u\n", flip, i);
@@ -371,7 +371,7 @@ static void checkStationaryVine(bool speedVine)
                              color, 1.0f, 37.2f, 6.5f, 5.5f, speedVine);
         swr.fb = expected;
         swrDrawSpriteRotatedInternal(&swr.base, -10, 70, 256, 17, &texture, 1, 1, 511, 33,
-                                     swrConvertPixel(color), 256, 37.2f, 6.5f, 5.5f, NULL);
+                                     swrConvertPixel(color), 256, 37.2f, 6.5f, 5.5f, NULL, false);
         if (memcmp(actual, expected, sizeof(actual)) || texture.stationaryRasters == NULL ||
             texture.stationaryRasters->count != 1 + frame / 2) {
             fprintf(stderr, "FAIL: stationary vine speed=%d frame=%d\n", speedVine, frame);
@@ -381,6 +381,48 @@ static void checkStationaryVine(bool speedVine)
     }
     swrFreeRotatedRasters(&texture);
     if (texture.stationaryRasters != NULL || swrRotatedRasterBytes != 0) exit(1);
+}
+
+static void checkGrowingVine(void)
+{
+    enum { WIDTH = 112, HEIGHT = 96, SRC_W = 511, SRC_H = 33 };
+    uintpixel_t source[SRC_W * SRC_H], actual[WIDTH * HEIGHT], expected[WIDTH * HEIGHT];
+    for (int i = 0; i < SRC_W * SRC_H; ++i)
+        source[i] = i % 9 < 3 ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
+    SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
+    SWRenderer swr = {0};
+    swr.fbPitch = WIDTH;
+    swr.scaleX = swr.scaleY = 0.5f;
+    swr.portX = 2;
+    swr.portY = 3;
+    swr.maxX = WIDTH;
+    swr.maxY = HEIGHT;
+    swr.portW = WIDTH - swr.portX;
+    swr.portH = HEIGHT - swr.portY;
+    swr.blendMode = bm_normal;
+    const int widths[] = {66, 169, 250, 271};
+    const float angles[] = {49.0f, 83.6f, 90.0f, 278.4f, 315.0f};
+    for (unsigned a = 0; a < sizeof(angles) / sizeof(angles[0]); ++a) {
+        for (unsigned i = 0; i < sizeof(widths) / sizeof(widths[0]); ++i) {
+            int w = widths[i], x = 45 - (int) i * 3, y = a < 3 ? 80 : -14;
+            float pivot = w * (13.0f / SRC_W);
+            for (int j = 0; j < WIDTH * HEIGHT; ++j)
+                actual[j] = expected[j] = (uintpixel_t) (0x8000 | ((j * 7919) & 0x7fff));
+            swr.fb = swr.mainFb = actual;
+            swrDrawSpriteRotatedInternal(&swr.base, x, y, w, 17, &texture, 0, 0, SRC_W, SRC_H,
+                                         swrConvertPixel(0xffa0a0), 256, angles[a], pivot, 5.5f, NULL, true);
+            swr.fb = expected;
+            swrDrawSpriteRotatedInternal(&swr.base, x, y, w, 17, &texture, 0, 0, SRC_W, SRC_H,
+                                         swrConvertPixel(0xffa0a0), 256, angles[a], pivot, 5.5f, NULL, false);
+            if (memcmp(actual, expected, sizeof(actual)) || texture.vineGrowthRows == NULL) {
+                fprintf(stderr, "FAIL: growing vine angle=%g width=%d\n", (double) angles[a], w);
+                exit(1);
+            }
+            checks += WIDTH * HEIGHT;
+        }
+    }
+    swrFreeRotatedRasters(&texture);
+    if (texture.vineGrowthRows != NULL) exit(1);
 }
 
 static void checkHalfTint(void)
@@ -513,6 +555,7 @@ int main(int argc, char** argv)
     checkTranslatedRotation(40, 40, true);
     checkStationaryVine(false);
     checkStationaryVine(true);
+    checkGrowingVine();
     checkHalfTint();
     checkDoubledSprite();
     checkHalfBlend();

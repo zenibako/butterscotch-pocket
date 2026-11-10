@@ -68,6 +68,7 @@ typedef struct
     struct SWRotatedRasterCache* rotatedRasters;
     struct SWRotatedRasterCache* eyeRasters;
     struct SWRotatedRasterCache* stationaryRasters;
+    struct SWVineGrowthCache* vineGrowthRows;
     uintpixel_t* halfBuffer;
     uint8_t* halfCoverage;  // how many of its four texels each copied one stands for, 0..4; NULL when every one is 0 or 4
     bool immutable;

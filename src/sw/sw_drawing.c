@@ -2070,6 +2070,55 @@ typedef struct {
     int x, y, width, height;
 } SWRotatedCapture;
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+enum { SWR_GROWTH_HEIGHT = 17, SWR_GROWTH_MAX_WIDTH = 271,
+       SWR_GROWTH_ROW_RADIUS = SWR_GROWTH_MAX_WIDTH + SWR_GROWTH_HEIGHT + 2,
+       SWR_GROWTH_CACHE_SLOTS = 16 };
+typedef struct {
+    uint32_t angleBits;
+    float slope, intercept;
+    int first, end, span;
+    int16_t left[2 * SWR_GROWTH_ROW_RADIUS + 1];
+} SWVineGrowthRows;
+
+typedef struct SWVineGrowthCache {
+    SWVineGrowthRows entries[SWR_GROWTH_CACHE_SLOTS];
+} SWVineGrowthCache;
+
+static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation rotation, int first, int end)
+{
+    if (first < -SWR_GROWTH_ROW_RADIUS || end > SWR_GROWTH_ROW_RADIUS + 1 ||
+        !(fabsf(rotation.sine) >= 0.7f)) return NULL;
+    if (texture->vineGrowthRows == NULL) {
+        texture->vineGrowthRows = calloc(1, sizeof(*texture->vineGrowthRows));
+        if (texture->vineGrowthRows == NULL) return NULL;
+    }
+    uint32_t hash = (rotation.angleBits ^ (rotation.angleBits >> 16)) * 0x9e3779b9u;
+    SWVineGrowthRows* rows = &texture->vineGrowthRows->entries[hash >> 28];
+    if (rows->span == 0 || rows->angleBits != rotation.angleBits) {
+        // The two long edges depend on angle, height, and pivot Y only.
+        // In screen space the growing vine always has height 17 and pivot Y 5.5.
+        float invSine = 1.0f / rotation.sine;
+        rows->angleBits = rotation.angleBits;
+        rows->slope = rotation.cosine * invSine;
+        rows->intercept = (invSine > 0.0f ? 5.5f - SWR_GROWTH_HEIGHT : 5.5f) * invSine - 0.5f;
+        rows->span = swrCeiling(SWR_GROWTH_HEIGHT * fabsf(invSine)) + 4;
+        rows->first = rows->end = first;
+    }
+    // Grow the cached interval as the on-screen vine lengthens. The row
+    // sample center is row + 0.5, so its distance from the pivot is row - 5.
+    while (rows->first > first) {
+        int row = --rows->first;
+        rows->left[row + SWR_GROWTH_ROW_RADIUS] = (int16_t) swrFloor(rows->slope * (row - 5) + rows->intercept);
+    }
+    while (rows->end < end) {
+        int row = rows->end++;
+        rows->left[row + SWR_GROWTH_ROW_RADIUS] = (int16_t) swrFloor(rows->slope * (row - 5) + rows->intercept);
+    }
+    return rows;
+}
+#endif
+
 static void swrDrawSpriteRotatedInternal(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -2077,7 +2126,8 @@ static void swrDrawSpriteRotatedInternal(
     float angleDeg,
     float pivotX,
     float pivotY,
-    SWRotatedCapture* capture
+    SWRotatedCapture* capture,
+    bool floweyGrowth
 )
 {
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -2138,6 +2188,15 @@ static void swrDrawSpriteRotatedInternal(
     // some final clip checks
     if (minXc >= maxXc || minYc >= maxYc) return;
 
+    bool cachedRows = false;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    const SWVineGrowthRows* growthRows = floweyGrowth ? swrVineGrowthRows(texture, rotation, minYc - dy, maxYc - dy) : NULL;
+    cachedRows = growthRows != NULL;
+    int growthLeft = cachedRows ? swrFloor(pxa) - 1 : 0;
+#else
+    (void) floweyGrowth;
+#endif
+
     if (capture != NULL) {
         int width = maxXc - minXc, height = maxYc - minYc;
         size_t count = (size_t) width * height;
@@ -2173,7 +2232,7 @@ static void swrDrawSpriteRotatedInternal(
     #define SWR_TURNED_SPARE 2.0f
     float edgeSlope[4], edgeLow[4], edgeHigh[4], edgeReach[4];
     bool edgeLevel[4];
-    for (int e = 0; e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
+    for (int e = 0; !cachedRows && e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
     {
         int next = (e + 1) & 3;
         float y0 = quadY[e], y1 = quadY[next];
@@ -2232,32 +2291,43 @@ static void swrDrawSpriteRotatedInternal(
     {
         float cyf = (float) cy;
         
-        // Where the rectangle can be on this row.
         float rowY = cyf + 0.5f;
-        float rowLeft = FLT_MAX, rowRight = -FLT_MAX;
-        for (int i = 0; i < 4; i++)
-        {
-            if (rowY < edgeLow[i] || rowY > edgeHigh[i]) continue;
-            if (edgeLevel[i]) {
-                float x0 = quadX[i], x1 = quadX[(i + 1) & 3];
-                if (rowLeft > x0) rowLeft = x0;
-                if (rowLeft > x1) rowLeft = x1;
-                if (rowRight < x0) rowRight = x0;
-                if (rowRight < x1) rowRight = x1;
-                continue;
-            }
-            // The crossing, and where it would be a row up and a row down:
-            // near a corner the edge may end short of this row's middle.
-            float at = quadX[i] + (rowY - quadY[i]) * edgeSlope[i];
-            float reach = edgeReach[i];
-            if (rowLeft > at - reach) rowLeft = at - reach;
-            if (rowRight < at + reach) rowRight = at + reach;
-        }
-        if (rowLeft > rowRight) continue;
         int rowFrom = minXc, rowTo = maxXc;
-        if (rowLeft - SWR_TURNED_SPARE > (float) minXc) rowFrom = swrFloor(rowLeft - SWR_TURNED_SPARE);
-        if (rowRight + SWR_TURNED_SPARE < (float) maxXc) rowTo = swrCeiling(rowRight + SWR_TURNED_SPARE) + 1;
-        if (rowTo > maxXc) rowTo = maxXc;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+        if (cachedRows) {
+            // Pad for the pivot's fractional column. The original inverse
+            // sampler below still checks the exact texture edges and tip.
+            int left = growthLeft + growthRows->left[cy - dy + SWR_GROWTH_ROW_RADIUS];
+            rowFrom = swrMax(minXc, left);
+            rowTo = swrMin(maxXc, left + growthRows->span);
+        } else
+#endif
+        {
+            // Where the rectangle can be on this row.
+            float rowLeft = FLT_MAX, rowRight = -FLT_MAX;
+            for (int i = 0; i < 4; i++)
+            {
+                if (rowY < edgeLow[i] || rowY > edgeHigh[i]) continue;
+                if (edgeLevel[i]) {
+                    float x0 = quadX[i], x1 = quadX[(i + 1) & 3];
+                    if (rowLeft > x0) rowLeft = x0;
+                    if (rowLeft > x1) rowLeft = x1;
+                    if (rowRight < x0) rowRight = x0;
+                    if (rowRight < x1) rowRight = x1;
+                    continue;
+                }
+                // The crossing, and where it would be a row up and a row down:
+                // near a corner the edge may end short of this row's middle.
+                float at = quadX[i] + (rowY - quadY[i]) * edgeSlope[i];
+                float reach = edgeReach[i];
+                if (rowLeft > at - reach) rowLeft = at - reach;
+                if (rowRight < at + reach) rowRight = at + reach;
+            }
+            if (rowLeft > rowRight) continue;
+            if (rowLeft - SWR_TURNED_SPARE > (float) minXc) rowFrom = swrFloor(rowLeft - SWR_TURNED_SPARE);
+            if (rowRight + SWR_TURNED_SPARE < (float) maxXc) rowTo = swrCeiling(rowRight + SWR_TURNED_SPARE) + 1;
+            if (rowTo > maxXc) rowTo = maxXc;
+        }
         if (rowFrom >= rowTo) continue;
         uintpixel_t* dst;
         if (capture != NULL) {
@@ -3738,7 +3808,7 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
         // Keep the real viewport and coordinates for the long vine's sampler.
         swrDrawSpriteRotatedInternal(&swr->base, key->screenX, key->screenY, key->dw, key->dh, texture,
                                      key->sx, key->sy, key->sw, key->sh,
-                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster);
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, false);
         if (raster.pixels == NULL) return NULL;
         raster.x -= key->screenX;
         raster.y -= key->screenY;
@@ -3751,7 +3821,7 @@ static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCa
         scratch.blendMode = bm_normal;
         swrDrawSpriteRotatedInternal(&scratch.base, x, y, key->dw, key->dh, texture,
                                      key->sx, key->sy, key->sw, key->sh,
-                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster);
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, false);
         if (raster.pixels == NULL) return NULL;
         raster.x -= x;
         raster.y -= y;
@@ -3896,6 +3966,8 @@ void swrFreeRotatedRasters(SWTexture* texture)
     swrFreeRasterCache(&texture->rotatedRasters);
     swrFreeRasterCache(&texture->stationaryRasters);
     swrFreeRasterCache(&texture->eyeRasters);
+    free(texture->vineGrowthRows);
+    texture->vineGrowthRows = NULL;
 #else
     (void) texture;
 #endif
@@ -4090,7 +4162,7 @@ void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, i
             SWRotatedCapture stamp = {0};
             swrDrawSpriteRotatedInternal(&bake.base, x - direction * PIVOT_X, stamps[i].y - PIVOT_Y,
                                          direction * STAMP_W, STAMP_H, pipe, sx, sy, SOURCE_W, SOURCE_H,
-                                         tintColor, 256, direction * stamps[i].angle, PIVOT_X, PIVOT_Y, &stamp);
+                                         tintColor, 256, direction * stamps[i].angle, PIVOT_X, PIVOT_Y, &stamp, false);
             for (int row = 0; row < stamp.height; ++row) {
                 const uintpixel_t* src = stamp.pixels + row * stamp.width;
                 uintpixel_t* dst = art->buffer + (stamp.y + row) * art->width + stamp.x;
@@ -4129,7 +4201,7 @@ void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy)
             int x = side == 0 ? stamps[i].x : 300 - stamps[i].x;
             int angle = side == 0 ? stamps[i].angle : 180 - stamps[i].angle;
             swrDrawSpriteRotatedInternal(&bake.base, x, stamps[i].y, 23, 16,
-                                         pipe, sx, sy, SOURCE_W, SOURCE_H, tintColor, 256, angle, 10.5f, 8.0f, NULL);
+                                         pipe, sx, sy, SOURCE_W, SOURCE_H, tintColor, 256, angle, 10.5f, 8.0f, NULL, false);
         }
     }
 #else
@@ -4175,7 +4247,7 @@ SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy)
             int x = side == 0 ? stamps[i].x : 320 - stamps[i].x;
             swrDrawSpriteRotatedInternal(&bake.base, x - LEFT - direction * 10, stamps[i].y - TOP - 7,
                                          direction * 23, 14, pipe, sx, sy, SOURCE_W, SOURCE_H,
-                                         tintColor, 256, direction * stamps[i].angle, 10.5f, 7.0f, NULL);
+                                         tintColor, 256, direction * stamps[i].angle, 10.5f, 7.0f, NULL, false);
         }
     }
     return art;
@@ -4326,6 +4398,7 @@ void swrDrawSpriteRotated(
     uintpixel_t packed = swrConvertPixel(tintColor);
     int opacity = swrIntAlpha(alpha);
 
+    bool floweyGrowth = false;
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
     bool pipe = sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H;
     bool eye = sw == SWR_EYE_SIZE && sh == SWR_EYE_SIZE && (packed & 0x7fff) == 0x7fff &&
@@ -4356,12 +4429,16 @@ void swrDrawSpriteRotated(
 #endif
         if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
     }
+    floweyGrowth = floweyVine && texture->immutable && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
+                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH && w != (SWR_VINE_W + 1) / 2 &&
+                   h == SWR_GROWTH_HEIGHT && pivotY == 5.5f &&
+                   pivotX >= 0.0f && pivotX <= w && x >= -4096 && x <= 4096 && y >= -4096 && y <= 4096;
 #else
     (void) floweyVine;
 #endif
     
     swrDrawSpriteRotatedInternal(
-        renderer, x, y, w, h, texture, sx, sy, sw, sh, packed, opacity, angleDeg, pivotX, pivotY, NULL
+        renderer, x, y, w, h, texture, sx, sy, sw, sh, packed, opacity, angleDeg, pivotX, pivotY, NULL, floweyGrowth
     );
 }
 

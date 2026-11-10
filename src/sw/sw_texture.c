@@ -36,6 +36,7 @@ SWTexture* swrCreateTextureEx(const void* srcBuffer, int width, int height, bool
     txt->rotatedRasters = NULL;
     txt->eyeRasters = NULL;
     txt->stationaryRasters = NULL;
+    txt->vineGrowthRows = NULL;
     txt->rowBounds = NULL;
     txt->boxRows = NULL;
     txt->floweyArtRows = NULL;
