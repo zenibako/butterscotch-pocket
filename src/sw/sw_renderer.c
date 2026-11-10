@@ -594,19 +594,27 @@ static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float
     return false;
 }
 
-static void swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag)
+static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag, uint32_t color)
 {
-    swr->floweyPipeFrame = swr->frameCounter;
+    // The rear layer's normal tint is 60% white. During the intro it fades
+    // up from black. Apply that fade to the whole neutral-pose composite.
+    const uint32_t normalShade = 0x99;
+    uint32_t shade = color & 0xff;
+    if (shade > normalShade || color != shade * 0x010101) return false;
     if (swr->floweyPipeBackdrop == NULL) {
         SWTexture* source = swrTextureForItem(swr, item);
-        if (source == NULL) return;
+        if (source == NULL) return false;
         swr->floweyPipeBackdrop = swrMakeFloweyPipeBackdrop(source, tpag->sourceX - source->originX,
                                                           tpag->sourceY - source->originY);
     }
     SWTexture* art = swr->floweyPipeBackdrop;
-    if (art != NULL)
-        swrDrawSprite(&swr->base, 0, 0, art->width * 2, art->height * 2, art,
-                      0, 0, art->width, art->height, 0xffffff, 1.0f);
+    if (art == NULL) return false;
+    uint32_t fade = (shade * 255 + normalShade / 2) / normalShade;
+    // Keep the static backdrop in screen space through the TV's camera shake.
+    swrDrawSprite(&swr->base, swr->viewX, swr->viewY, art->width * 2, art->height * 2, art,
+                  0, 0, art->width, art->height, fade * 0x010101, 1.0f);
+    swr->floweyPipeFrame = swr->frameCounter;
+    return true;
 }
 
 static bool swrFloweyScreenItem(const SWRenderer* swr, int32_t item)
@@ -643,16 +651,16 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
         if (tpagIndex == swr->floweyPipeItem) {
             // Submit at the first ordinary back-pipe call, in its original
             // place behind the boss and projectiles. Later layers are baked in.
-            if (swr->floweyPipeFrame != swr->frameCounter && swr->blendMode == bm_normal &&
+            if (swr->floweyPipeFrame == swr->frameCounter) return;
+            if (swr->blendMode == bm_normal &&
                 fabsf(x - 400.0f) <= 1.01f && fabsf(y + 20.0f) <= 0.51f &&
                 fabsf(xscale - 1.0f) <= 0.0051f && yscale == 1.0f && angleDeg == 0.0f &&
-                color == 0x999999 && alpha == 1.0f && originX == 0.0f && originY == 0.0f &&
+                alpha == 1.0f && originX == 0.0f && originY == 0.0f &&
                 tpag->sourceWidth == 190 && tpag->sourceHeight == 181 &&
                 tpag->targetX == 0 && tpag->targetY == 0 && tpag->targetWidth == 190 && tpag->targetHeight == 181 &&
-                swr->viewX == 0 && swr->viewY == 0 && swr->portX == 0 && swr->portY == 0 &&
-                swr->maxX == 320 && swr->maxY == 240 && swr->scaleX == 0.5f && swr->scaleY == 0.5f)
-                swrDrawFloweyPipeBackdrop(swr, tpagIndex, tpag);
-            return;
+                swr->portX == 0 && swr->portY == 0 && swr->maxX == 320 && swr->maxY == 240 &&
+                swr->scaleX == 0.5f && swr->scaleY == 0.5f && swrDrawFloweyPipeBackdrop(swr, tpagIndex, tpag, color))
+                return;
         }
         for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
             if (swr->floweyBackdropItems[i] == tpagIndex) return;
