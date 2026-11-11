@@ -1,4 +1,5 @@
 #include "instance.h"
+#include "runner.h"
 #include "vm.h"
 #include "physics/physics_engine.h"
 
@@ -199,10 +200,7 @@ void Instance_computeSpeedFromComponents(Instance* inst) {
 }
 
 // Compute hspeed/vspeed from speed and direction (HTML5: Compute_Speed2)
-void Instance_computeComponentsFromSpeed(Instance* inst) {
-    inst->hspeed = (float) (inst->speed * clampFloat(GMLReal_cos(inst->direction * (M_PI / 180.0))));
-    inst->vspeed = (float) (-inst->speed * clampFloat(GMLReal_sin(inst->direction * (M_PI / 180.0))));
-
+static inline void roundMotionComponents(Instance* inst) {
     // Round if very close to integer
     if (GMLReal_fabs(inst->hspeed - GMLReal_round(inst->hspeed)) <= (GMLReal) 0.0001) {
         inst->hspeed = (float) GMLReal_round(inst->hspeed);
@@ -211,6 +209,40 @@ void Instance_computeComponentsFromSpeed(Instance* inst) {
         inst->vspeed = (float) GMLReal_round(inst->vspeed);
     }
 }
+
+void Instance_computeComponentsFromSpeed(Instance* inst) {
+    inst->hspeed = (float) (inst->speed * clampFloat(GMLReal_cos(inst->direction * (M_PI / 180.0))));
+    inst->vspeed = (float) (-inst->speed * clampFloat(GMLReal_sin(inst->direction * (M_PI / 180.0))));
+
+    roundMotionComponents(inst);
+}
+
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+void Instance_computeFrictionComponents(Instance* inst, Runner* runner) {
+    GMLReal cosine, sine;
+    // Friction changes speed every update while most projectiles hold their
+    // direction. Cache the exact clamped unit vector, independent of speed.
+    uint32_t bits;
+    memcpy(&bits, &inst->direction, sizeof(bits));
+    uint32_t key = bits + 1u; // zero-initialized entries have no finite angle
+    uint32_t hash = (bits ^ (bits >> 16)) * 0x9e3779b9u;
+    MotionRotation* cached = &runner->motionRotations[hash >> 25];
+    if (key != 0 && cached->key == key) {
+        cosine = cached->cosine;
+        sine = cached->sine;
+    } else {
+        GMLReal radians = inst->direction * (M_PI / 180.0);
+        cosine = clampFloat(GMLReal_cos(radians));
+        sine = clampFloat(GMLReal_sin(radians));
+        if (isfinite(inst->direction)) *cached = (MotionRotation) { key, cosine, sine };
+    }
+    inst->hspeed = (float) (inst->speed * cosine);
+    inst->vspeed = (float) (-inst->speed * sine);
+
+    roundMotionComponents(inst);
+}
+
+#endif
 
 char* Instance_toStringFancy(Instance* inst, DataWin* dataWin) {
     const IntRValueHashMap* map = &inst->selfVars;

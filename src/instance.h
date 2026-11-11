@@ -126,6 +126,9 @@ static inline void Instance_setSelfVar(Instance* inst, int32_t varID, RValue val
 void Instance_computeSpeedFromComponents(Instance* inst);
 // Recompute hspeed/vspeed from speed/direction (called when speed or direction is set)
 void Instance_computeComponentsFromSpeed(Instance* inst);
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+void Instance_computeFrictionComponents(Instance* inst, struct Runner* runner);
+#endif
 
 char* Instance_toStringFancy(Instance* inst, DataWin* dataWin);
 

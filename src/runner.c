@@ -4990,7 +4990,11 @@ void Runner_step(Runner* runner) {
             } else if (inst->speed != 0.0f) {
                 inst->speed = ns;
             }
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+            Instance_computeFrictionComponents(inst, runner);
+#else
             Instance_computeComponentsFromSpeed(inst);
+#endif
         }
 
         // Gravity: add velocity in gravity_direction (HTML5: AddTo_Speed)
