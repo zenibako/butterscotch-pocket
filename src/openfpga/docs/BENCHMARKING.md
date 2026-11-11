@@ -16,9 +16,11 @@ including the existing release, build, performance, verification and platform
 notes. Claude discovers that same collection through the `.claude/skills`
 root symlink; individual skill-directory aliases are not used.
 Keep this thin route local; the maintained collector workflow lives in the
-private `zenibako/pocket-harness` checkout, alongside its implementation.
+shared [pocket-dev-tools](https://github.com/zenibako/pocket-dev-tools)
+checkout, formerly `pocket-harness`, alongside its implementation.
 
-Use a harness path already established in the session or `POCKET_HARNESS_ROOT`.
+Use a root established in the session, then `POCKET_DEV_TOOLS_ROOT`, then legacy
+`POCKET_HARNESS_ROOT`; resolve conflicting explicit roots before choosing.
 An adjacent checkout is only a candidate. Verify that it contains
 `benchmarks/__main__.py` and `.agents/skills/pocket-benchmarking/SKILL.md`, resolve
 the latter's canonical path, then read it and its linked `benchmarks/README.md`,
@@ -26,6 +28,49 @@ the latter's canonical path, then read it and its linked `benchmarks/README.md`,
 Do not copy the harness skill body here. Missing access limits collection;
 applicable local correctness checks can continue. RV32 capture/replay/profiling
 routes separately to the harness's canonical `os25-harness` skill.
+
+## Routine regression checks
+
+Use the [shared preserved-baseline contract](https://github.com/zenibako/pocket-dev-tools/blob/fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58/benchmarks/REGRESSIONS.md)
+(introduced in shared commit `fd5fc7af6cb51b19bb800d6c2cd43b7c03cfcf58`) from the verified
+`pocket-dev-tools` checkout. Require its `benchmarks/REGRESSIONS.md` and record the
+actual shared commit; do not silently substitute an older checkout. Keep private
+source exports, accepted evidence, indices and candidate/failure records under
+that checkout's ignored directories. Do not ship them in this project's releases.
+
+For supported Butterscotch os25 sources, follow shared `docs/REGRESSION.md` and
+`python3 regression.py --help`. Establish a verified reference once from an
+explicit accepted source revision. The standard roster is Undertale Flowey and
+Deltarune field/menu/dodge, each with trace and timing builds (eight cases).
+Use the central guide's fixed-audio/configuration controls; a declared subset
+covers only that subset. Every registered case needs repeat QEMU agreement,
+positive RTL replay and a rejected corrupted oracle. Demonstrate separately that
+a known bad candidate fails the cross-build comparison, not only its own replay.
+
+From the shared checkout, use actual printed CASE paths and an unused name:
+
+```sh
+python3 regression.py baseline --name accepted-reference --traffic quiet \
+  --cases BASELINE_CASE_1 BASELINE_CASE_2
+python3 regression.py check --baseline BASELINE_INDEX \
+  --repo /absolute/path/to/butterscotch-pocket --revision CANDIDATE_REVISION --jobs 1
+```
+
+Replace the two example paths with the complete selected case roster; use the
+printed BASELINE path. Git export reads committed objects, not uncommitted port
+edits. The gate creates fresh independent candidates, validates the exact roster,
+compiler/ordered flags/tooling/platform and negative evidence, and compares raw
+pixels/geometry plus fixed PCM/counts. It never rebuilds or promotes the reference.
+Output mismatch exits 2 and keeps both images; stale/incomplete/incompatible or
+failed evidence exits nonzero. Preserve those failures and the index digest.
+Changed tooling or compiler needs newly verified cases and a new baseline name.
+
+These timings are simulated, with no automatic slowdown threshold. A routine
+pass supplements the desktop both-game and scene-specific checks; it does not
+qualify shipping runtime/API/allocator/storage behavior or actual SD, audio,
+progress saves, Memories or sleep/wake. Keep the applicable physical Pocket and
+release gates below. The collector's `verify`/numeric `compare` is archival work,
+not this deterministic output gate.
 
 ## Plan this project's evaluation
 
