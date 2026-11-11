@@ -619,7 +619,7 @@ static void dumpFrameIfRequested(bool drawn) {
 static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript) */
 
 #ifdef OF_PC
-/* BS_FRAME_LOG=<file> (desktop) writes one line per presented frame: frame,
+/* BS_FRAME_LOG=<file> (desktop) writes one line per drawn frame: frame,
  * room, width, step/draw/out/audio microseconds, calls per draw kind, and the
  * 32x16 tiles the renderer had marked as drawn in the buffer it cleared last
  * (swrDirtyLastTiles), a measure of how much of the screen a frame touches.
