@@ -44,8 +44,8 @@ static void checkFloweyArt(void)
     swr.portH = swr.maxY = HEIGHT;
     swr.scaleX = swr.scaleY = 0.5f;
     swr.blendMode = bm_normal;
-    if (!swrDrawFloweyArt(&swr.base, texture, 6, -2, -8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM) ||
-        !swrDrawFloweyArt(&swr.base, texture, 6, 2, 8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM) ||
+    if (!swrDrawFloweyArt(&swr.base, texture, 6, -2, -8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM, 0xffffff) ||
+        !swrDrawFloweyArt(&swr.base, texture, 6, 2, 8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM, 0xffffff) ||
         !swrIsOpaque(actual[0]) || !swrIsOpaque(actual[1]) || actual[2] || actual[3] ||
         actual[WIDTH + 3] || actual[WIDTH + 4] != colors[1] ||
         actual[WIDTH + 5] != actual[0] || actual[3 * WIDTH + 5]) {
@@ -53,6 +53,26 @@ static void checkFloweyArt(void)
         exit(1);
     }
     checks += WIDTH * HEIGHT;
+    uintpixel_t expected[WIDTH * HEIGHT];
+    memcpy(expected, actual, sizeof(expected));
+    for (unsigned shade = 0; shade < 256; ++shade) {
+        uint32_t color = shade * 0x010101u;
+        uintpixel_t tintColor = swrConvertPixel(color);
+        memset(actual, 0, sizeof(actual));
+        if (!swrDrawFloweyArt(&swr.base, texture, 6, -2, -8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM, color) ||
+            !swrDrawFloweyArt(&swr.base, texture, 6, 2, 8, 4, 1, 1, 8, 4, SWR_FLOWEY_ART_ARM, color)) {
+            fprintf(stderr, "FAIL: cached Flowey fade rejected shade %u\n", shade);
+            exit(1);
+        }
+        for (int i = 0; i < WIDTH * HEIGHT; ++i) {
+            uintpixel_t faded = swrIsOpaque(expected[i]) ? tint(tintColor, expected[i]) : expected[i];
+            if (actual[i] != faded) {
+                fprintf(stderr, "FAIL: cached Flowey fade shade %u pixel %d\n", shade, i);
+                exit(1);
+            }
+        }
+        checks += WIDTH * HEIGHT;
+    }
     swrFreeTexture(texture);
 }
 
@@ -70,7 +90,7 @@ static void checkFloweyTvPalette(void)
     swr.portH = swr.maxY = 2;
     swr.scaleX = swr.scaleY = 0.5f;
     swr.blendMode = bm_normal;
-    if (!swrDrawFloweyArt(&swr.base, texture, 0, 0, 130, 4, 0, 0, SOURCE_WIDTH, 2, SWR_FLOWEY_ART_SCREEN))
+    if (!swrDrawFloweyArt(&swr.base, texture, 0, 0, 130, 4, 0, 0, SOURCE_WIDTH, 2, SWR_FLOWEY_ART_SCREEN, 0xffffff))
         exit(1);
     int step = (SOURCE_WIDTH << 14) / WIDTH;
     for (int y = 0; y < 2; ++y) {
@@ -397,18 +417,20 @@ static void checkStationaryVine(bool speedVine)
 
 static void checkShakenVine(void)
 {
-    enum { WIDTH = 320, HEIGHT = 240, SRC_W = 513, SRC_H = 35 };
+    enum { WIDTH = 320, HEIGHT = 240, PITCH = 322, SRC_W = 513, SRC_H = 35 };
     uintpixel_t* source = malloc(SRC_W * SRC_H * sizeof(*source));
-    uintpixel_t* actual = malloc(WIDTH * HEIGHT * sizeof(*actual));
-    uintpixel_t* expected = malloc(WIDTH * HEIGHT * sizeof(*expected));
+    uintpixel_t* actual = malloc(PITCH * HEIGHT * sizeof(*actual));
+    uintpixel_t* expected = malloc(PITCH * HEIGHT * sizeof(*expected));
     if (source == NULL || actual == NULL || expected == NULL) exit(1);
     for (int i = 0; i < SRC_W * SRC_H; ++i)
         source[i] = i % 9 < 3 ? 0 : (uintpixel_t) (0x8000 | ((i * 491) & 0x7fff));
     SWTexture texture = { .buffer = source, .width = SRC_W, .height = SRC_H, .immutable = true };
     SWRenderer swr = {0};
-    swr.fbPitch = WIDTH;
+    swr.fbPitch = PITCH;
     swr.scaleX = swr.scaleY = 0.5f;
     swr.blendMode = bm_normal;
+    // A padded framebuffer exercises the full-detail stationary cache.
+    // The tightly packed 320x240 target uses the paired Speed sampler.
     swr.portW = swr.maxX = WIDTH;
     swr.portH = swr.maxY = HEIGHT;
     const int offsets[] = { 0, 4, -4, 3, -3, 8, -8, 0 };
@@ -417,7 +439,7 @@ static void checkShakenVine(void)
         swr.frameCounter = frame;
         swr.viewX = offsets[frame];
         swr.viewY = offsets[sizeof(offsets) / sizeof(offsets[0]) - 1 - frame];
-        for (int i = 0; i < WIDTH * HEIGHT; ++i)
+        for (int i = 0; i < PITCH * HEIGHT; ++i)
             actual[i] = expected[i] = (uintpixel_t) (0x8000 | ((i * 7919) & 0x7fff));
         const uint32_t color = tints[frame % 4];
         const float angle = 263.271f;
@@ -428,12 +450,12 @@ static void checkShakenVine(void)
         swrDrawSpriteRotatedInternal(&swr.base, swrFloor((17.0f - swr.viewX) * 0.5f),
                                      swrFloor((181.0f - swr.viewY) * 0.5f), 256, 17, &texture, 1, 1, 511, 33,
                                      swrConvertPixel(color), 256, angle, 6.5f, 5.5f, NULL, false);
-        if (memcmp(actual, expected, WIDTH * HEIGHT * sizeof(*actual)) ||
+        if (memcmp(actual, expected, PITCH * HEIGHT * sizeof(*actual)) ||
             texture.stationaryRasters == NULL || texture.stationaryRasters->count != 1) {
             fprintf(stderr, "FAIL: shaken vine output or cache reuse on frame %u\n", frame);
             exit(1);
         }
-        checks += WIDTH * HEIGHT;
+        checks += PITCH * HEIGHT;
     }
     swrFreeRotatedRasters(&texture);
     if (texture.stationaryRasters != NULL || swrRotatedRasterBytes != 0) exit(1);

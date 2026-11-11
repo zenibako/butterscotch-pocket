@@ -781,17 +781,17 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     dy += y;
 
     // Reuse the original rims and mouth trim upright through small rotations.
-    if (floweySpeed && color == 0xffffff && alpha == 1.0f &&
+    if (floweySpeed && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
         ((tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_OVERLAY] && fabsf(angleDeg) <= 4.0f) ||
          ((tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_EDGE] ||
            tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_FLAP] ||
            tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_HOLDER]) && fabsf(angleDeg) <= 2.0f)) &&
         sw == tpag->targetWidth && sh == tpag->targetHeight &&
-        swrDrawFloweyTrim(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh)) return;
+        swrDrawFloweyTrim(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, color)) return;
 
     // The idle arm is a separate item from the attack's stem and strike.
     // The TV's warnings and flashes also use separate items or fills.
-    if (floweySpeed && angleDeg == 0.0f && color == 0xffffff && alpha == 1.0f &&
+    if (floweySpeed && angleDeg == 0.0f && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
         sw == tpag->targetWidth && sh == tpag->targetHeight) {
         int kind = SWR_FLOWEY_ART_NONE;
         if (tpagIndex == swr->floweyArmItem && sw == 171 && sh == 275 &&
@@ -803,7 +803,7 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
                  yscale >= 0.89f && yscale <= 1.01f && swrFloweyScreenItem(swr, tpagIndex))
             kind = SWR_FLOWEY_ART_SCREEN;
         if (kind != SWR_FLOWEY_ART_NONE &&
-            swrDrawFloweyArt(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, kind)) return;
+            swrDrawFloweyArt(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, kind, color)) return;
     }
     
     if (UNLIKELY(swrMustRotate(angleDeg)))

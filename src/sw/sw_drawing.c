@@ -4548,7 +4548,7 @@ void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const
 }
 
 bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
-                       int sx, int sy, int sw, int sh)
+                       int sx, int sy, int sw, int sh, uint32_t color)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -4572,17 +4572,17 @@ bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float d
     swrTransformSizeIfNeeded(swr, &dw, &dh);
     swrOverlayFlush(swr);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
-                          &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(0xffffff), 256, false, SWR_CONTRAST_NONE);
+                          &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(color), 256, false, SWR_CONTRAST_NONE);
     return true;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
-    (void) sx; (void) sy; (void) sw; (void) sh;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) color;
     return false;
 #endif
 }
 
 bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
-                      int sx, int sy, int sw, int sh, int kind)
+                      int sx, int sy, int sw, int sh, int kind, uint32_t color)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -4609,6 +4609,8 @@ bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy
     const uintpixel_t* colors = (const uintpixel_t*) (art->rows + art->height);
     if (mirrored) colors += (size_t) width * art->height;
     int ystep = (art->height << 14) / height;
+    const bool untinted = color == 0xffffff;
+    const uintpixel_t tintColor = swrConvertPixel(color);
     swrOverlayFlush(swr);
     for (int y = firstRow; y < endRow; ++y) {
         int row = (y * ystep) >> 14;
@@ -4622,16 +4624,20 @@ bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy
         swrDirtyRow(swr, top + y, left + first, left + end);
         uintpixel_t* dst = swr->fb + (top + y) * swr->fbPitch + left + first;
         const uintpixel_t* src = colors + row * width;
-        swrCopyPixels(dst + solidFrom - first, src + solidFrom, solidTo - solidFrom);
+        if (untinted) {
+            swrCopyPixels(dst + solidFrom - first, src + solidFrom, solidTo - solidFrom);
+        } else {
+            for (int x = solidFrom; x < solidTo; ++x) dst[x - first] = tint(tintColor, src[x]);
+        }
         for (int x = first; x < solidFrom; ++x)
-            if (swrIsOpaque(src[x])) dst[x - first] = src[x];
+            if (swrIsOpaque(src[x])) dst[x - first] = untinted ? src[x] : tint(tintColor, src[x]);
         for (int x = solidTo; x < end; ++x)
-            if (swrIsOpaque(src[x])) dst[x - first] = src[x];
+            if (swrIsOpaque(src[x])) dst[x - first] = untinted ? src[x] : tint(tintColor, src[x]);
     }
     return true;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
-    (void) sx; (void) sy; (void) sw; (void) sh; (void) kind;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) color; (void) kind;
     return false;
 #endif
 }
