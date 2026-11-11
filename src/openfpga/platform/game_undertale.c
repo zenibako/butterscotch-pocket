@@ -861,8 +861,11 @@ static int snowPlayers(Runner *runner, Instance *self, SnowPlayer *out) {
 
 /* Whether that collision_circle could find one of them: it answers noone
  * unless one passes Collision_circleOverlapsInstance for the centre and
- * radius it works out, so test exactly that (the closest-point test, on the
- * box worked out above, or the whole function for a rotated shape). */
+ * radius it works out. That test is repeated here (the closest-point test,
+ * on the box worked out above, or the whole function for a rotated shape)
+ * with half a pixel to spare, so that a compiler fusing the arithmetic one
+ * way here and another in the built-in cannot skip a call that would hit:
+ * near the edge, the built-in decides. */
 static bool snowMayTouch(Runner *runner, const SnowPlayer *players, int count, GMLReal cx, GMLReal cy) {
     GMLReal radius = (GMLReal) 2;
     if (count < 0) return true;
@@ -880,13 +883,14 @@ static bool snowMayTouch(Runner *runner, const SnowPlayer *players, int count, G
     }
     for (int i = 0; i < count; i++) {
         if (players[i].rotated) {
-            if (Collision_circleOverlapsInstance(runner, players[i].instance, cx, cy, radius)) return true;
+            if (Collision_circleOverlapsInstance(runner, players[i].instance, cx, cy, radius + (GMLReal) 0.5)) return true;
             continue;
         }
         /* Collision_circleOverlapsInstance's test for a shape without rotation. */
         InstanceBBox bbox = players[i].box;
         if (!bbox.valid) continue;
-        GMLReal rSq = radius * radius;
+        GMLReal reach = radius + (GMLReal) 0.5;
+        GMLReal rSq = reach * reach;
         GMLReal closestX = cx;
         if (bbox.left > closestX) closestX = bbox.left;
         if (closestX > bbox.right) closestX = bbox.right;
