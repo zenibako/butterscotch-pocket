@@ -131,6 +131,14 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     return true;
 }
 
+bool ofBenchStartSnow(void) {
+    if (ofGame.snowScript == NULL) return false;
+    benchStart(ofGame.snowTitle, ofGame.snowScript, ofGame.snowJumps, ofGame.snowJumpCount,
+               ofGame.snowSections, ofGame.snowSectionCount, true, false);
+    g_def.runProbes = false;
+    return true;
+}
+
 bool ofBenchLivePacing(void) {
     return g_def.livePacing;
 }

@@ -726,6 +726,14 @@ per wall-clock second, display submissions, and skipped draws for each
 section. The `drawn` and `skip` rows give average work, limiter wait, and
 total milliseconds per update. Full speed is 30 updates per second.
 
+`--bench-snow` measures room 57 (`room_tundra_snowpuzz`, the room with the
+"Dog Marriage" sign), whose snow patch draws and tests 400 dots a frame. It
+jumps there from the intro, turns random encounters off, and reports 300
+frames standing with the patch out of view (`stand`), a walk down through the
+patch and back (`walk`), and 180 frames standing with it in view (`near`).
+`--bench-snow-smooth` is the same route in Speed mode. Each window checks
+for the room and its `obj_snowfloor` instances. It skips the post-run probes.
+
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:
 

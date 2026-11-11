@@ -22,6 +22,8 @@ bool ofBenchStartBulletTour(void);
 bool ofBenchStartChaosSaber(void);
 /* The game's Flowey checkpoint tour, optionally with normal gameplay pacing. */
 bool ofBenchStartFloweyTour(bool livePacing);
+/* "--bench-snow": the game's single-room snow patch benchmark, if available. */
+bool ofBenchStartSnow(void);
 bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);

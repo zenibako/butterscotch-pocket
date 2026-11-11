@@ -976,6 +976,29 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_snowfloor_Draw_0", 2204, 0x659c1fd61851691eull, snowfloorDraw },
 };
 
+/* Room 57 (room_tundra_snowpuzz), whose 16 obj_snowfloor instances draw and
+ * test 400 snow dots every frame. The run jumps there from the intro, turns
+ * random encounters off once the room's encounterer has reset its count,
+ * stands with the patch out of view, walks down through it (the dots part
+ * and the hidden switch shows) and back up, then stands with the patch in
+ * view. The route is the one the desktop checks of the snow patch native
+ * use, 350 frames later. */
+static const char g_snowScript[] =
+    "420:L*6,430:D*95,530:U*20,555:R*8,568:D*12,585:L*10,600:U*40";
+
+static const OfJump g_snowJumps[] = {
+    { 60, 57, NULL, NULL },
+    { 70, -1, "encounter=-100000", NULL },
+};
+
+static const OfBenchSection g_snowSections[] = {
+    { "boot and intro", 60, "boot", NULL, NULL, NULL },
+    { "room 57 entry", 120, "entry", "room_tundra_snowpuzz", "obj_snowfloor", NULL },
+    { "standing, patch out of view", 420, "stand", "room_tundra_snowpuzz", "obj_snowfloor", NULL },
+    { "walking through the patch", 640, "walk", "room_tundra_snowpuzz", "obj_snowfloor", NULL },
+    { "standing, patch in view", 820, "near", "room_tundra_snowpuzz", "obj_snowfloor", NULL },
+};
+
 /* Save states (of_state_requests.c) are taken anywhere the runner can store
  * exactly (Runner_snapshotCheck refuses the rest): the overworld, the game's
  * own menus, dialogue, battles, cutscenes, and the intro, title and naming
@@ -1304,6 +1327,12 @@ const OfGame ofGame = {
     .floweySectionCount = (int) (sizeof(g_floweySections) / sizeof(g_floweySections[0])),
     .floweyOpening = g_floweyOpening,
     .floweyOpeningCount = (int) (sizeof(g_floweyOpening) / sizeof(g_floweyOpening[0])),
+    .snowTitle = "Undertale room 57 snow patch",
+    .snowScript = g_snowScript,
+    .snowJumps = g_snowJumps,
+    .snowJumpCount = (int) (sizeof(g_snowJumps) / sizeof(g_snowJumps[0])),
+    .snowSections = g_snowSections,
+    .snowSectionCount = (int) (sizeof(g_snowSections) / sizeof(g_snowSections[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,
