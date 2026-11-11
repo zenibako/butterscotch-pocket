@@ -1053,17 +1053,18 @@ static void SWRenderer_drawTriangle(Renderer* renderer,
     }
 }
 
-// draw_circle and draw_ellipse, filled: the triangle fan of Renderer_drawEllipseColor, triangle for triangle, with two
-// differences that leave the pixels as they were. The points around the unit circle are worked out once for each
-// precision (the same cosf and sinf of the same float angles) rather than for every shape. And a shape that lies
-// wholly outside the target draws nothing: swrDrawTriangleInternal draws only rows 0 to height - 1 and columns from
-// portX to maxX - 1 of a triangle whose corners, rounded down or up, lie within the shape's box, so beyond a pixel's
-// margin round that box nothing can land. It still settles what is held, as its first triangle would have
-// (swrOverlayFlush), and once rather than once a triangle, which is the same thing.
+// draw_circle and draw_ellipse, filled. The corners are those of Renderer_drawEllipseColor's polygon, worked out
+// from a cos/sin table kept for each precision (the same cosf and sinf of the same float angles) rather than for
+// every shape. A shape in one colour is filled as one convex polygon by pixel centres (swrFillConvexPolygon), which
+// leaves no gaps; the triangle fan the other renderers use left out the row through a centre on an exact pixel row,
+// so rows of small dots showed stripes. A shape shaded from centre to rim, or with no width or height, is still drawn
+// as that triangle fan. A shape wholly outside the target draws nothing (nothing either way can land beyond a
+// pixel's margin round its box), but still settles what is held (swrOverlayFlush), as a first triangle would have.
 static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
 {
     static float unitCos[65], unitSin[65];
     static int32_t unitSegments = 0;
+    float xs[65], ys[65];
     int32_t i;
     SWRenderer* swr = (SWRenderer*) renderer;
     if (SWR_SKIPPED(swr)) return;
@@ -1086,16 +1087,18 @@ static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy,
         }
         unitSegments = segments;
     }
-    float alpha = renderer->drawAlpha;
-    float prevX = cx + rx;
-    float prevY = cy;
+    xs[0] = cx + rx;
+    ys[0] = cy;
     for (i = 1; segments >= i; i++) {
-        float curX = cx + rx * unitCos[i];
-        float curY = cy + ry * unitSin[i];
-        swrDrawTriangle(renderer, cx, cy, prevX, prevY, curX, curY, col1, col2, col2, alpha);
-        prevX = curX;
-        prevY = curY;
+        xs[i] = cx + rx * unitCos[i];
+        ys[i] = cy + ry * unitSin[i];
     }
+    if (col1 == col2 && rx != 0.0f && ry != 0.0f) {
+        swrFillConvexPolygon(renderer, xs, ys, segments + 1, col1, renderer->drawAlpha);
+        return;
+    }
+    for (i = 1; segments >= i; i++)
+        swrDrawTriangle(renderer, cx, cy, xs[i - 1], ys[i - 1], xs[i], ys[i], col1, col2, col2, renderer->drawAlpha);
 }
 
 static void SWRenderer_drawLineColor(Renderer* renderer, float x1, float y1, float x2, float y2,

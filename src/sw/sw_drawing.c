@@ -4802,6 +4802,96 @@ void swrDrawSpriteRotated(
     );
 }
 
+// Fills a convex polygon of up to 65 corners, given in room coordinates, by the pixel-centre rule: a pixel is
+// drawn when its centre is inside, an edge counting as inside on the top and left (half-open in both directions),
+// so the pixels of shapes that share an edge are drawn once. One pass of horizontal spans, each pixel blended once.
+// Used for filled circles and ellipses, which the triangle fan rasterizer drew with gaps: its triangles leave out the
+// row through a centre that lies exactly on a pixel row, and seams where neighbouring triangles round apart.
+void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, int count, uint32_t color, float alpha)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    float px[65], py[65], slope[65];
+    float top, bottom;
+    int i, y, yStart, yEnd, blendmode, intAlpha, first, last;
+    bool chains = true;
+    uintpixel_t pixel;
+    if (count < 3 || count > 65) return;
+    for (i = 0; count > i; i++) {
+        px[i] = xs[i];
+        py[i] = ys[i];
+        swrTransformPosIfNeeded(swr, &px[i], &py[i]);
+        if (!(px[i] == px[i]) || !(py[i] == py[i])) return; // NaN
+    }
+    first = 0;
+    last = 0;
+    for (i = 0; count > i; i++) {
+        if (py[first] > py[i]) first = i;
+        if (py[i] > py[last]) last = i;
+    }
+    top = py[first];
+    bottom = py[last];
+    // Rows whose centres y + 0.5 lie in [top, bottom), clipped as the triangle rasterizer clips rows.
+    if (top - 0.5f > (float) swr->height || 0.0f > bottom - 0.5f) return;
+    yStart = top - 0.5f > 0.0f ? swrCeiling(top - 0.5f) : 0;
+    yEnd = (float) swr->height > bottom - 0.5f ? swrCeiling(bottom - 0.5f) : swr->height;
+    // Each row's crossings are one edge on each side. When y never falls along either side going down from the top
+    // corner (always, unless rounding has bent the outline), those two edges are found by walking down the sides,
+    // rather than by testing every edge on every row: the same edges, so the same pixels.
+    for (i = first; last != i; i = i + 1 == count ? 0 : i + 1)
+        if (py[i] > py[i + 1 == count ? 0 : i + 1]) chains = false;
+    for (i = first; last != i; i = i == 0 ? count - 1 : i - 1)
+        if (py[i] > py[i == 0 ? count - 1 : i - 1]) chains = false;
+    // An edge's slope is worked out once, when a row first needs it (divisions are dear on the device).
+    for (i = 0; count > i; i++) {
+        int next = i + 1 == count ? 0 : i + 1;
+        if (!chains) slope[i] = py[next] != py[i] ? (px[next] - px[i]) / (py[next] - py[i]) : 0.0f;
+    }
+    blendmode = swr->blendMode;
+    intAlpha = swrIntAlpha(alpha);
+    pixel = swrConvertPixel(color);
+    int down = first, up = first; // edges down..down+1 and up-1..up (indices wrap)
+    int downSlope = -1, upSlope = -1; // the edges whose slopes are in slope[]
+    for (y = yStart; yEnd > y; y++) {
+        float centre = (float) y + 0.5f;
+        float left = 0.0f, right = 0.0f;
+        bool crossed = false;
+        int x, x0, x1;
+        if (chains) {
+            int next = down + 1 == count ? 0 : down + 1, prev = up == 0 ? count - 1 : up - 1;
+            float a, b;
+            while (down != last && centre >= py[next]) { down = next; next = down + 1 == count ? 0 : down + 1; }
+            while (up != last && centre >= py[prev]) { up = prev; prev = up == 0 ? count - 1 : up - 1; }
+            if (down == last || up == last) continue;
+            if (downSlope != down) { slope[down] = (px[next] - px[down]) / (py[next] - py[down]); downSlope = down; }
+            if (upSlope != prev) { slope[prev] = (px[up] - px[prev]) / (py[up] - py[prev]); upSlope = prev; }
+            a = px[down] + (centre - py[down]) * slope[down];
+            b = px[prev] + (centre - py[prev]) * slope[prev];
+            left = a > b ? b : a;
+            right = a > b ? a : b;
+            crossed = true;
+        } else {
+            for (i = 0; count > i; i++) {
+                int next = i + 1 == count ? 0 : i + 1;
+                float a = py[i], b = py[next], at;
+                if (!((a <= centre && centre < b) || (b <= centre && centre < a))) continue;
+                at = px[i] + (centre - a) * slope[i];
+                if (!crossed) { left = right = at; crossed = true; }
+                else if (left > at) left = at;
+                else if (at > right) right = at;
+            }
+        }
+        if (!crossed) continue;
+        // Columns whose centres x + 0.5 lie in [left, right).
+        if (left - 0.5f >= (float) swr->maxX || (float) swr->portX > right - 0.5f) continue;
+        x0 = left - 0.5f > (float) swr->portX ? swrCeiling(left - 0.5f) : swr->portX;
+        x1 = (float) swr->maxX > right - 0.5f ? swrCeiling(right - 0.5f) : swr->maxX;
+        if (x0 >= x1) continue;
+        uintpixel_t* line = &swr->fb[y * swr->width];
+        swrDirtyRow(swr, y, x0, x1);
+        for (x = x0; x1 > x; x++) alphaBlend(&line[x], pixel, blendmode, intAlpha);
+    }
+}
+
 void swrDrawTriangle(Renderer* renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha)
 {
     SWRenderer* swr = (SWRenderer*) renderer;

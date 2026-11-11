@@ -87,5 +87,7 @@ bool swrDrawHintedGlyph(Renderer* renderer, float dx, float dy, float dw, float 
 void swrDrawDoubledGlyph(Renderer* renderer, float dx, float dy, float dw, float dh, SWTexture* texture, int sx, int sy, int sw, int sh, uint32_t tintColor, float alpha);
 void swrDrawSpriteRotated(Renderer* renderer, float dx, float dy, float dw, float dh, SWTexture* texture, int sx, int sy, int sw, int sh, uint32_t tintColor, float alpha, float angleDeg, float pivotX, float pivotY, bool floweyVine);
 void swrDrawTriangle(Renderer* renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha);
+/* A convex polygon in room coordinates, filled in one colour by pixel centres (top-left rule). */
+void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, int count, uint32_t color, float alpha);
 
 #endif//_SW_DRAWING_H
