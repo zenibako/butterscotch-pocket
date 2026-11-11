@@ -843,7 +843,8 @@ static GMLReal snowPlayerBox(VMContext *ctx, Instance *player, int16_t id, const
  * too many instances, leaves every dot to the built-in. */
 enum { SNOW_MAX_PLAYERS = 4 };
 typedef struct {
-    GMLReal left, top, right, bottom;
+    GMLReal left, top, right, bottom; /* the box, widened by 4 */
+    InstanceBBox box;                 /* the box itself */
 } SnowReach;
 
 static int snowPlayers(Runner *runner, Instance *self, SnowReach *out) {
@@ -858,6 +859,7 @@ static int snowPlayers(Runner *runner, Instance *self, SnowReach *out) {
         InstanceBBox box = Collision_computeBBox(runner, inst);
         if (!box.valid) continue; /* Collision_circleOverlapsInstance: never */
         if (!isfinite(box.left) || !isfinite(box.top) || !isfinite(box.right) || !isfinite(box.bottom)) return -1;
+        out[count].box = box;
         out[count].left = box.left - (GMLReal) 4;
         out[count].top = box.top - (GMLReal) 4;
         out[count].right = box.right + (GMLReal) 4;
@@ -867,10 +869,31 @@ static int snowPlayers(Runner *runner, Instance *self, SnowReach *out) {
     return count;
 }
 
-static bool snowMayTouch(const SnowReach *players, int count, GMLReal cx, GMLReal cy) {
+static bool snowMayTouch(Runner *runner, const SnowReach *players, int count, GMLReal cx, GMLReal cy) {
     if (count < 0 || !isfinite(cx) || !isfinite(cy)) return true;
-    for (int i = 0; i < count; i++)
-        if (cx >= players[i].left && cx <= players[i].right && cy >= players[i].top && cy <= players[i].bottom) return true;
+    for (int i = 0; i < count; i++) {
+        if (!(cx >= players[i].left && cx <= players[i].right && cy >= players[i].top && cy <= players[i].bottom)) continue;
+        /* Inside the widened box: Collision_circleOverlapsInstance's closest-point test with the
+         * centre and radius the built-in works out, half a pixel to spare for rounding. */
+        GMLReal x = cx, y = cy, radius = (GMLReal) 2;
+        if (runner->collisionCompatibilityMode) {
+            GMLReal qx1r = GMLReal_bankersRound(x - radius), qy1r = GMLReal_bankersRound(y - radius);
+            GMLReal qx2r = GMLReal_bankersRound(x + radius), qy2r = GMLReal_bankersRound(y + radius);
+            x = (GMLReal) ((double) (qx1r + qx2r) * 0.5);
+            y = (GMLReal) ((double) (qy1r + qy2r) * 0.5);
+            GMLReal rx = (GMLReal) ((double) (qx2r - qx1r) * 0.5), ry = (GMLReal) ((double) (qy2r - qy1r) * 0.5);
+            radius = rx < ry ? rx : ry;
+        }
+        const InstanceBBox *box = &players[i].box;
+        GMLReal reach = radius + (GMLReal) 0.5;
+        GMLReal closestX = x, closestY = y;
+        if (box->left > closestX) closestX = box->left;
+        if (closestX > box->right) closestX = box->right;
+        if (box->top > closestY) closestY = box->top;
+        if (closestY > box->bottom) closestY = box->bottom;
+        GMLReal dx = closestX - x, dy = closestY - y;
+        if (!(dx * dx + dy * dy > reach * reach)) return true;
+    }
     return false;
 }
 
@@ -998,11 +1021,13 @@ static bool snowfloorDraw(VMContext *ctx) {
                         x += 1.0f;
                         y += 1.0f;
                     }
-                    /* Off the target it draws nothing; its only effect, settling held layers, the
-                     * event's first circle has had, and nothing since has held anything new. */
-                    if (!drewOne || !SWRenderer_filledEllipseOutside(runner->renderer, x, y, radius, radius)) {
+                    /* The event's first circle settles held layers; nothing drawn since holds anything
+                     * new, so the others can skip that (and need nothing at all off the target). */
+                    if (!drewOne) {
                         Renderer_drawCircle(runner->renderer, x, y, radius, false);
                         drewOne = true;
+                    } else if (!SWRenderer_drawFilledCircleSettled(runner->renderer, x, y, radius)) {
+                        Renderer_drawCircle(runner->renderer, x, y, radius, false);
                     }
                 }
             }
@@ -1018,7 +1043,7 @@ static bool snowfloorDraw(VMContext *ctx) {
              * overlaps the circle, so it is called only when one might. */
             bool touched = false;
             tests++;
-            if (snowMayTouch(players, playerCount, snowX->real, snowY->real)) {
+            if (snowMayTouch(runner, players, playerCount, snowX->real, snowY->real)) {
                 RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
                                    RValue_makeInt32(0), RValue_makeInt32(1) };
                 args[0].ownsReference = args[1].ownsReference = false;
