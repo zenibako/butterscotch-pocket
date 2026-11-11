@@ -16,6 +16,8 @@
 #include "utils.h"
 #include "vm_builtins.h"
 
+extern bool swrSmoothMinify; /* The replacement pipe art requires half-size Speed rendering. */
+
 /* Prompts beyond the ones of_strings.c renames for every game. */
 static const OfStringPatch g_strings[] = {
     /* Papyrus's date. */
@@ -292,7 +294,7 @@ static bool floweyPipeDraw(VMContext *ctx, int pipe) {
         { 12, 49, 85, 3, 40, (GMLReal)2.2 },
         { 15, 34, 45, 34, 40, (GMLReal)3 },
     };
-    if (!ofPlatformSpeedMode()) return false;
+    if (!ofPlatformSpeedMode() || !swrSmoothMinify) return false;
     Runner *runner = ctx->runner;
     Instance *self = ctx->currentCallFrame->self;
     if (runner == NULL || self == NULL || runner->currentRoom == NULL || ctx->globalScopeInstance == NULL ||

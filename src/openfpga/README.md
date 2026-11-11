@@ -121,6 +121,7 @@ make vm-call-args-fixture    # checks argument bounds, ownership and nested call
 make call-later-fixture WADS="16 17" # checks deferred script/method/builtin callback context
 make physics-contact-fixture WADS="16 17" # checks collision callback self/other and inheritance
 make tile-shift-fixture GAME=deltarune # compares the guarded native with supplied real bytecode
+make flowey-pipes-fixture     # checks full-resolution Speed fallback with supplied Undertale bytecode
 make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
                 # (GAME=deltarune: ./deltarune_pc, ./deltarune_pc_asan)
 make copy       # copy the core to a mounted Pocket SD card
@@ -194,6 +195,10 @@ unoptimized baseline without enforcing those work bounds. Run with the
 sanitizer flags above and also build `GAME=undertale WADS=16` to check exclusion.
 Creation and warm-up retain the interpreter; the native handles only bounded,
 finite active-state values behind the exact event length/hash guard.
+
+The Flowey pipe fixture is `./undertale_pc_flowey_pipes_fixture`. Pass your own
+Undertale `data.win` as its argument. It compares full-resolution Speed draws
+and typed state against the interpreter, and checks the half-size native path.
 
 The tile-shift fixture is `./deltarune_pc_tile_shift_fixture`. Pass the path to
 your own Chapter 1 `data.win` as its argument. It compares the interpreted

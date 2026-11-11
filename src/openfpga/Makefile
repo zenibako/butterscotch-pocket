@@ -433,6 +433,11 @@ forest-sentry-fixture: $(PC_OBJS)
 orange-particle-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/orange-particle.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_orange_particle_fixture
 
+# Real-asset oracle for full-resolution Speed pipe fallback and the half-size native.
+.PHONY: flowey-pipes-fixture
+flowey-pipes-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/flowey-pipes.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_flowey_pipes_fixture
+
 # Real-asset oracle for live background lookup and its guarded native path.
 .PHONY: background-lookup-fixture
 background-lookup-fixture: $(PC_OBJS)
