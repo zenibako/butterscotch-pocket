@@ -620,7 +620,10 @@ static SWTexture* swrBuildFloweyPipeBackdrop(SWRenderer* swr, int32_t item, cons
         if (vineItem < 0) continue;
         const TexturePageItem* vinePage = &swr->base.dataWin->tpag.items[vineItem];
         SWTexture* vine = swrTextureForItem(swr, vineItem);
-        if (vine == NULL) continue;
+        if (vine == NULL) {
+            swrFreeTexture(art);
+            return NULL;
+        }
         swrAddFloweyBackdropVines(art, vine, vinePage->sourceX - vine->originX,
                                  vinePage->sourceY - vine->originY, vinePage, layer);
 #if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
@@ -652,6 +655,9 @@ static SWTexture* swrBuildFloweyPipeBackdrop(SWRenderer* swr, int32_t item, cons
                 }
             }
 #endif
+        } else {
+            swrFreeTexture(art);
+            return NULL;
         }
     }
     return art;
@@ -728,8 +734,10 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
                 swr->scaleX == 0.5f && swr->scaleY == 0.5f && swrDrawFloweyPipeBackdrop(swr, tpagIndex, tpag, color))
                 return;
         }
-        for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
-            if (swr->floweyBackdropItems[i] == tpagIndex) return;
+        if (swr->floweyPipeBackdrop != NULL && swr->floweyPipeFrame == swr->frameCounter) {
+            for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
+                if (swr->floweyBackdropItems[i] == tpagIndex) return;
+        }
         if (swr->blendMode == bm_normal) {
             if (tpagIndex == swr->floweyOuterEyeShadow && color == 0 && alpha == 1.0f) return;
             if (angleDeg != 0.0f && fabsf(angleDeg) <= 2.0f) {
