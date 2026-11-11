@@ -1,9 +1,25 @@
 #include <stdlib.h>
 #include <errno.h>
+#ifdef OF_PC
+#include <stdio.h>
+#endif
 #include "sw_renderer_private.h"
 #include "sw_texture_pack.h"
 #include "image/image_decoder.h"
 #include "gettime.h"
+
+#ifdef PLATFORM_PACK_READ
+void platformTextureLoadTime(uint64_t nanos);
+#endif
+
+static unsigned finishTextureLoad(uint64_t start)
+{
+    uint64_t elapsed = nowNanos() - start;
+#ifdef PLATFORM_PACK_READ
+    platformTextureLoadTime(elapsed);
+#endif
+    return (unsigned) (elapsed / 1000000u);
+}
 
 #if defined(OF_NATIVE_SAVESTATES) && !defined(OF_PC)
 /* Only native save-state builds link this port hook. */
@@ -161,7 +177,14 @@ static SWTexture* loadFromPack(SWRenderer* swr, uint32_t pageId)
     texture->halfBuffer = NULL;
     texture->glyphHints = NULL;
     texture->buttonCache = NULL;
+    texture->rotatedRasters = NULL;
+    texture->eyeRasters = NULL;
+    texture->stationaryRasters = NULL;
+    texture->vineGrowthRows = NULL;
     texture->rowBounds = NULL;
+    texture->boxRows = NULL;
+    texture->floweyArtRows = NULL;
+    texture->pipeSolidBounds = NULL;
     texture->halfRowBounds = NULL;
     texture->halfFullBounds = NULL;
     texture->spans = texture->halfSpans = NULL;
@@ -263,6 +286,7 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId)
         texture = loadFromDataWin(swr, pageId);
     }
     if (!texture) {
+        finishTextureLoad(loadStart);
         size_t needed = (size_t) packW * packH * sizeof(uintpixel_t);
         logError("SWR: TXTR page %u needs %u KB; largest free block %u KB, cache %u KB\n", pageId, (unsigned) (needed / 1024),
                  (unsigned) (largestFreeBlock(needed ? needed : 16u * 1024u * 1024u) / 1024), (unsigned) (cachedBytes(swr) / 1024));
@@ -277,7 +301,7 @@ bool swrEnsureTextureIsLoaded(SWRenderer* swr, uint32_t pageId)
 #endif
     
     logInfo("SWR: Loaded TXTR page %u (%dx%d, %s) took %u ms, cache %u KB\n", pageId, texture->width, texture->height,
-            source, (unsigned)((nowNanos() - loadStart) / 1000000u), (unsigned)(cachedBytes(swr) / 1024));
+            source, finishTextureLoad(loadStart), (unsigned)(cachedBytes(swr) / 1024));
     return true;
 }
 
@@ -293,10 +317,36 @@ void swrFreeItemTextures(SWRenderer* swr)
     swr->itemCount = 0;
 }
 
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+static void captureFloweyOpeningItem(int32_t item, uint32_t page, int x, int y, int w, int h,
+                                     const uintpixel_t* buffer)
+{
+    static const char* dir;
+    static bool checked;
+    if (!checked) {
+        dir = getenv("BS_FLOWEY_OPENING_OUT");
+        checked = true;
+    }
+    if (!dir) return;
+
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%d.rgb555", dir, (int) item);
+    if (length < 0 || length >= (int) sizeof(path)) return;
+    FILE* out = fopen(path, "wbx");
+    if (!out) return;
+
+    uint16_t shape[] = {(uint16_t) page, (uint16_t) x, (uint16_t) y, (uint16_t) w, (uint16_t) h};
+    size_t pixels = (size_t) w * h;
+    bool ok = fwrite(shape, sizeof(*shape), 5, out) == 5 && fwrite(buffer, sizeof(*buffer), pixels, out) == pixels;
+    if (fclose(out) != 0 || !ok) remove(path);
+}
+#endif
+
 // Loads the item's rectangle, grown by a pixel on each side where the page
 // allows: scaled draws may sample one texel past the item, and should find
 // what is on the page there, as they would with the whole page loaded.
-static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_t pageId, int pageW, int pageH, bool* outOfMemory)
+static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_t pageId, int pageW, int pageH,
+                           int32_t tpagIndex, bool* outOfMemory)
 {
     *outOfMemory = false;
     int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
@@ -314,11 +364,18 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     SWTexture* texture = (SWTexture*) allocOrEvict(swr, sizeof(SWTexture));
     uintpixel_t* buffer = (uintpixel_t*) allocOrEvict(swr, bytes);
     *outOfMemory = !texture || !buffer;
-    if (*outOfMemory || !swrTexturePackDecodeRect(pageId, left, top, w, h, buffer)) {
+    bool openingItem = tpagIndex >= 0 && swr->floweySpeedRoom && swrSmoothMinify;
+    bool decoded = !*outOfMemory &&
+                   ((openingItem && swrTexturePackDecodeFloweyOpeningItem(tpagIndex, pageId, left, top, w, h, buffer)) ||
+                    swrTexturePackDecodeRect(pageId, left, top, w, h, buffer));
+    if (!decoded) {
         free(buffer);
         free(texture);
         return NULL;
     }
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+    if (openingItem) captureFloweyOpeningItem(tpagIndex, pageId, left, top, w, h, buffer);
+#endif
     
     texture->buffer = buffer;
     texture->width = (uint16_t) w;
@@ -326,7 +383,14 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->halfBuffer = NULL;
     texture->glyphHints = NULL;
     texture->buttonCache = NULL;
+    texture->rotatedRasters = NULL;
+    texture->eyeRasters = NULL;
+    texture->stationaryRasters = NULL;
+    texture->vineGrowthRows = NULL;
     texture->rowBounds = NULL;
+    texture->boxRows = NULL;
+    texture->floweyArtRows = NULL;
+    texture->pipeSolidBounds = NULL;
     texture->halfRowBounds = NULL;
     texture->halfFullBounds = NULL;
     texture->spans = texture->halfSpans = NULL;
@@ -336,6 +400,53 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->halfPhaseX = texture->halfPhaseY = 0;
     texture->originX = (uint16_t) left;
     texture->originY = (uint16_t) top;
+    return texture;
+}
+
+SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr)
+{
+    uint32_t pageId = (uint32_t) swr->textureCount;
+    if (!swrTexturePackHasFloweyBackdrop(pageId)) return NULL;
+
+    TexturePageItem item;
+    ZERO_STRUCT(item);
+    item.sourceWidth = SWR_FLOWEY_BACKDROP_WIDTH;
+    item.sourceHeight = SWR_FLOWEY_BACKDROP_HEIGHT;
+    uint64_t start = nowNanos();
+    SwrTexturePackStats stats;
+    swrTexturePackTakeStats(&stats);
+    bool outOfMemory;
+    SWTexture* texture = loadItem(swr, &item, pageId, item.sourceWidth, item.sourceHeight, -1, &outOfMemory);
+    unsigned ms = finishTextureLoad(start);
+    swrTexturePackTakeStats(&stats);
+    if (texture != NULL)
+        logInfo("SWR: Loaded baked Flowey backdrop: %u ms, %u reads, %u bytes\n",
+                ms, (unsigned) stats.reads, (unsigned) stats.bytes);
+    return texture;
+}
+
+SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, int height)
+{
+    if (!swrTexturePackHasFloweyStalk(pose, width, height)) return NULL;
+
+    uint64_t start = nowNanos();
+    size_t bytes = (size_t) width * height * sizeof(uintpixel_t);
+    makeRoomFor(swr, bytes);
+    SWTexture* texture = (SWTexture*) allocOrEvict(swr, sizeof(*texture));
+    uintpixel_t* pixels = texture ? (uintpixel_t*) allocOrEvict(swr, bytes) : NULL;
+    if (!pixels || !swrTexturePackDecodeFloweyStalk(pose, width, height, pixels)) {
+        free(pixels);
+        free(texture);
+        finishTextureLoad(start);
+        return NULL;
+    }
+    ZERO_STRUCT(*texture);
+    texture->buffer = pixels;
+    texture->width = (uint16_t) width;
+    texture->height = (uint16_t) height;
+    texture->solid = 2;
+    unsigned ms = finishTextureLoad(start);
+    logInfo("SWR: Loaded baked Flowey stalk pose %u in %u ms\n", pose, ms);
     return texture;
 }
 
@@ -380,8 +491,9 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
         SwrTexturePackStats stats;
         swrTexturePackTakeStats(&stats);
         bool outOfMemory;
-        item = loadItem(swr, tpag, (uint32_t) pageId, pageW, pageH, &outOfMemory);
+        item = loadItem(swr, tpag, (uint32_t) pageId, pageW, pageH, tpagIndex, &outOfMemory);
         if (item == NULL) {
+            finishTextureLoad(loadStart);
             // Out of memory is worth backing off from: making room has cost
             // other textures. A read that failed is tried again on the next
             // draw; that passes (the storage was busy) and holding the page
@@ -407,8 +519,8 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 #ifdef TEXTURE_CACHE_RESERVE_BYTES
         keepHeapReserve(swr);
 #endif
-        // Only the slow ones are worth a line; the platform reads the time off it.
-        uint32_t tookMs = (uint32_t) ((nowNanos() - loadStart) / 1000000u);
+        // Keep the log short. The benchmark counts fast loads too.
+        unsigned tookMs = finishTextureLoad(loadStart);
         if (tookMs >= 20) {
             swrTexturePackTakeStats(&stats);
             logInfo("SWR: Loaded TXTR item %d of page %d (%dx%d, pack) took %u ms, cache %u KB\n", (int) tpagIndex, (int) pageId,

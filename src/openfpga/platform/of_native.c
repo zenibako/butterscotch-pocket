@@ -36,6 +36,7 @@ void ofNativeInstall(Runner *runner) {
     }
     if (getenv("BS_NO_NATIVE") != NULL) return;
 #endif
+    if (ofGame.installCollisionFilter != NULL) ofGame.installCollisionFilter(runner);
     for (size_t n = 0; n < ofGame.nativeCount; n++) {
         uint32_t length = 0;
         if (VM_codeHash(vm, ofGame.natives[n].name, &length) == 0) continue; /* another game */

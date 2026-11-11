@@ -39,11 +39,96 @@ MHz matrix inventories evidence; this project need not evaluate all four cells.
 Variant labels do not determine clock or cache sizes.
 
 Prefer a separate benchmark core beside gameplay, with isolated settings,
-progress, result slots and Memories identity. The current focused package adds
-diagnostic launch entries under the gameplay core; it is not a dedicated core.
-Preserve its existing save isolation. Match relevant production paths and record
-instrumentation, renderer, audio and pacing differences. Do not overwrite shared
-runtime/assets while constructing side-by-side packages.
+progress, result slots and Memories identity. The additive bullet-hell package
+uses `zenibako.BsBullet`, `bs_bullet.elf`, `bs_bullet_os.bin` and isolated
+`bs_bullet_0.sav` through `bs_bullet_9.sav`; it preserves asset slots 4–7 and
+leaves the gameplay core and saves unchanged. The current focused package adds
+diagnostic launch entries under the gameplay core instead; preserve its existing
+save isolation. Match relevant production paths and record instrumentation,
+renderer, audio and pacing differences. Do not overwrite shared runtime/assets
+while constructing side-by-side packages.
+
+Build the diagnostic ELF from clean committed source with the matched SDK and
+`GAME=undertale APP=bs_bullet SAVESTATES=1 FOCUS_BENCH=0` using the `elf`
+target. Set `OF_BUILD_NOTE=<version>-<short-commit>` to identify each A/B build
+in returned report titles. The packager checks that the RISC-V ELF uses the
+benchmark's save and log slot names. Pass that ELF and an explicit test version.
+
+```sh
+python3 src/openfpga/tools/mkbullet.py \
+  --elf src/openfpga/out/bullet-build/.obj/bs_bullet/app.elf \
+  --version "$VERSION_WITHOUT_V" \
+  --output "../artifacts/bullet-hell-$(git rev-parse --short HEAD)/bullet-hell.zip"
+```
+
+The ZIP contains no game data or saves. It has entries for the full bullet-hell
+tour, the short Chaos Saber benchmark and the Photoshop Flowey checkpoint tour:
+
+| Entry | Exact `ARGS=` value |
+| --- | --- |
+| Bullet Hell - Accuracy | `--bench-bullet-hell` |
+| Bullet Hell - Speed | `--bench-bullet-hell-smooth` |
+| Bullet Hell - No Render | `--bench-bullet-hell --draw-every 100000` |
+| Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
+| Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
+| Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Chaos Saber - Accuracy | `--bench-chaos-saber` |
+| Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
+| Flowey - Accuracy | `--bench-flowey` |
+| Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - Speed (Live Pacing) | `--bench-flowey-live` |
+| Flowey - No Render | `--bench-flowey --draw-every 100000` |
+| Flowey - No Audio | `--bench-flowey --mute` |
+| Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
+| Flowey - Profile | `--bench-flowey --scripts` |
+
+For the short Chaos Saber benchmark, compare the 150-frame `saber` rows
+in Accuracy and Speed. Both use the same direct Asriel entry and 82-frame
+setup. Use a separate baseline from the full tour, which enters via Asgore
+and consumes a different sequence of random numbers. The short benchmark
+skips the standalone SD and renderer probes.
+
+For Flowey, compare the 160-frame `vines` and `eyes` rows. Both are natural
+attack windows in `room_floweyx`, reached via its phase 2 and phase 6
+checkpoints. The `vset` and `fset` rows include entry and warmup and should
+be kept separate from attack timing. Flowey uses the same `bs_bullet_1.sav`
+report slot as the Asriel tour.
+
+Use Live Pacing to measure gameplay cadence with the Speed limiter active.
+It reports completed game updates, adaptive screen skips, display
+submissions, and elapsed wall time, including the limiter's wait. The
+`other` column includes updates during room transitions that do not submit
+a picture. Separate `drawn` and `skip` rows report the sample count and
+average work, limiter wait, and total milliseconds per update. An update
+with no eligible swap stays in the wall-clock rate and out of both timing
+rows. A drawn update can count without a display submission, for example
+when the desktop flip is disabled. The uncapped Speed entry measures the
+cost of drawing every frame. Compare timings within the same entry.
+
+The Flowey opening table uses scripted update numbers so it also includes the
+room transition, which can occur without a display submission. `cold` and
+`return` cover entry through the first backdrop draw. Each is followed by
+separate fade, hold, and TV laugh windows. The second entry is a later
+checkpoint in the same process and can reuse textures from the first.
+`tx-ms` sums texture load time in each window, and `max-ms` is the longest
+update's work time. `warm-ms` averages only drawn updates with no texture
+loads. A dash means there were no such samples. Audio work is still included.
+
+The texture window read table separates successful direct reads, declined
+direct attempts, and the ensuing stdio attempts for the same windows. A
+decline includes an unavailable direct backend. Counts are renderer read
+windows, and the time columns are totals in milliseconds for each backend.
+
+The `45x31 raster` lines show the number of rotated sprite calls on the timed
+frames and the mean microseconds per call. `warm` reuses a cached raster,
+`build` creates and blits one, `pivot` bypasses the cache because the pivot
+is outside the supported range or off its half-pixel grid, and `other` covers
+remaining fallbacks. These calls also appear in the ordinary sprite totals.
+
+Start with repeated paired Accuracy and Speed runs on the same Pocket. Add No
+Render, No Audio, Core Only and Profile only when attribution is needed. Record
+the actual ELF, version, flags and package hash privately with the collected
+reports; do not publish this diagnostic package as a stable release.
 
 Prepare a version-1 platform definition using the harness's `PLATFORMS.md` shape.
 Declare the actual CPU/ISA/issue/cache/features and OS/SDK source identities.
@@ -79,11 +164,20 @@ optional `deployment` describes package/core/save identities. Use the harness's
 metadata schema rather than inventing missing measurements or identities.
 
 Finish sampling before screenshots or report writes. Quit through the Analogue
-menu after each focused mode to flush save RAM, then mount the card. Standard
-logs are `Saves/butterscotch/common/undertale_1.sav` or `deltarune_1.sav`;
-focused tiles reports accumulate in `deltarune_tiles_1.sav`. Preserve the original
-NUL-padded file; text ends at the first NUL. Old/duplicate reports can remain.
-Inspect the chosen file and explicitly select the intended complete block:
+menu after each focused or bullet-hell mode to flush save RAM, then mount the
+card. Standard logs are `Saves/butterscotch/common/undertale_1.sav` or
+`deltarune_1.sav`; focused tiles reports accumulate in `deltarune_tiles_1.sav`.
+Each bullet-hell entry reports to `bs_bullet_1.sav` in that same directory:
+collect a fresh, private snapshot after the Analogue-menu quit and before
+launching the next entry. Preserve the NUL padding in the snapshot. Use
+`pocket_card.py collect` with the local mount or the authorized SSH host.
+[Card collection commands](../../../.agents/skills/butterscotch-pocket-build/references/sd-card.md#collect-a-benchmark-save)
+
+Use the local [log history check](../../../.agents/skills/butterscotch-pocket-perf/SKILL.md#reading-the-log-off-the-card)
+to identify complete report blocks and exact copies across files.
+
+For formats recognized by the shared collector, inspect the chosen file and
+explicitly select the intended complete block.
 
 ```sh
 python3 -m benchmarks inspect "$LOG"
@@ -95,12 +189,13 @@ python3 -m benchmarks verify build/benchmarks/RUN_ID
 
 Use the printed bundle path in place of `RUN_ID`. Bind each import to its known
 matching variant and clock; the device's numeric core variant does not identify
-os20/os25. Import each focused mode separately with its actual metadata and the
-route's seed 7, seven windows and completion markers. A complete `FOCUS FAIL`
-report can be imported and remains failed evidence. Keep incomplete raw reports
-privately too; the collector refuses incomplete imports. Standard logs lack an
-embedded source commit and independent correctness oracle; their build
-attribution remains declared.
+os20/os25. Import each supported mode separately with its actual metadata,
+seed 7, route-specific section/window roster and completion markers. Use the
+local history check for report titles the collector does not recognize.
+A complete `FOCUS FAIL` report can be imported and remains failed evidence.
+Keep incomplete raw reports privately too. Use actual package provenance for
+build attribution. A legacy report without a build label needs independent
+provenance.
 
 Keep raw logs, profiles, metadata, screenshots, bundles and selection notes
 private under the harness's ignored `build/`; never add game inputs, progress,
@@ -134,8 +229,13 @@ legacy unbound comparisons remain provisional.
 
 Preserve literal units and every source limitation. Multiple changed factors
 are a combined experiment; different-ELF configurations cannot isolate a CPU,
-cache, clock, OS or compiler effect. Overlapping counters and counterfactual
-no-render/no-audio modes are not additive. Select the best eligible tested
+cache, clock, OS or compiler effect. Bullet-hell No Render skips ordinary frame
+presentation except at the configured draw interval, No Audio disables audio
+work, and Core Only combines those counterfactuals rather than isolating a pure
+CPU/VM measurement: their overlapping savings are not additive, and none
+predicts an ordinary gameplay configuration by subtraction. Profile adds script
+instrumentation and changes timing; use its counters for workload attribution
+and rankings, never as baseline frame times. Select the best eligible tested
 configuration against this project's targets and observed variability, or report
 a tie/insufficient evidence. One candidate shows suitability, not superiority
 over untested profiles. There is no automatic ranking command.

@@ -232,9 +232,35 @@ static void work(void) {
     f.sprites[0].masks = f.masks[0]; f.masks[0][0] = f.masks[0][1] = NULL;
     assert(!pair(&f, all, all));
 }
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+static void rotationCache(void) {
+    Fixture f;
+    init(&f);
+
+    resetCounts();
+    CollisionRotation first = Collision_rotation(&f.runner, 4.0f);
+    CollisionRotation repeated = Collision_rotation(&f.runner, 4.0f);
+    assert(first.cosine == repeated.cosine && first.sine == repeated.sine);
+    bound("same angle reuses trig", 0, 0, 1);
+
+    // Four and five degrees address the same slot. Replacing an entry
+    // must still produce the exact coefficients for both angles.
+    resetCounts();
+    CollisionRotation other = Collision_rotation(&f.runner, 5.0f);
+    CollisionRotation replaced = Collision_rotation(&f.runner, 4.0f);
+    assert(other.cosine == cosf((float)(5.0 * M_PI / 180.0)));
+    assert(other.sine == sinf((float)(5.0 * M_PI / 180.0)));
+    assert(first.cosine == replaced.cosine && first.sine == replaced.sine);
+    bound("different angle replaces trig", 0, 0, 2);
+    checks += 4;
+}
+#endif
 int main(int argc, char **argv) {
     behaviorOnly = argc > 1 && !strcmp(argv[1], "--behavior-only");
     literals(); differential(); work();
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+    rotationCache();
+#endif
     printf("WAD%d: %u behavior checks, %u work-bound failures\n", FIXTURE_WAD, checks, workFailures);
     return workFailures ? 1 : 0;
 }

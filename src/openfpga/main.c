@@ -128,6 +128,29 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(tourSmooth);
             if (!ofBenchStartTour()) logWarn("Bench: this game has no battle tour\n");
         }
+        /* --bench-bullet-hell (accuracy) and --bench-bullet-hell-smooth (speed): the bullet tour. */
+        bool bulletSmooth = strcmp(argv[i], "--bench-bullet-hell-smooth") == 0;
+        if (bulletSmooth || strcmp(argv[i], "--bench-bullet-hell") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(bulletSmooth);
+            if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
+        }
+        bool saberSmooth = strcmp(argv[i], "--bench-chaos-saber-smooth") == 0;
+        if (saberSmooth || strcmp(argv[i], "--bench-chaos-saber") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(saberSmooth);
+            if (!ofBenchStartChaosSaber()) logWarn("Bench: this game has no Chaos Saber benchmark\n");
+        }
+        bool floweySmooth = strcmp(argv[i], "--bench-flowey-smooth") == 0;
+        bool floweyLive = strcmp(argv[i], "--bench-flowey-live") == 0;
+        if (floweyLive || floweySmooth || strcmp(argv[i], "--bench-flowey") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(floweyLive || floweySmooth);
+            if (!ofBenchStartFloweyTour(floweyLive)) logWarn("Bench: this game has no Flowey tour\n");
+        }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */
@@ -154,7 +177,7 @@ int main(int argc, char **argv) {
 
 #ifdef OF_PC
     if (getenv("BS_SCRIPT") != NULL) ofPlatformSetInputScript(getenv("BS_SCRIPT"));
-    if (getenv("BS_UNCAPPED") != NULL) ofPlatformSetUncapped(true);
+    if (getenv("BS_UNCAPPED") != NULL && !ofBenchLivePacing()) ofPlatformSetUncapped(true);
     if (getenv("BS_SMOOTH") != NULL) ofPlatformSetSmoothLowres(true);
     /* BS_NO_MIRROR=1 draws mirrored layers the ordinary way; BS_MIRROR_FAINT=<alpha of 256> sets how faint
      * a mirrored layer has to be to be left out (4 leaves none out). For comparing frames. */
@@ -197,6 +220,10 @@ int main(int argc, char **argv) {
 #ifdef OF_TRACE_FRAMES
     args.traceFrames = true;
 #endif
+    if (ofBenchLivePacing() && ofPlatformForcedSkip() > 0) {
+        logError("Bench: Flowey live pacing cannot be combined with forced skipping\n");
+        return EXIT_FAILURE;
+    }
 
     int ret = loop(args, OF_GAME_NAME);
     freeCommandLineArgs(&args);

@@ -108,22 +108,30 @@ make button-prompts-fixture  # builds the asset-free prompt, font and icon regre
 make deltarune-button-prompts-fixture  # builds generated-label and fallback checks
 make string-reads-fixture    # builds the asset-free string read/ownership regression
 make collision-work-fixture  # builds asset-free collision order/mutation checks
+make drawable-order-fixture  # checks legacy drawable ordering and guarded fallback without game data
 make collision-precise-fixture GAME=undertale WADS=16 # checks precise pairs against scalar sampling
 make collision-precise-fixture GAME=deltarune WADS=17 # checks the Chapter 1 configuration
 make font-sampling-fixture   # checks doubled fonts and unchanged fallback filters
 make menu-fixture            # checks menu help, scrolling and navigation without game data
 make battle-contrast-fixture # checks shared speech, battle labels and buttons
 make solid-fill-fixture      # builds exact RGB555 fill/blending and boundary checks
+make bench-scene-fixture     # builds asset-free benchmark room/live-object checks
 make spatial-grid-fixture    # builds asset-free grid recovery/update checks
 make layer-lookup-fixture    # checks layer lookup order, mutation and repeated work
 make vm-call-args-fixture    # checks argument bounds, ownership and nested calls
 make call-later-fixture WADS="16 17" # checks deferred script/method/builtin callback context
 make physics-contact-fixture WADS="16 17" # checks collision callback self/other and inheritance
 make tile-shift-fixture GAME=deltarune # compares the guarded native with supplied real bytecode
+make flowey-pipes-fixture     # checks full-resolution Speed fallback with supplied Undertale bytecode
 make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
                 # (GAME=deltarune: ./deltarune_pc, ./deltarune_pc_asan)
 make copy       # copy the core to a mounted Pocket SD card
 ```
+
+Pass `OF_BUILD_NOTE=<label>` to `make` to identify an experimental build in
+benchmark report titles. The label defaults to the extra compiler flags in
+`OF_OPT`. For an explicit label, use only ASCII letters, digits, dots,
+underscores and hyphens; quotes and backslashes are not supported.
 
 The collision fixture is `./<game>_pc_collision_work_fixture`. Build with one
 explicit `WADS=16` or `WADS=17`; add `PC_EXTRA_CFLAGS=-DOF_COLLISION_WORK_PROFILE`
@@ -164,6 +172,10 @@ The layer lookup fixture is `./<game>_pc_layer_lookup_fixture`. It checks ordere
 ID lookup, missing IDs, structural mutations and bounded repeated-hit work using
 the actual runner and layer builtins. Use a separate object directory per game.
 
+The drawable-order fixture is `./<game>_pc_drawable_order_fixture`. Run it
+without arguments to compare legacy draw ordering with independent ranks and
+check insertion sorting, bounded fallback, and unsupported-room guards.
+
 The VM call fixture is `./<game>_pc_vm_call_args_fixture`. It exercises actual
 CALL bytecode and WAD17 CALLV bytecode, stack/heap argument boundaries, value
 ownership and nested script/event execution without game assets. Run it once
@@ -189,6 +201,10 @@ unoptimized baseline without enforcing those work bounds. Run with the
 sanitizer flags above and also build `GAME=undertale WADS=16` to check exclusion.
 Creation and warm-up retain the interpreter; the native handles only bounded,
 finite active-state values behind the exact event length/hash guard.
+
+The Flowey pipe fixture is `./undertale_pc_flowey_pipes_fixture`. Pass your own
+Undertale `data.win` as its argument. It compares full-resolution Speed draws
+and typed state against the interpreter, and checks the half-size native path.
 
 The tile-shift fixture is `./deltarune_pc_tile_shift_fixture`. Pass the path to
 your own Chapter 1 `data.win` as its argument. It compares the interpreted
@@ -533,6 +549,15 @@ readability at half resolution. Both games use the shared sampler in
 assets and active battle context. Accuracy and non-battle screens keep their
 ordinary sampling.
 
+In the Photoshop Flowey fight, Speed mode uses a static backdrop for the
+decorative pipes and layered background vines. The long attacking vines use
+the original artwork, with a sharp disappearance when they stop dealing damage.
+The side stalks animate
+in fewer poses, and the mouth and eye surrounds have simpler motion and
+shading. The idle arms and TV casing have coarser shading, and the animated TV
+face uses a steadier width. The arm windups, strikes, TV warnings, and vine
+warning lines keep their original animation.
+
 `make battle-contrast-fixture` builds `./<game>_pc_battle_contrast_fixture`
 without game assets. Run it once for each `GAME` to check game-specific
 selection as well as shared coverage, clipping, cache isolation and fallback
@@ -665,6 +690,108 @@ code, drawing by kind of call, sound, presenting) and the draw calls that
 cost the most. `platform/of_bench.c` has the route and says what each
 table's columns are. Quote numbers from a report together with the commit
 it was built from.
+
+Undertale also has a bullet-hell tour: `--bench-bullet-hell` measures
+Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
+Asgore control is followed by two 150-frame natural attack sections,
+Asriel's Chaos Saber and a green-spear turn from the first Lost Soul. Encounter
+and turn setup are separate report sections, not attack windows; a final
+one-frame capture tail is not an attack either. The Asgore control checks
+for `obj_asgoreb` in `room_battle`. Each attack section checks
+`room_battle` and its observed projectile controller (`obj_ultimagen` or
+`obj_greenspeargen`). A missing scene logs `BENCH FAIL`, halts on the Pocket,
+and exits with a failure status on desktop. Asriel is not force-cleared.
+Benchmark saves are volatile: the route neither reads nor writes ordinary
+progress.
+
+For a shorter Asriel run, `--bench-chaos-saber` enters the Asriel battle
+directly and measures one 150-frame Chaos Saber turn after 82 setup frames.
+`--bench-chaos-saber-smooth` runs the same route in Speed mode. The `saber`
+row covers the turn from wind-up through its final active frame. The report
+checks that the attack controller is still live and the player has HP at
+that boundary, then halts. This run skips the standalone post-run probes.
+
+The Photoshop Flowey tour uses Undertale v1.08's `room_floweyx` checkpoints
+at `fplot=3` and `fplot=7`. It reports 160 frames of phase 2 vine pressure
+(`vines`) and 160 frames of phase 6 eye shots (`eyes`), with room entry and
+attack setup reported separately. Each window ends with the expected battle
+phase, positive HP and its live attack object (`obj_gigavine` or
+`obj_eyeshot_a`). All three modes use seed 7 and volatile saves. Leave the
+controls alone while it runs.
+
+`--bench-flowey-live` runs the same checkpoints with the normal Speed
+mode limiter and adaptive draw skipping. The report shows gameplay updates
+per wall-clock second, display submissions, and skipped draws for each
+section. The `drawn` and `skip` rows give average work, limiter wait, and
+total milliseconds per update. Full speed is 30 updates per second.
+
+`tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
+core. Its launch entries and exact arguments are:
+
+| Entry | Arguments |
+|---|---|
+| Bullet Hell - Accuracy | `--bench-bullet-hell` |
+| Bullet Hell - Speed | `--bench-bullet-hell-smooth` |
+| Bullet Hell - No Render | `--bench-bullet-hell --draw-every 100000` |
+| Bullet Hell - No Audio | `--bench-bullet-hell --mute` |
+| Bullet Hell - Core Only | `--bench-bullet-hell --draw-every 100000 --mute` |
+| Bullet Hell - Profile | `--bench-bullet-hell --scripts` |
+| Chaos Saber - Accuracy | `--bench-chaos-saber` |
+| Chaos Saber - Speed | `--bench-chaos-saber-smooth` |
+| Flowey - Accuracy | `--bench-flowey` |
+| Flowey - Speed | `--bench-flowey-smooth` |
+| Flowey - Speed (Live Pacing) | `--bench-flowey-live` |
+| Flowey - No Render | `--bench-flowey --draw-every 100000` |
+| Flowey - No Audio | `--bench-flowey --mute` |
+| Flowey - Core Only | `--bench-flowey --draw-every 100000 --mute` |
+| Flowey - Profile | `--bench-flowey --scripts` |
+
+The package contains the benchmark ELF, matched os25 runtime and launch
+metadata, but no game data or save files. Install the Undertale data separately;
+slots 4–7 retain the ordinary asset filenames while the ELF, OS config and all
+ten save slots use the isolated `bs_bullet` prefix. The report is
+`Saves/butterscotch/common/bs_bullet_1.sav`. Quit through the Analogue menu
+after every entry to flush save RAM, then preserve that report before launching
+another entry. No Render, No Audio and Core Only are counterfactual attribution
+modes, not predictions whose savings can be added together. Profile
+instrumentation changes timing; its script totals are workload rankings, not
+baseline timings.
+
+An optional baked backdrop avoids loading the five source sprites on Flowey's
+first Speed-mode fade draw. With the stock Undertale pack and a desktop build,
+set `BS_FLOWEY_BACKDROP_OUT` to a new file and run `--bench-flowey-smooth`
+through the Photoshop intro. Use
+`python3 tools/flowey_texture_pack.py textures.bin <capture> bs_bullet_music.bin --music music.bin`
+to append the captured neutral-pose art to a private copy of the asset.
+Pass `--baked-flowey-pack` to `tools/mkbullet.py` and place
+`bs_bullet_music.bin` in `Assets/butterscotch/common/` alongside the ordinary
+assets. The package ZIP still contains only the core and launch files.
+
+To bake the held side-stalk poses too, set `BS_FLOWEY_STALKS_OUT` to an empty
+directory on the same desktop run and continue through the TV laugh. Pass
+`--stalks <directory>` to `flowey_texture_pack.py` and write the output as
+`bs_stalk_music.bin`. Install it alongside the ordinary assets and use
+`--baked-stalk-pack` when packaging the benchmark core.
+
+For the grouped opening textures, also set `BS_FLOWEY_OPENING_OUT` to a
+separate empty directory on that run. Pass `--opening <directory>` alongside
+`--stalks`, write the output as `bs_open_music.bin`, and package the benchmark
+core with `--baked-opening-pack`.
+
+The Flowey report's `45x31 raster` lines break down rotating pipe draws by
+cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
+
+On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
+`BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
+`BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,
+`BS_OBJECTS=<frame>` records live objects, `BS_DUMP_FRAME=<frame>` with
+`BS_DUMP_PATH=<file>` captures one image, and `BS_DUMP_EVERY=<n>` with
+`BS_DUMP_DIR=<directory>` captures periodically. `--draw-every 100000`
+checks the no-render path, `--mute` checks disabled audio, and `--scripts`
+enables the script profile. Profile totals are workload rankings, not
+baseline timings. Desktop runs establish route correctness and determinism
+only; they do not prove Pocket timing, memory pressure, SD behavior,
+video-mode behavior or hardware audio behavior.
 
 The boot log stays on screen while loading, and every Butterscotch log line
 is prefixed with seconds since start, so load stages can be timed by eye.

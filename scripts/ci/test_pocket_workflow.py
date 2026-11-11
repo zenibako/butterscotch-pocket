@@ -111,7 +111,9 @@ class PocketWorkflowTests(unittest.TestCase):
             ("bs_pc_fonts_font_sampling_fixture", []),
             *[("bs_pc_fonts_menu_fixture", [str(height)]) for height in (0, 6, 16, 24)],
             ("bs_pc_battle_undertale_battle_contrast_fixture", []),
+            ("bs_pc_battle_undertale_drawable_order_fixture", []),
             ("bs_pc_battle_deltarune_battle_contrast_fixture", []),
+            ("bs_pc_battle_deltarune_drawable_order_fixture", []),
         ])
         makes = [row["args"] for row in records if row["tool"] == "make"]
         for target in ("undertale_pc", "deltarune_pc", "snapshot-tests", "lint"):

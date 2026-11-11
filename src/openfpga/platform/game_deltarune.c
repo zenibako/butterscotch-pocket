@@ -584,15 +584,15 @@ static const OfJump g_jumps[] = {
 };
 
 static const OfBenchSection g_sections[] = {
-    { "opening text 320x240", 1700, "text" },
-    { "creation screens 320", 2100, "creat" },
-    { "town yard 320x240", 2600, "yard" },
-    { "field (640x480)", 3050, "field" },
+    { "opening text 320x240", 1700, "text", NULL, NULL, NULL },
+    { "creation screens 320", 2100, "creat", NULL, NULL, NULL },
+    { "town yard 320x240", 2600, "yard", NULL, NULL, NULL },
+    { "field (640x480)", 3050, "field", NULL, NULL, NULL },
     /* The battle in three: choosing and attacking, the enemy's turn (the
      * heart in its box among the bullets), and the turn after. */
-    { "battle: menu, attack", 3225, "bmenu" },
-    { "battle: dodging", 3380, "dodge" },
-    { "battle: next turn", 3600, "bnext" },
+    { "battle: menu, attack", 3225, "bmenu", NULL, NULL, NULL },
+    { "battle: dodging", 3380, "dodge", NULL, NULL, NULL },
+    { "battle: next turn", 3600, "bnext", NULL, NULL, NULL },
 };
 
 /* The cutscene marker describes player control, not a missing snapshot

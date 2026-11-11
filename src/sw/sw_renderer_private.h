@@ -6,6 +6,11 @@
 #include "sw_pixel_convert.h"
 
 enum { SWR_FONT_BUBBLE_CONTRAST = 1, SWR_FONT_WHITE_CONTRAST = 2 };
+enum {
+    SWR_FLOWEY_STALK_HOLD = 6,
+    SWR_FLOWEY_STALK_FRAMES = 62,
+    SWR_FLOWEY_STALK_POSES = (SWR_FLOWEY_STALK_FRAMES + SWR_FLOWEY_STALK_HOLD - 1) / SWR_FLOWEY_STALK_HOLD
+};
 
 // Frees the composed tile-run pictures (sw_renderer.c); they are rebuilt on
 // the next draw. Returns false if there were none.
@@ -65,6 +70,10 @@ typedef struct
     // change (immutable: one loaded from the game's data, not a surface).
     SWGlyphHintCache* glyphHints; // freed with the immutable source texture
     SWButtonCache* buttonCache;
+    struct SWRotatedRasterCache* rotatedRasters;
+    struct SWRotatedRasterCache* eyeRasters;
+    struct SWRotatedRasterCache* stationaryRasters;
+    struct SWVineGrowthCache* vineGrowthRows;
     uintpixel_t* halfBuffer;
     uint8_t* halfCoverage;  // how many of its four texels each copied one stands for, 0..4; NULL when every one is 0 or 4
     bool immutable;
@@ -80,6 +89,9 @@ typedef struct
     // immutable texture only (swrRowBounds); the half-size copy's are made
     // with it and live in its allocation.
     uint16_t* rowBounds;
+    struct SWBoxRows* boxRows;
+    struct SWFloweyArtRows* floweyArtRows;
+    uint16_t* pipeSolidBounds; // longest fully opaque point and 2x2 runs per row
     uint16_t* halfRowBounds;
     uint16_t* halfFullBounds; // per row of the half-size copy, the longest run of texels standing for all four of theirs: [start, end)
     // For each row, the runs of opaque texels other than spansColor, so that a
@@ -93,6 +105,7 @@ SWTexture;
 
 const SWButtonCache* swrButtonCache(SWTexture* texture, int sx, int sy, int sw, int sh);
 void swrFreeButtonCache(SWTexture* texture);
+void swrFreeBoxRows(SWTexture* texture);
 
 typedef struct
 {
@@ -132,6 +145,13 @@ typedef struct {
     bool solid;
 } SWMirrorLayer;
 
+typedef struct {
+    uint32_t angleBits;
+    float cosine, sine;
+} SWRotation;
+
+#define SWR_ROTATION_CACHE_SIZE 64
+
 typedef struct
 {
     Renderer base;
@@ -151,6 +171,20 @@ typedef struct
     uint8_t* contrastItems;
     uint8_t* contrastFonts;
     uint32_t contrastItemCount, contrastFontCount;
+    bool floweySpeedRoom;
+    int32_t floweyVineItem;
+    int32_t floweyStalkSprite, floweyStalkFirst, floweyStalkLast;
+    int32_t floweyArmItem, floweyTvCaseItem, floweyTvScreenSprite;
+    int32_t floweyOuterEyeShadow;
+    int32_t floweyPipeItem;
+    uint32_t floweyPipeFrame;
+    SWTexture* floweyPipeBackdrop;
+    SWTexture* floweyStalkEyePipes;
+    SWTexture* floweyStalkPoses[SWR_FLOWEY_STALK_POSES];
+    uint16_t floweyStalkLoadTried;
+    int32_t floweyTrimItems[5];
+    int32_t floweyBackdropItems[4];
+    unsigned floweyBackdropCount;
     uintpixel_t* mainFb;
     uint16_t mainWidth;
     uint16_t mainHeight;
@@ -194,6 +228,10 @@ typedef struct
     int overlayFirstAlpha;
     float overlayKeep;              // share of the destination that still shows through
     float overlayRed, overlayGreen, overlayBlue; // accumulated colour, 5-bit channel * 256
+
+    SWSpriteCall pipeCalls[3];
+    int pipeCount;
+    struct SWPipeLayer* pipePlan;
     
     // Translucent layers drawn as four mirrored quarters, held back so that one
     // quarter can be blended and copied to the other three (see swrMirrorFlush).
@@ -243,6 +281,9 @@ typedef struct
     int primitiveType;
     bool primitiveBegun;
     bool primitiveOverflow;
+
+    SWRotation rotationCache[SWR_ROTATION_CACHE_SIZE];
+    int32_t floweyPipeSegmentItem;
 }
 SWRenderer;
 

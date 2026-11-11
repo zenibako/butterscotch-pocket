@@ -70,10 +70,10 @@ static bool checkDraw(SWRenderer* reference, SWRenderer* clipped, SWTexture* tex
  * Verify that cached runs honor both clip edges and blend partial coverage
  * over the existing background while leaving transparent gaps untouched.
  */
-static bool checkSparseHalfDraw(void)
+static bool checkSparseHalfDraw(float alpha)
 {
     enum { WIDTH = 144, HEIGHT = 3, LEFT = 7, RIGHT = 142 };
-    const uintpixel_t under = 0xfc00, ink = 0x83e0, halfInk = 0xbde0;
+    const uintpixel_t under = 0xfc00, ink = 0x83e0;
     uintpixel_t pixels[WIDTH * HEIGHT * 4] = { 0 };
     SWTexture texture = { 0 };
     texture.buffer = pixels;
@@ -86,7 +86,9 @@ static bool checkSparseHalfDraw(void)
             pixels[WIDTH * 2 + x * 2] = pixels[WIDTH * 2 + x * 2 + 1] = ink;
         }
     }
-    pixels[80] = pixels[81] = ink; // a half-covered pixel between the two clipped runs
+    pixels[80] = pixels[81] = ink;
+    pixels[82] = ink;
+    pixels[84] = pixels[85] = pixels[WIDTH * 2 + 84] = ink;
     SWRenderer renderer;
     setup(&renderer, WIDTH);
     renderer.portX = renderer.viewX = LEFT;
@@ -95,16 +97,20 @@ static bool checkSparseHalfDraw(void)
     swrFillPixels(renderer.fb, WIDTH * WIDTH, under);
     swrFavorSpeed = swrSmoothMinify = true;
     swrDrawSprite((Renderer*) &renderer, 0, 0, WIDTH, HEIGHT, &texture,
-                  0, 0, texture.width, texture.height, 0xffffff, 1.0f);
+                  0, 0, texture.width, texture.height, 0xffffff, alpha);
     swrOverlayFlush(&renderer);
-    bool ok = texture.halfSpans != NULL;
+    bool ok = alpha < 1.0f || texture.halfSpans != NULL;
     if (!ok) fprintf(stderr, "FAIL: sparse half-size sprite did not cache its runs\n");
     for (int y = 0; y < HEIGHT; y++) {
         for (int x = 0; x < WIDTH; x++) {
             uintpixel_t expected = under;
             if (y == 0 && x >= LEFT && x < RIGHT) {
-                if (x < 14 || x >= 139) expected = ink;
-                else if (x == 40) expected = halfInk;
+                int covered = 0;
+                if (x < 14 || x >= 139) covered = 4;
+                else if (x == 40) covered = 2;
+                else if (x == 41) covered = 1;
+                else if (x == 42) covered = 3;
+                alphaBlend(&expected, ink, bm_normal, swrIntAlpha(alpha) * covered / 4);
             }
             if (renderer.fb[y * WIDTH + x] != expected) {
                 fprintf(stderr, "FAIL: sparse half-size sprite pixel %d,%d\n", x, y);
@@ -116,6 +122,45 @@ static bool checkSparseHalfDraw(void)
     free(texture.halfBuffer);
     free(renderer.fb);
     return ok;
+}
+
+static bool checkRotatedDraw(SWRenderer* renderer, SWTexture* texture, float angle,
+                             bool flipX, uint32_t color, float alpha, int blendmode)
+{
+    const int left = 1, top = -1, width = 11, height = 9;
+    const int sx = 1, sy = 2, sw = 6, sh = 5;
+    const float px = 5.0f, py = 3.0f;
+    float radians = -angle * M_PI / 180.0f;
+    float c = cosf(radians), s = sinf(radians);
+    uintpixel_t ink = swrConvertPixel(color);
+
+    renderer->blendMode = blendmode;
+    swrFillPixels(renderer->fb, FRAME_SIZE * FRAME_SIZE, background);
+    swrDrawSpriteRotated((Renderer*) renderer, (float) (left + (flipX ? width : 0)), (float) top,
+                         (float) (flipX ? -width : width), (float) height, texture, sx, sy, sw, sh,
+                         color, alpha, angle, flipX ? width - px : px, py, false);
+
+    // Scalar inverse transform and ordinary compositing at each pixel center.
+    for (int y = 0; y < FRAME_SIZE; y++) {
+        for (int x = 0; x < FRAME_SIZE; x++) {
+            uintpixel_t expected = background;
+            float ox = x + 0.5f - (left + px), oy = y + 0.5f - (top + py);
+            float lx = c * ox + s * oy + px, ly = -s * ox + c * oy + py;
+            if (x >= 2 && x < 10 && y >= 2 && y < 10 && lx >= 0 && lx < width && ly >= 0 && ly < height) {
+                float u = lx * ((float) sw / width), v = ly * ((float) sh / height);
+                int tx = flipX ? (int) (sw - 1 - u) : (int) u;
+                int ty = (int) v;
+                uintpixel_t sample = texture->buffer[(sy + ty) * TEX_SIZE + sx + tx];
+                if (swrIsOpaque(sample)) alphaBlend(&expected, tint(ink, sample), blendmode, swrIntAlpha(alpha));
+            }
+            if (renderer->fb[y * FRAME_SIZE + x] != expected) {
+                fprintf(stderr, "FAIL: rotated angle %.1f flip %d tint %x alpha %.2f blend %d pixel %d,%d\n",
+                        (double) angle, flipX, (unsigned) color, (double) alpha, blendmode, x, y);
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 /** Run the clipped sprite matrix and the sparse half-size coverage regression. */
@@ -142,7 +187,7 @@ int main(void)
     if (!checkDraw(&reference, &clipped, &texture, 8, 8, 1.0f, true, true, 1.0f)) return 1;
     const int positions[] = { 0, 2, 6, 8, 10 };
     const float scales[] = { 0.5f, 1.0f, 2.0f };
-    const float alphas[] = { 1.0f, 0.63f };
+    const float alphas[] = { 1.0f, 0.63f, 0.5f };
     for (unsigned s = 0; s < sizeof(scales) / sizeof(scales[0]); ++s)
         for (unsigned a = 0; a < sizeof(alphas) / sizeof(alphas[0]); ++a)
             for (int flips = 0; flips < 4; ++flips)
@@ -156,12 +201,27 @@ int main(void)
                         if (!checkDraw(&reference, &clipped, &texture, positions[x], positions[y],
                                        scales[s], (flips & 1) != 0, (flips & 2) != 0, alphas[a])) return 1;
                     }
+    swrFavorSpeed = true;
+    if (!checkDraw(&reference, &clipped, &texture, 8, 8, 1.0f, true, true, 0.5f)) return 1;
+    const float angles[] = { 0.1f, 19.0f, 89.9f, 141.0f };
+    for (unsigned a = 0; a < sizeof(angles) / sizeof(angles[0]); a++) {
+        for (int flip = 0; flip < 2; flip++) {
+            if (!checkRotatedDraw(&clipped, &texture, angles[a], flip, 0xffffff, 1.0f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 1.0f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 0.5f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x808080, 1.0f, bm_add) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 1.0f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 0.5f, bm_normal) ||
+                !checkRotatedDraw(&clipped, &texture, angles[a], flip, 0x907f20, 1.0f, bm_add)) return 1;
+        }
+    }
     free(reference.fb);
     free(clipped.fb);
     free(texture.rowBounds);
     free(texture.buffer);
-    if (!checkSparseHalfDraw()) return 1;
+    if (!checkSparseHalfDraw(1.0f) || !checkSparseHalfDraw(0.5f)) return 1;
     printf("PASS: %u clipped sprite cases match the unclipped crop\n", checked);
     puts("PASS: clipped sparse half-size sprite matches expected coverage");
+    puts("PASS: clipped rotated sprites match scalar sampling and blending");
     return 0;
 }

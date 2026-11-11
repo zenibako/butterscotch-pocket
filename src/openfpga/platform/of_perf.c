@@ -12,6 +12,7 @@
  */
 
 #include "of_perf.h"
+#include "of_hooks.h"
 
 #include "debug_font.h"
 #include "of_font.h"
@@ -49,6 +50,14 @@ static const uint16_t g_digits[10] = {
 
 void ofPerfAddLoad(OfLoadKind kind, uint64_t nanos) {
     g_loadNanos[kind] += nanos;
+}
+
+void platformTextureLoadTime(uint64_t nanos) {
+    ofPerfAddLoad(OF_LOAD_TEXTURE, nanos);
+}
+
+uint64_t ofPerfTextureLoadNanos(void) {
+    return g_totals.loadNanos[OF_LOAD_TEXTURE] + g_loadNanos[OF_LOAD_TEXTURE];
 }
 
 bool ofPerfDetail = true;

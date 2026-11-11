@@ -119,7 +119,7 @@ static bool check(int phaseX, int phaseY, bool doubled, bool favorSpeed, bool sm
     swrFillPixels(swr.fb, SIZE * SIZE, background);
     if (angle != 0)
         swrDrawSpriteRotated(&swr.base, (float) left, (float) top, GLYPH_SIZE, GLYPH_SIZE,
-                             &texture, 0, 0, GLYPH_SIZE, GLYPH_SIZE, color, alpha, angle, 0, 0);
+                             &texture, 0, 0, GLYPH_SIZE, GLYPH_SIZE, color, alpha, angle, 0, 0, false);
     else
         swrDrawSprite(&swr.base, (float) left, (float) top, GLYPH_SIZE, GLYPH_SIZE,
                       &texture, 0, 0, GLYPH_SIZE, GLYPH_SIZE, color, alpha);

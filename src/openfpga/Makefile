@@ -91,7 +91,7 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
 BS_PHYSICS_SRCS = $(BS_SRC)/physics/physics.c $(BS_SRC)/physics/disabled/physics_disabled.c
 
 SRCS = main.c platform/game_$(GAME).c platform/of_platform.c platform/of_diag.c platform/of_log.c \
-       platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c \
+       platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c platform/of_bench_scene.c \
        platform/of_strings.c platform/of_buttons.c platform/of_gamepad.c platform/of_save_fs.c platform/of_native.c platform/of_focus.c platform/of_focus_stats.c \
        platform/of_font.c platform/debug_font.c platform/of_loading.c platform/of_menu.c platform/of_state_requests.c \
        platform/of_snapshot_envelope.c \
@@ -160,7 +160,9 @@ BS_WARN = -Wno-unused-parameter -Wno-unused-variable -Wno-unused-function \
 # undrawn battle frame, within run-to-run variation).
 # UT_OPT is the name it had until 2026-10-13. rename-ut: keep
 OF_OPT ?= $(UT_OPT)
-CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(OF_OPT) -DOF_BUILD_NOTE='"$(OF_OPT)"'
+# Override the report title suffix without changing compiler options.
+OF_BUILD_NOTE ?= $(OF_OPT)
+CFLAGS = $(BS_DEFS) $(BS_INCLUDES) $(BS_WARN) $(OF_OPT) -DOF_BUILD_NOTE='"$(OF_BUILD_NOTE)"'
 LDFLAGS += $(OF_OPT)
 
 # Data files bundled into the per-target deliverable (override per core).
@@ -180,7 +182,7 @@ MISTER_ASSETS ?= $(wildcard $(G)data.win) $(GAME_PACKS)
 # compiled code and save filenames, so they must invalidate the same objects.
 # (Before sdk.mk, which looks at what is
 # in them; PC_OBJ_DIR is only set this early when a sub-make passes it.)
-HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID)'; } | cksum | cut -d' ' -f1)
+HEADER_SUM := $(shell { cat $(BS_SRC)/*.h $(BS_SRC)/*/*.h platform/*.h 2>/dev/null; printf '%s' '$(SAVESTATES) $(GAME) $(WADS) $(FOCUS_BENCH) $(FOCUS_BUILD_ID) $(OF_BUILD_NOTE)'; } | cksum | cut -d' ' -f1)
 $(foreach d,$(OBJ_DIR) $(or $(PC_OBJ_DIR),$(ROOT)/.obj/$(APP)-pc),$(shell [ "$$(cat $(d)/.headers 2>/dev/null)" = "$(HEADER_SUM)" ] || { rm -rf $(d); mkdir -p $(d); echo $(HEADER_SUM) > $(d)/.headers; }))
 
 # Declare default target before sdk.mk's rules
@@ -406,6 +408,11 @@ collision-precise-fixture:
 collision-work-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/collision-work.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/runner.o $(filter %/src/runner.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_collision_work_fixture
 
+# Asset-free legacy grouping versus independent drawable ranks, including guards.
+.PHONY: drawable-order-fixture
+drawable-order-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/drawable-order.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/runner.o $(filter %/src/runner.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_drawable_order_fixture
+
 # Asset-free spatial membership/recovery and bounded-update-work checks.
 .PHONY: spatial-grid-fixture
 spatial-grid-fixture: $(PC_OBJS)
@@ -431,10 +438,20 @@ forest-sentry-fixture: $(PC_OBJS)
 orange-particle-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/orange-particle.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_orange_particle_fixture
 
+# Real-asset oracle for full-resolution Speed pipe fallback and the half-size native.
+.PHONY: flowey-pipes-fixture
+flowey-pipes-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/flowey-pipes.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_flowey_pipes_fixture
+
 # Real-asset oracle for live background lookup and its guarded native path.
 .PHONY: background-lookup-fixture
 background-lookup-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -finstrument-functions -fno-inline-functions tests/background-lookup.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/vm.o $(filter %/src/vm.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_background_lookup_fixture
+
+# Asset-free benchmark room and live-object scene contract checks.
+.PHONY: bench-scene-fixture
+bench-scene-fixture:
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/bench-scene.c platform/of_bench_scene.c $(BS_SRC)/stb_ds.c $(PC_EXTRA_CFLAGS) -o $(PC_BIN)_bench_scene_fixture
 
 # Asset-free same-frame wall/flip accounting and frame distribution checks.
 .PHONY: focus-stats-fixture

@@ -30,6 +30,7 @@ uint16_t *platformAcquireFramebuffer(int width, int height);
 void platformSetNextFramebuffer(uint16_t *framebuffer, int width, int height, int bpp);
 bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *dest);
 uint64_t platformPackRefusedNanos(void);
+void platformTextureLoadTime(uint64_t nanos);
 /* Port-internal: a file stored in the audio pack (of_audio_system.c). */
 bool ofAudioReadPackFile(const char *path, uint8_t **outData, uint32_t *outSize);
 bool ofAudioHasPackFile(const char *path);

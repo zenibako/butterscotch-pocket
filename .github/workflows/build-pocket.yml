@@ -212,10 +212,11 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1
         run: |
           for game in undertale deltarune; do
-            make GAME="$game" battle-contrast-fixture WADS="16 17" PC_BIN="bs_pc_battle_$game" \
+            make GAME="$game" battle-contrast-fixture drawable-order-fixture WADS="16 17" PC_BIN="bs_pc_battle_$game" \
               PC_OBJ_DIR="$PWD/out/.obj/sanitized-$game" \
               PC_EXTRA_CFLAGS="-g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize=alignment"
             "./bs_pc_battle_${game}_battle_contrast_fixture"
+            "./bs_pc_battle_${game}_drawable_order_fixture"
           done
 
       - name: Report compiler cache statistics

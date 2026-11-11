@@ -16,6 +16,8 @@ bool SWRenderer_snapshotGetState(Renderer* renderer, SWRendererSnapshotState* st
 void SWRenderer_snapshotApplyState(Renderer* renderer, const SWRendererSnapshotState* state);
 
 void SWRenderer_clearFrameBuffer(Renderer* renderer, uint32_t color);
+/* Screen draws can be omitted on a skip. User surfaces still receive draws. */
+bool SWRenderer_isSkippingScreen(const Renderer* renderer);
 
 // Platform opt-in for selected UI assets; only exact half-size Speed draws are adjusted.
 void SWRenderer_setContrastAssets(Renderer* renderer, const char* const* sprites, size_t spriteCount,
@@ -35,6 +37,9 @@ typedef struct {
 } SWHintedGlyphAsset;
 void SWRenderer_setHintedGlyphAssets(Renderer* renderer, const SWHintedGlyphAsset* assets, size_t count);
 void SWRenderer_setContrastEnabled(Renderer* renderer, bool enabled);
+void SWRenderer_setFloweySpeedAssets(Renderer* renderer);
+void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active);
+void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer);
 // The renderer clears a platform display buffer only where it drew since that
 // buffer's last clear. A platform that writes into one of those buffers itself
 // (an overlay, a menu, a copy) calls this, so the next clear is a whole one.

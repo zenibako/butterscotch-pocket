@@ -42,9 +42,21 @@ typedef struct {
     const char *name;
     int lastFrame;
     const char *tag; /* five letters at most, for the breakdown table */
+    /* Optional scene contract; NULL means no requirement. */
+    const char *roomName;
+    const char *requiredObject;
+    /* Optional end-of-window condition for scenes with shared objects. */
+    bool (*endValid)(const Runner *runner);
 } OfBenchSection;
 
 #define OF_BENCH_MAX_SECTIONS 8
+#define OF_BENCH_MAX_OPENING_WINDOWS 8
+
+/* A window in scripted update numbers, including updates with no swap. */
+typedef struct {
+    const char *tag;
+    int firstUpdate, endUpdate;
+} OfBenchOpeningWindow;
 
 typedef struct {
     /* The game's name, and its files on the card, for the loading screen's errors. */
@@ -65,6 +77,7 @@ typedef struct {
     size_t nativeScriptCount;
     /* Called for each new VM (a game_change gives one), to forget its ids (or NULL). */
     void (*nativesForgetVm)(void);
+    void (*installCollisionFilter)(Runner *runner);
 
     /* Derived battle appearance: selected assets and whether the scene is active. */
     void (*battleUiInstall)(Runner *runner);
@@ -88,6 +101,29 @@ typedef struct {
     int tourJumpCount;
     const OfBenchSection *tourSections;
     int tourSectionCount;
+    /* A third benchmark ("--bench-bullet-hell"), or NULL: the same report over another script. */
+    const char *bulletTitle;
+    const char *bulletScript;
+    const OfJump *bulletJumps;
+    int bulletJumpCount;
+    const OfBenchSection *bulletSections;
+    int bulletSectionCount;
+    /* Optional short Asriel encounter. */
+    const char *saberTitle;
+    const char *saberScript;
+    const OfJump *saberJumps;
+    int saberJumpCount;
+    const OfBenchSection *saberSections;
+    int saberSectionCount;
+    /* Optional Photoshop Flowey checkpoint tour. */
+    const char *floweyTitle;
+    const char *floweyScript;
+    const OfJump *floweyJumps;
+    int floweyJumpCount;
+    const OfBenchSection *floweySections;
+    int floweySectionCount;
+    const OfBenchOpeningWindow *floweyOpening;
+    int floweyOpeningCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

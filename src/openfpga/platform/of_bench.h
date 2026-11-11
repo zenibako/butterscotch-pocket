@@ -16,13 +16,23 @@
 void ofBenchStart(void);
 /* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle. */
 bool ofBenchStartTour(void);
+/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
+bool ofBenchStartBulletTour(void);
+/* "--bench-chaos-saber": the short Asriel encounter, if available. */
+bool ofBenchStartChaosSaber(void);
+/* The game's Flowey checkpoint tour, optionally with normal gameplay pacing. */
+bool ofBenchStartFloweyTour(bool livePacing);
+bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
-/* Call once per presented frame. Prints the report and halts at the end. */
-void ofBenchFrame(void);
+/* The tour advances on each eligible swap, including adaptive skips. */
+typedef struct Runner Runner;
+void ofBenchFrame(Runner *runner, bool skipped);
+/* Complete a live sample using the frame limiter's existing clock reads. */
+void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uint64_t waitEnd);
 
 /* Time spent inside the display flip, reported separately from the rest. */
-void ofBenchAddFlipTime(uint64_t nanos);
+void ofBenchAddFlipTime(uint64_t nanos, bool submitted);
 
 /* Platform hooks the benchmark drives. */
 bool ofPlatformShowLogAndHalt(void);

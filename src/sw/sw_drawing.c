@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <float.h>
+#ifdef OF_PC
+#include <stdio.h>
+#endif
 #include "sw_renderer_private.h"
 #include "sw_call_notes.h"
 
@@ -163,6 +166,66 @@ MAYBE_UNUSED static const uint16_t* swrRowBounds(SWTexture* texture)
     return bounds;
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+FORCE_INLINE int swrAverageBox(uintpixel_t t0, uintpixel_t t1, uintpixel_t t2, uintpixel_t t3, uintpixel_t* out)
+{
+    if (t0 == t1 && t0 == t2 && t0 == t3) {
+        *out = t0;
+        return swrIsOpaque(t0) ? 4 : 0;
+    }
+    uint32_t red = 0, green = 0, blue = 0;
+    int covered = 0;
+    #define SW_ACCUMULATE(texel) \
+        if (swrIsOpaque(texel)) { \
+            red += ((texel) >> 10) & 31u; green += ((texel) >> 5) & 31u; blue += (texel) & 31u; covered++; \
+        }
+    SW_ACCUMULATE(t0) SW_ACCUMULATE(t1) SW_ACCUMULATE(t2) SW_ACCUMULATE(t3)
+    #undef SW_ACCUMULATE
+    static const uint32_t reciprocal[5] = { 0, 65536, 32768, 21846, 16384 };
+    uint32_t scale = reciprocal[covered];
+    *out = (uintpixel_t) (0x8000 | (((red * scale) >> 16) << 10) |
+                         (((green * scale) >> 16) << 5) | ((blue * scale) >> 16));
+    return covered;
+}
+
+FORCE_INLINE int swrFirstSampleAtColumn(int col, int step, int unit)
+{
+    return col <= 0 ? 0 : 1 + (col * unit - 1) / step;
+}
+
+static void swrPointSampleSpan(const uint16_t* bounds, int sx, int width, int step, int unit,
+                               bool flipX, int* from, int* to)
+{
+    int first = swrMin(width, swrFirstSampleAtColumn((int) bounds[0] - sx, step, unit));
+    int end = swrMin(width, swrFirstSampleAtColumn((int) bounds[1] - sx, step, unit));
+    // The mirrored sampler visits the same sequence in reverse after clipping.
+    *from = flipX ? width - end : first;
+    *to = flipX ? width - first : end;
+}
+
+// Find the destination interval whose two horizontal taps can reach either
+// opaque source row. Convert its edges with the sampler's original step.
+static void swrBoxSampleSpan(const uint16_t* bounds, int row0, int row1, int sx, int right,
+                             int step, int unit, int* from, int* to)
+{
+    int first = right + 1, end = sx;
+    for (int row = row0; row <= swrMax(row0, row1); ++row) {
+        int lo = swrMax(sx, bounds[row * 2]);
+        int hi = swrMin(right + 1, bounds[row * 2 + 1]);
+        if (lo >= hi) continue;
+        first = swrMin(first, lo);
+        end = swrMax(end, hi);
+    }
+    if (first >= end) {
+        *to = 0;
+        return;
+    }
+    // A sample starting one column earlier still reads the first opaque texel.
+    *from = swrFirstSampleAtColumn(first - sx - 1, step, unit);
+    *to = swrMin(*to, swrFirstSampleAtColumn(end - sx, step, unit));
+}
+#endif
+
 // The runs of a texture's rows that hold opaque texels other than `color`
 // (see SWTexture.spans): row y's runs are runs[rows[y]] up to runs[rows[y + 1]],
 // each start << 16 | end. One whose texels are mostly such runs is not worth
@@ -224,6 +287,112 @@ FORCE_INLINE void swrCopyPixels(uintpixel_t* dst, const uintpixel_t* src, int co
     else memcpy(dst, src, (size_t) count * sizeof(uintpixel_t));
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+enum { SWR_BOX_UNIT = 1 << 14, SWR_BOX_CACHE_BYTES = 256 * 1024 };
+
+typedef struct {
+    uint16_t from, to, solidFrom, solidTo;
+} SWBoxRow;
+
+typedef struct SWBoxRows {
+    int sx, step, width;
+    size_t bytes;
+    SWBoxRow* rows;
+    uintpixel_t* colors;
+    uint8_t* coverage;
+} SWBoxRows;
+
+static size_t swrBoxCacheBytes;
+
+// Flowey's arm and three backdrop vines change height while keeping the
+// same horizontal sampling. Store filtered rows indexed by the upper tap.
+static const SWBoxRows* swrBackdropBoxRows(SWTexture* texture, int sw, int sh, int sx, int step)
+{
+    bool backdrop = (sw == 171 && sh == 275) || (sw == 297 && sh == 150) ||
+                    (sw == 298 && (sh == 102 || sh == 131));
+    if (!backdrop || !texture->immutable || texture->width > sw + 2 || texture->height > sh + 2)
+        return NULL;
+    SWBoxRows* cache = texture->boxRows;
+    if (cache != NULL) return cache->sx == sx && cache->step == step ? cache : NULL;
+
+    int width = swrFirstSampleAtColumn(texture->width - 1 - sx, step, SWR_BOX_UNIT);
+    int height = texture->height - 1;
+    if (width <= 0 || height <= 0) return NULL;
+    size_t texels = (size_t) width * height;
+    size_t header = sizeof(*cache) + (size_t) height * sizeof(SWBoxRow);
+    size_t bytes = header + texels * (sizeof(uintpixel_t) + sizeof(uint8_t));
+    if (bytes > SWR_BOX_CACHE_BYTES - swrBoxCacheBytes) return NULL;
+    cache = malloc(bytes);
+    if (cache == NULL) return NULL;
+    cache->sx = sx;
+    cache->step = step;
+    cache->width = width;
+    cache->bytes = bytes;
+    cache->rows = (SWBoxRow*) (cache + 1);
+    cache->colors = (uintpixel_t*) ((uint8_t*) cache + header);
+    cache->coverage = (uint8_t*) (cache->colors + texels);
+
+    for (int y = 0; y < height; ++y) {
+        const uintpixel_t* upper = texture->buffer + y * texture->width + sx;
+        const uintpixel_t* lower = upper + texture->width;
+        uintpixel_t* colors = cache->colors + y * width;
+        uint8_t* coverage = cache->coverage + y * width;
+        int from = 0, to = 0, solidFrom = 0, solidTo = 0, start = 0;
+        for (int x = 0, sample = 0; x < width; ++x, sample += step) {
+            int col = sample >> 14;
+            int covered = swrAverageBox(upper[col], upper[col + 1], lower[col], lower[col + 1], &colors[x]);
+            coverage[x] = (uint8_t) covered;
+            if (covered != 0) {
+                if (to == 0) from = x;
+                to = x + 1;
+            }
+            if (covered != 4) start = x + 1;
+            else if (x + 1 - start > solidTo - solidFrom) {
+                solidFrom = start;
+                solidTo = x + 1;
+            }
+        }
+        cache->rows[y] = (SWBoxRow) { (uint16_t) from, (uint16_t) to, (uint16_t) solidFrom, (uint16_t) solidTo };
+    }
+    swrBoxCacheBytes += bytes;
+    texture->boxRows = cache;
+    return cache;
+}
+
+static void swrBlitBoxRow(const SWBoxRows* cache, int row, int limit, uintpixel_t* dst)
+{
+    const SWBoxRow* bounds = &cache->rows[row];
+    const uintpixel_t* colors = cache->colors + row * cache->width;
+    const uint8_t* coverage = cache->coverage + row * cache->width;
+    int to = swrMin(limit, bounds->to);
+    int solidTo = swrMin(to, bounds->solidTo);
+    int solidFrom = swrMin(solidTo, bounds->solidFrom);
+    swrCopyPixels(dst + solidFrom, colors + solidFrom, solidTo - solidFrom);
+    for (int x = bounds->from; x < to; ++x) {
+        if (x == solidFrom && solidFrom < solidTo) { x = solidTo - 1; continue; }
+        int covered = coverage[x];
+        if (covered == 4) dst[x] = colors[x];
+        else if (covered != 0) {
+            int alpha = covered << 6;
+            dst[x] = swrBlendPremultiplied(dst[x], swrSpreadRedBlue(colors[x]) * alpha,
+                                           swrGreen(colors[x]) * alpha, 256 - alpha);
+        }
+    }
+}
+#endif
+
+void swrFreeBoxRows(SWTexture* texture)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    if (texture->boxRows == NULL) return;
+    swrBoxCacheBytes -= texture->boxRows->bytes;
+    free(texture->boxRows);
+    texture->boxRows = NULL;
+#else
+    (void) texture;
+#endif
+}
+
 // One row of an untinted 1:1 opaque draw into the main buffer, where tiles
 // that still hold nothing but the clear colour (see SWDirtyBuffer) get only
 // the texel runs of other colours (`run` to `runEnd`, see SWColorSpans; in
@@ -271,6 +440,34 @@ MAYBE_UNUSED static void swrCopyOntoClean(uint32_t* marks, uint32_t clean, uint3
         x = end;
     }
     marks[dy >> SWR_DIRTY_TILE_H_SHIFT] |= wrote;
+}
+
+// The fixed Flowey backdrop is applied over clean or retained tiles. Walk its
+// opaque runs directly so the gap between the left and right art costs nothing.
+MAYBE_UNUSED static uint32_t swrCopyBackdropRuns(uintpixel_t* dst, const uintpixel_t* src,
+                                                const uint32_t* run, const uint32_t* end,
+                                                int sx, int dx, int width, uint32_t keep)
+{
+    uint32_t wrote = 0;
+    for (; run < end; ++run) {
+        int first = swrMax(0, (int)(*run >> 16) - sx);
+        int last = swrMin(width, (int)(*run & 0xffff) - sx);
+        if (first >= last) continue;
+        uint32_t tiles = swrDirtyMask(dx + first, dx + last);
+        uint32_t needed = tiles & ~keep;
+        wrote |= needed;
+        if (needed == tiles) {
+            swrCopyPixels(dst + first, src + first, last - first);
+        } else {
+            for (; needed != 0; needed &= needed - 1) {
+                int tile = swrLowestBit(needed);
+                int left = swrMax(first, (tile << SWR_DIRTY_TILE_W_SHIFT) - dx);
+                int right = swrMin(last, ((tile + 1) << SWR_DIRTY_TILE_W_SHIFT) - dx);
+                swrCopyPixels(dst + left, src + left, right - left);
+            }
+        }
+    }
+    return wrote;
 }
 
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
@@ -654,6 +851,31 @@ static void swrDrawSpriteInternal(
 #ifdef SW_HAS_PREMUL_BLEND
 #define SW_MIRROR_MIN_PIXELS 4096
 
+typedef struct SWPipeLayer {
+    const uintpixel_t* pixels;
+    const uint16_t* bounds;
+    const uint16_t* solidBounds;
+    const uint8_t* coverage;
+    int pitch, dx, dy, dw, dh, sx, sy, right, bottom, xstep, ystep;
+    uintpixel_t tint;
+    int alpha;
+    bool flipX, box;
+} SWPipeLayer;
+
+static const uint16_t* swrPipeSolidBounds(SWTexture* texture);
+
+static void swrFlushPipeLayers(SWRenderer* swr)
+{
+    int count = swr->pipeCount;
+    swr->pipeCount = 0;
+    for (int i = 0; i < count; ++i) {
+        const SWSpriteCall* call = &swr->pipeCalls[i];
+        swrDrawSpriteInternal(&swr->base, call->dx, call->dy, call->dw, call->dh, call->texture,
+                              call->sx, call->sy, call->sw, call->sh, call->tintColor, call->alpha,
+                              false, SWR_CONTRAST_NONE);
+    }
+}
+
 static void swrMirrorReplay(SWRenderer* swr, const SWSpriteCall* call)
 {
     swrDrawSpriteInternal((Renderer*) swr, call->dx, call->dy, call->dw, call->dh, call->texture,
@@ -963,7 +1185,7 @@ void swrOverlayFlushForState(SWRenderer* swr)
 {
 #ifdef SW_HAS_PREMUL_BLEND
     swrTileRunsFlush(swr); // takes the clear along if there were pictures
-    if (swr->clearHeld && !swrGridHeld() && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0) {
+    if (swr->clearHeld && !swrGridHeld() && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0) {
         bool uniform = swr->uniformValid;
         swr->clearHeld = false;
         swrOverlayFlush(swr);
@@ -983,7 +1205,7 @@ void swrOverlayFlush(SWRenderer* swr)
     // and a held clear is older still: the pictures take it with them, and
     // it stays held for a run of tiles coming in to do the same.
     // A held grid lies between the two. With anything else held as well, all of it goes.
-    bool othersHeld = swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0;
+    bool othersHeld = swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0 || swr->pipeCount != 0;
     if (!swr->tileRunEntering || othersHeld) {
         swrTileRunsFlush(swr);
         swrGridFlush(swr);
@@ -994,6 +1216,9 @@ void swrOverlayFlush(SWRenderer* swr)
     swrClearSettle(swr);
 #endif
     swrOverlayFlushHeld(swr);
+#ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0) swrFlushPipeLayers(swr);
+#endif
     swr->uniformValid = false; // every caller is about to draw
 }
 
@@ -1014,6 +1239,91 @@ static int swrContrastCoverage(int covered, int alpha, int contrast)
 }
 #endif
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+// The clipped width and destination stride are even and the destination is
+// word-aligned. A transparent texel leaves both destination rows untouched.
+static void swrCopyDoubledSprite(uintpixel_t* dst, int dstPitch, const uintpixel_t* src, int srcPitch,
+                                 int width, int height, bool flipX)
+{
+    int columns = width / 2;
+    int start = flipX ? columns - 1 : 0;
+    int step = flipX ? -1 : 1;
+    for (int y = 0; y < height; y += 2) {
+        uintpixel_t* top = dst + y * dstPitch;
+        // Reuse the last row for an odd clipped height.
+        uintpixel_t* bottom = top + (y + 1 < height ? dstPitch : 0);
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+#endif
+#endif
+        const uintpixel_t* row = src + (y / 2) * srcPitch;
+        for (int x = 0, col = start; x < width; x += 2, col += step) {
+            uintpixel_t texel = row[col];
+            if (!swrIsOpaque(texel)) continue;
+            uint32_t pair = ((uint32_t) texel << 16) | texel;
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        }
+    }
+}
+
+// Copy a solid run in reverse. Align the destination before writing pairs.
+static void swrCopyReversedPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
+{
+    if (count == 0) return;
+    if ((uintptr_t) dst & 3) {
+        *dst++ = src[--count];
+    }
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+    dst = __builtin_assume_aligned(dst, 4);
+#endif
+#endif
+    while (count >= 2) {
+        uint32_t pair;
+        count -= 2;
+        memcpy(&pair, src + count, sizeof(pair));
+        pair = (pair << 16) | (pair >> 16);
+        memcpy(dst, &pair, sizeof(pair));
+        dst += 2;
+    }
+    if (count != 0) *dst = src[0];
+}
+
+// Point-sampled half-size art treats every covered texel as opaque. Use the
+// existing half-size row bounds and copy the longest solid run in bulk.
+static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
+                                int dx, int dy, int sx, int sy, int w, int h, bool flipX)
+{
+    swrDirtyRect(swr, dx, dy, dx + w, dy + h);
+    for (int y = 0; y < h; ++y) {
+        int row = sy + y;
+        int from = swrMax(0, texture->halfRowBounds[2 * row] - sx);
+        int to = swrMin(w, texture->halfRowBounds[2 * row + 1] - sx);
+        if (from >= to) continue;
+        int solidFrom = swrMin(to, swrMax(from, texture->halfFullBounds[2 * row] - sx));
+        int solidTo = swrMax(solidFrom, swrMin(to, texture->halfFullBounds[2 * row + 1] - sx));
+        const uintpixel_t* src = texture->buffer + row * texture->width + sx;
+        uintpixel_t* dst = swr->fb + (dy + y) * swr->fbPitch + dx;
+        if (flipX) {
+            swrCopyReversedPixels(dst + w - solidTo, src + solidFrom, solidTo - solidFrom);
+            for (int x = from; x < solidFrom; ++x)
+                if (swrIsOpaque(src[x])) dst[w - 1 - x] = src[x];
+            for (int x = solidTo; x < to; ++x)
+                if (swrIsOpaque(src[x])) dst[w - 1 - x] = src[x];
+        } else {
+            swrCopyPixels(dst + solidFrom, src + solidFrom, solidTo - solidFrom);
+            for (int x = from; x < solidFrom; ++x)
+                if (swrIsOpaque(src[x])) dst[x] = src[x];
+            for (int x = solidTo; x < to; ++x)
+                if (swrIsOpaque(src[x])) dst[x] = src[x];
+        }
+    }
+}
+#endif
+
 /**
  * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
  * A cached half-size texture can supply the coverage of each sampled pixel.
@@ -1028,6 +1338,7 @@ static void swrDrawSpriteInternal(
     MAYBE_UNUSED SWTexture* source = texture; // `texture` may become its half-size copy's stand-in
     SWR_PROBE_STOP(3);
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0) swrOverlayFlush(swr);
     const SWSpriteCall asked = { dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha };
 #endif
     
@@ -1061,7 +1372,9 @@ static void swrDrawSpriteInternal(
         if (pointSample && osw == odw && osh == odh) {
             // A pre-hinted native mask is already 1:1. Preserve its last visible
             // row/column, including a viewport only one pixel wide or high.
-            sx += diffxl; sy += diffyl; sw = dw; sh = dh;
+            sx += flipX ? diffxu : diffxl;
+            sy += flipY ? diffyu : diffyl;
+            sw = dw; sh = dh;
         } else if (contrast != SWR_CONTRAST_NONE) {
             // This sampler is exactly 2:1. An odd last block has one source
             // texel, so clipping it must not remove a texel from its neighbour.
@@ -1131,6 +1444,12 @@ static void swrDrawSpriteInternal(
         
         if (coverage != NULL)
         {
+            if (swr->pipePlan != NULL) {
+                *swr->pipePlan = (SWPipeLayer) { halved.buffer, halved.halfRowBounds, halved.halfFullBounds, coverage,
+                    halfW, dx, dy, dw, dh, sx, sy, sx + dw - 1, sy + dh - 1,
+                    1 << 14, 1 << 14, tintColor, alpha, false, false };
+                return;
+            }
             SWR_PROBE_STOP(5);
             SWR_PROBE_PATH(1);
             swrOverlayFlush(swr);
@@ -1158,6 +1477,25 @@ static void swrDrawSpriteInternal(
                 int from = (int) halved.halfRowBounds[row * 2] - sx, to = (int) halved.halfRowBounds[row * 2 + 1] - sx;
                 if (from < 0) from = 0;
                 if (to > dw) to = dw;
+                if (alpha == 128 && contrast == SWR_CONTRAST_NONE) {
+                    for (int x = from; x < to; x++) {
+                        uint32_t covered = covline[x];
+                        if (covered == 0) continue;
+                        uintpixel_t color = srcline[x];
+                        if (color != lastColor) {
+                            lastTinted = tint(tintColor, color);
+                            lastColor = color;
+                        }
+                        if (covered == 4) {
+                            dstline[x] = swrBlendHalf(dstline[x], lastTinted);
+                        } else {
+                            uint32_t coverageAlpha = covered << 5;
+                            dstline[x] = swrBlendPremultiplied(dstline[x], swrSpreadRedBlue(lastTinted) * coverageAlpha,
+                                                               swrGreen(lastTinted) * coverageAlpha, 256 - coverageAlpha);
+                        }
+                    }
+                    continue;
+                }
                 // Untinted at full opacity, a texel standing for all four of its own is stored as it
                 // is: the row's longest run of those is copied, and only what is left on either side
                 // (a sprite's edge) is gone through a pixel at a time. The loop below does the left
@@ -1229,6 +1567,16 @@ static void swrDrawSpriteInternal(
     int blendmode = swr->blendMode;
     
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipePlan != NULL) {
+        bool box = swrSmoothMinify && !flipX && xstep > (3 << (fp_prec - 1)) && ystep > (3 << (fp_prec - 1));
+        const uint16_t* bounds = fromHalf ? texture->halfRowBounds : swrRowBounds(texture);
+        const uint16_t* solid = fromHalf ? texture->halfFullBounds : swrPipeSolidBounds(texture);
+        if (solid != NULL && box) solid += texture->height * 2;
+        *swr->pipePlan = (SWPipeLayer) { texture->buffer, bounds, solid, NULL, texture->width,
+            dx, dy, dw, dh, sx, sy, sx + sw - 1, sy + sh - 1, (int) xstep,
+            dh == sh && !box ? 1 << fp_prec : (int) ystep, tintColor, alpha, flipX, box };
+        return;
+    }
     // Nothing comes of a draw this faint: alphaBlend skips it, and a 16-bit texel is opaque or absent.
     // Leaving here keeps what is held, and what is known about the buffer, as it was.
     if (blendmode == bm_normal && alpha < 4) return;
@@ -1360,6 +1708,15 @@ static void swrDrawSpriteInternal(
         xstep > (3 << (fp_prec - 1)) && ystep > (3 << (fp_prec - 1)) && alpha >= 4)
     {
         int srcRight = sx + sw - 1, srcBottom = sy + sh - 1;
+        const SWBoxRows* cached = NULL;
+        if (swrFavorSpeed && !fromHalf && swr->fb == swr->mainFb && alpha == 256 &&
+            (tintColor & 0x7fff) == 0x7fff && contrast == SWR_CONTRAST_NONE)
+            cached = swrBackdropBoxRows(texture, osw, osh, sx, xstep);
+        // The clipped right/bottom edge may lack taps present in the cache.
+        int interior = cached == NULL ? 0 : swrMin(dw, swrFirstSampleAtColumn(srcRight - sx, xstep, SWR_BOX_UNIT));
+        const uint16_t* bounds = NULL;
+        if (!fromHalf && dw >= 32 && texture->width <= 512 && texture->height <= 512)
+            bounds = swrRowBounds(texture);
         uint32_t lastColor = 0xFFFFFFFF;
         uintpixel_t lastTinted = 0;
         SWR_PROBE_PATH(5);
@@ -1375,8 +1732,15 @@ static void swrDrawSpriteInternal(
             const uintpixel_t* src0 = &texture->buffer[row0 * texture->width];
             const uintpixel_t* src1 = row1 >= 0 ? &texture->buffer[row1 * texture->width] : NULL;
             
-            fixedp_t xs2 = ixs2;
-            for (int x = 0; x < dw; x++, xs2 += oxs2)
+            int from = 0, to = dw;
+            if (interior > 0 && row1 >= 0) {
+                swrBlitBoxRow(cached, row0, interior, dstline);
+                from = interior;
+            } else if (bounds != NULL) {
+                swrBoxSampleSpan(bounds, row0, row1, sx, srcRight, xstep, 1 << fp_prec, &from, &to);
+            }
+            fixedp_t xs2 = ixs2 + from * oxs2;
+            for (int x = from; x < to; x++, xs2 += oxs2)
             {
                 int col0 = sx + (int)(xs2 >> fp_prec);
                 if (col0 > srcRight) break;
@@ -1389,27 +1753,9 @@ static void swrDrawSpriteInternal(
                 uintpixel_t t3 = (src1 && col1 >= 0) ? src1[col1] : 0;
                 
                 uintpixel_t color;
-                int coverageAlpha = alpha;
-                if (t0 == t1 && t0 == t2 && t0 == t3) {
-                    // Flat area (most of any sprite): nothing to average.
-                    if (!swrIsOpaque(t0)) continue;
-                    color = t0;
-                } else {
-                    uint32_t red = 0, green = 0, blue = 0, covered = 0;
-                    #define SW_ACCUMULATE(texel) \
-                        if (swrIsOpaque(texel)) { \
-                            red += ((texel) >> 10) & 0x1F; green += ((texel) >> 5) & 0x1F; blue += (texel) & 0x1F; covered++; \
-                        }
-                    SW_ACCUMULATE(t0) SW_ACCUMULATE(t1) SW_ACCUMULATE(t2) SW_ACCUMULATE(t3)
-                    #undef SW_ACCUMULATE
-                    if (covered == 0) continue;
-                    
-                    // Divide by the 1..4 covered texels without a hardware divide: x * (65536 / n + 1) >> 16.
-                    static const uint32_t reciprocal[5] = { 0, 65536, 32768, 21846, 16384 };
-                    uint32_t scale = reciprocal[covered];
-                    color = (uintpixel_t)(0x8000 | (((red * scale) >> 16) << 10) | (((green * scale) >> 16) << 5) | ((blue * scale) >> 16));
-                    coverageAlpha = swrContrastCoverage((int) covered, alpha, contrast);
-                }
+                int covered = swrAverageBox(t0, t1, t2, t3, &color);
+                if (covered == 0) continue;
+                int coverageAlpha = swrContrastCoverage(covered, alpha, contrast);
                 
                 if (color != lastColor) {
                     lastTinted = tint(tintColor, color);
@@ -1436,6 +1782,7 @@ static void swrDrawSpriteInternal(
         uint32_t dstalpha = 256 - alpha;
         uint32_t lastPixel = 0xFFFFFFFF;
         uint32_t srcRedBlue = 0, srcGreen = 0;
+        uintpixel_t lastTinted = 0;
         SWR_PROBE_PATH(4);
         
         fixedp_t ys2 = iys2;
@@ -1459,6 +1806,18 @@ static void swrDrawSpriteInternal(
                 if (from < 0) from = 0;
                 if (to > dw) to = dw;
                 xs2 += (fixedp_t) from * oxs2;
+            }
+            if (alpha == 128 && swrFavorSpeed) {
+                for (int x = from; x < to; x++, xs2 += oxs2) {
+                    uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
+                    if (!swrIsOpaque(pixel)) continue;
+                    if (pixel != lastPixel) {
+                        lastTinted = tint(tintColor, pixel);
+                        lastPixel = pixel;
+                    }
+                    dstline[x] = swrBlendHalf(dstline[x], lastTinted);
+                }
+                continue;
             }
             for (int x = from; x < to; x++, xs2 += oxs2)
             {
@@ -1486,6 +1845,21 @@ static void swrDrawSpriteInternal(
     if (blendmode == bm_normal && alpha > 253)
     {
         bool untinted = (tintColor & 0x7FFF) == 0x7FFF;
+        if (pointSample && untinted && !flipY && dw == sw && dh == sh &&
+            texture->buffer == texture->halfBuffer && texture->halfFullBounds != NULL) {
+            SWR_PROBE_PATH(texture->solid == 1 ? 2 : 3);
+            swrBlitHalfPointRows(swr, texture, dx, dy, sx, sy, dw, dh, flipX);
+            if (swr->baseMode != 0) swrBaseFinish(swr, false);
+            return;
+        }
+        if (untinted && texture->immutable && !flipY && xstep == (1 << (fp_prec - 1)) && ystep == xstep &&
+            !((dx | dw | swr->fbPitch) & 1) && !((uintptr_t) swr->fb & 3)) {
+            SWR_PROBE_PATH(texture->solid == 1 ? 2 : 3);
+            swrDirtyRect(swr, dx, dy, dx + dw, dy + dh);
+            swrCopyDoubledSprite(swr->fb + dy * swr->fbPitch + dx, swr->fbPitch,
+                                 texture->buffer + sy * texture->width + sx, texture->width, dw, dh, flipX);
+            return;
+        }
         uint32_t lastPixel = 0xFFFFFFFF;
         uintpixel_t lastTinted = 0;
         
@@ -1500,6 +1874,10 @@ static void swrDrawSpriteInternal(
         const uint16_t* rowBounds = NULL;
         if (!solid && untinted && !flipX && xstep == (1 << fp_prec) && dh == sh)
             rowBounds = texture->buffer == texture->halfBuffer ? texture->halfRowBounds : swrRowBounds(texture); // the half-size copy stands in as a texture of its own
+        const uint16_t* pointBounds = NULL;
+        if (!solid && (flipX || xstep > (1 << fp_prec)) && xstep >= (1 << fp_prec) && dw >= 32 &&
+            texture->width <= 512 && texture->height <= 512 && texture->buffer != texture->halfBuffer)
+            pointBounds = swrRowBounds(texture);
         
         // Onto tiles still holding only the clear colour, texels of that colour are left out (swrCopyOntoClean).
         static int noCleanSkip = -1;
@@ -1519,17 +1897,16 @@ static void swrDrawSpriteInternal(
         // The buffer's first draw (see SWBaseKey) marks baseRows, and stays kept only if every row went through the runs.
         bool asBase = swr->baseMode != 0 && clear != NULL && clear == swr->dirty;
         bool baseWhole = asBase;
+        bool floweyBackdrop = asBase && texture == swr->floweyPipeBackdrop;
+        bool cleanBackdropRow = false;
         uint32_t* marks = clear == NULL ? NULL : asBase ? clear->baseRows : clear->rows;
         
         fixedp_t ys2 = iys2;
         for (int y = 0, ys = iys; y < dh; y++, ys += oys, ys2 += oys2)
         {
             uintpixel_t* dstline = &swr->fb[(dy + y) * swr->fbPitch + dx];
-            const uintpixel_t* srcline;
-            if (dh == sh)
-                srcline = &texture->buffer[(sy + ys) * texture->width + sx];
-            else
-                srcline = &texture->buffer[(sy + (int)(ys2 >> fp_prec)) * texture->width + sx];
+            int srcRow = dh == sh ? sy + ys : sy + (int) (ys2 >> fp_prec);
+            const uintpixel_t* srcline = &texture->buffer[srcRow * texture->width + sx];
             
             if (clear != NULL && dy + y >= 0 && dy + y < clear->height) {
                 int tileRow = (dy + y) >> SWR_DIRTY_TILE_H_SHIFT;
@@ -1539,6 +1916,12 @@ static void swrDrawSpriteInternal(
                     uint32_t mask = swrDirtyMask(dx, dx + dw);
                     clean = ~(clear->rows[tileRow] | clear->baseRows[tileRow]) & mask;
                     keep = swr->baseMode == 2 && asBase ? clear->keep[tileRow] & mask : 0;
+                    cleanBackdropRow = floweyBackdrop && (clean | keep) == mask;
+                }
+                if (cleanBackdropRow) {
+                    marks[tileRow] |= swrCopyBackdropRuns(dstline, srcline, &spans->runs[spans->rows[srcRow]],
+                                                        &spans->runs[spans->rows[srcRow + 1]], sx, dx, dw, keep);
+                    continue;
                 }
                 if ((clean | keep) != 0) {
                     int from = 0, to = dw;
@@ -1549,7 +1932,6 @@ static void swrDrawSpriteInternal(
                         if (from < 0) from = 0;
                         if (to > dw) to = dw;
                     }
-                    int srcRow = dh == sh ? sy + ys : sy + (int) (ys2 >> fp_prec);
                     swrCopyOntoClean(marks, clean, keep, dstline, srcline, &spans->runs[spans->rows[srcRow]], &spans->runs[spans->rows[srcRow + 1]],
                                      sx, dx, dy + y, from, to, solid);
                     continue;
@@ -1558,7 +1940,6 @@ static void swrDrawSpriteInternal(
             baseWhole = false;
             swrDirtyRow(swr, dy + y, dx, dx + dw);
             
-            fixedp_t xs2 = ixs2;
             if (untinted && !flipX && xstep == (1 << fp_prec) && solid)
             {
                 // Nothing transparent anywhere in the texture: the row goes over as it is.
@@ -1583,28 +1964,27 @@ static void swrDrawSpriteInternal(
                         dstline[x] = pixel;
                 }
             }
-            else if (untinted)
-            {
-                for (int x = 0; x < dw; x++, xs2 += oxs2)
-                {
-                    uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
-                    if (swrIsOpaque(pixel))
-                        dstline[x] = pixel;
-                }
-            }
             else
             {
-                for (int x = 0; x < dw; x++, xs2 += oxs2)
-                {
-                    uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
-                    if (!swrIsOpaque(pixel))
-                        continue;
-                    
-                    if (pixel != lastPixel) {
-                        lastTinted = tint(tintColor, pixel);
-                        lastPixel = pixel;
+                int from = 0, to = dw;
+                if (pointBounds != NULL)
+                    swrPointSampleSpan(pointBounds + srcRow * 2, sx, dw, xstep, 1 << fp_prec, flipX, &from, &to);
+                fixedp_t xs2 = ixs2 + from * oxs2;
+                if (untinted) {
+                    for (int x = from; x < to; x++, xs2 += oxs2) {
+                        uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
+                        if (swrIsOpaque(pixel)) dstline[x] = pixel;
                     }
-                    dstline[x] = lastTinted;
+                } else {
+                    for (int x = from; x < to; x++, xs2 += oxs2) {
+                        uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
+                        if (!swrIsOpaque(pixel)) continue;
+                        if (pixel != lastPixel) {
+                            lastTinted = tint(tintColor, pixel);
+                            lastPixel = pixel;
+                        }
+                        dstline[x] = lastTinted;
+                    }
                 }
             }
         }
@@ -1671,24 +2051,291 @@ static void swrDrawSpriteInternal(
     }
 }
 
+// Sprite chains reuse the same angles. Cache their exact float keys so nearby
+// angles keep their own sine and cosine and the sampler retains its rounding.
+static SWRotation swrSpriteRotation(SWRenderer* swr, float angleDeg)
+{
+    uint32_t key;
+    memcpy(&key, &angleDeg, sizeof(key));
+    uint32_t hash = (key ^ (key >> 16)) * 0x9e3779b9u;
+    SWRotation* entry = &swr->rotationCache[hash >> 26];
+    if (key != 0 && entry->angleBits == key) return *entry;
+
+    float radians = -angleDeg * M_PI / 180.0f;
+    SWRotation result = { key, cosf(radians), sinf(radians) };
+    *entry = result;
+    return result;
+}
+
+typedef struct {
+    uintpixel_t* pixels;
+    uint16_t* bounds;
+    int x, y, width, height;
+} SWRotatedCapture;
+
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+enum { SWR_VINE_W = 511, SWR_VINE_H = 33,
+       SWR_GROWTH_HEIGHT = 17, SWR_GROWTH_MAX_WIDTH = 271,
+       SWR_GROWTH_ROW_RADIUS = SWR_GROWTH_MAX_WIDTH + SWR_GROWTH_HEIGHT + 2,
+       SWR_GROWTH_CACHE_SLOTS = 16 };
+typedef struct {
+    uint32_t angleBits;
+    float slope, intercept;
+    int first, end, span;
+    int16_t left[2 * SWR_GROWTH_ROW_RADIUS + 1];
+} SWVineGrowthRows;
+
+enum { SWR_VINE_BLOCK_SHIFT = 5, SWR_VINE_BLOCKS = (SWR_VINE_W >> SWR_VINE_BLOCK_SHIFT) + 1 };
+typedef struct { uint8_t first, end; } SWVineCoverage;
+typedef struct SWVineGrowthCache {
+    SWVineGrowthRows entries[SWR_GROWTH_CACHE_SLOTS];
+    const uintpixel_t* coverageSource;
+    SWVineCoverage coverage[SWR_VINE_BLOCKS][SWR_VINE_BLOCKS];
+} SWVineGrowthCache;
+
+static void swrVineCoverage(SWVineGrowthCache* cache, const uintpixel_t* src, int pitch)
+{
+    if (cache->coverageSource == src) return;
+    SWVineCoverage blocks[SWR_VINE_BLOCKS];
+    for (int block = 0; block < SWR_VINE_BLOCKS; ++block) {
+        SWVineCoverage bounds = { SWR_VINE_H, 0 };
+        int first = block << SWR_VINE_BLOCK_SHIFT;
+        int end = swrMin(first + (1 << SWR_VINE_BLOCK_SHIFT), SWR_VINE_W);
+        for (int y = 0; y < SWR_VINE_H; ++y) {
+            for (int x = first; x < end; ++x) {
+                if (!swrIsOpaque(src[y * pitch + x])) continue;
+                if (bounds.first > y) bounds.first = y;
+                bounds.end = y + 1;
+                break;
+            }
+        }
+        blocks[block] = bounds;
+    }
+    for (int first = 0; first < SWR_VINE_BLOCKS; ++first) {
+        SWVineCoverage bounds = { SWR_VINE_H, 0 };
+        for (int end = first; end < SWR_VINE_BLOCKS; ++end) {
+            bounds.first = swrMin(bounds.first, blocks[end].first);
+            bounds.end = swrMax(bounds.end, blocks[end].end);
+            cache->coverage[first][end] = bounds;
+        }
+    }
+    cache->coverageSource = src;
+}
+
+static const SWVineGrowthRows* swrVineGrowthRows(SWTexture* texture, SWRotation rotation, int first, int end)
+{
+    if (first < -SWR_GROWTH_ROW_RADIUS || end > SWR_GROWTH_ROW_RADIUS + 1 ||
+        !(fabsf(rotation.sine) >= 0.7f)) return NULL;
+    if (texture->vineGrowthRows == NULL) {
+        texture->vineGrowthRows = calloc(1, sizeof(*texture->vineGrowthRows));
+        if (texture->vineGrowthRows == NULL) return NULL;
+    }
+    uint32_t hash = (rotation.angleBits ^ (rotation.angleBits >> 16)) * 0x9e3779b9u;
+    SWVineGrowthRows* rows = &texture->vineGrowthRows->entries[hash >> 28];
+    if (rows->span == 0 || rows->angleBits != rotation.angleBits) {
+        // The two long edges depend on angle, height, and pivot Y only.
+        // In screen space the growing vine always has height 17 and pivot Y 5.5.
+        float invSine = 1.0f / rotation.sine;
+        rows->angleBits = rotation.angleBits;
+        rows->slope = rotation.cosine * invSine;
+        rows->intercept = (invSine > 0.0f ? 5.5f - SWR_GROWTH_HEIGHT : 5.5f) * invSine - 0.5f;
+        rows->span = swrCeiling(SWR_GROWTH_HEIGHT * fabsf(invSine)) + 4;
+        rows->first = rows->end = first;
+    }
+    // Grow the cached interval as the on-screen vine lengthens. The row
+    // sample center is row + 0.5, so its distance from the pivot is row - 5.
+    while (rows->first > first) {
+        int row = --rows->first;
+        rows->left[row + SWR_GROWTH_ROW_RADIUS] = (int16_t) swrFloor(rows->slope * (row - 5) + rows->intercept);
+    }
+    while (rows->end < end) {
+        int row = rows->end++;
+        rows->left[row + SWR_GROWTH_ROW_RADIUS] = (int16_t) swrFloor(rows->slope * (row - 5) + rows->intercept);
+    }
+    return rows;
+}
+
+static bool swrFloweyVineBlockTarget(const SWRenderer* swr)
+{
+    return swr->portX == 0 && swr->portY == 0 && swr->portW == 320 && swr->portH == 240 &&
+           swr->fb == swr->mainFb && !swr->drawingToSurface &&
+           swr->fbPitch == 320 && ((uintptr_t) swr->fb & 3) == 0;
+}
+
+// In Speed, sample the original vine once per 2x2 screen block. This
+// keeps the textured strike visible while reducing sampling and writes.
+static void swrDrawFloweyVineBlocks(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
+                                   const uintpixel_t* src, int pitch, int dx, int dy, int dw, float pxa, float pya,
+                                   int minX, int minY, int maxX, int maxY, uintpixel_t color)
+{
+    const float c = rotation.cosine, s = rotation.sine;
+    const float scaleX = (float) SWR_VINE_W / dw, scaleY = (float) SWR_VINE_H / SWR_GROWTH_HEIGHT;
+    const int x0 = minX & ~1, y0 = minY & ~1;
+    const int xEnd = (maxX + 1) & ~1, yEnd = (maxY + 1) & ~1;
+    const float ox = (float) x0 + 1.0f - pxa, oy = (float) y0 + 1.0f - pya;
+    const int32_t stepU = swrFloor(c * scaleX * 131072.0f + 0.5f);
+    const int32_t stepV = swrFloor(-s * scaleY * 131072.0f + 0.5f);
+    const int32_t downU = swrFloor(s * scaleX * 131072.0f + 0.5f);
+    const int32_t downV = swrFloor(c * scaleY * 131072.0f + 0.5f);
+    // The rotated bounds have already been intersected with the viewport.
+    int32_t startU = swrFloor(((c * ox + s * oy) + (pxa - dx)) * scaleX * 65536.0f + 0.5f);
+    int32_t startV = swrFloor(((-s * ox + c * oy) + 5.5f) * scaleY * 65536.0f + 0.5f);
+    const int leftOrigin = swrFloor(pxa) - 1;
+    const bool tinted = (color & 0x7fff) != 0x7fff;
+    for (int y = y0; y < yEnd; y += 2, startU += downU, startV += downV) {
+        int left = leftOrigin + rows->left[y - dy + SWR_GROWTH_ROW_RADIUS];
+        int from = swrMax((left - 2) & ~1, x0), to = swrMin((left + rows->span + 3) & ~1, xEnd);
+        if (from >= to) continue;
+        int32_t u = startU + ((from - x0) >> 1) * stepU;
+        int32_t v = startV + ((from - x0) >> 1) * stepV;
+        uintpixel_t* top = swr->fb + y * 320;
+        uintpixel_t* bottom = top + 320;
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+#endif
+#endif
+        swrDirtyRow(swr, y, from, to);
+        swrDirtyRow(swr, y + 1, from, to);
+        for (int x = from; x < to; x += 2, u += stepU, v += stepV) {
+            unsigned tx = (unsigned) (u >> 16), ty = (unsigned) (v >> 16);
+            if (tx >= SWR_VINE_W || ty >= SWR_VINE_H) continue;
+            uintpixel_t pixel = src[ty * pitch + tx];
+            if (!swrIsOpaque(pixel)) continue;
+            if (tinted) pixel = tint(color, pixel);
+            uint32_t pair = pixel | ((uint32_t) pixel << 16);
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        }
+    }
+}
+
+// A growing strike keeps its angle, so the inverse transform advances by a
+// constant per row as well as per column. Re-anchor every 16 rows and use the
+// float sampler at texel boundaries to retain its edge and colour rounding.
+static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows, SWRotation rotation,
+                                  const uintpixel_t* src, int pitch, SWVineGrowthCache* cache, int dx, int dy, int dw,
+                                  float pxa, float pya, int minX, int minY, int maxX, int maxY,
+                                  SWRotatedCapture* capture)
+{
+    const float c = rotation.cosine, s = rotation.sine;
+    const float xScale = (float) SWR_VINE_W / dw, yScale = (float) SWR_VINE_H / SWR_GROWTH_HEIGHT;
+    const float pivotX = pxa - dx, pivotY = pya - dy;
+    const int leftOrigin = swrFloor(pxa) - 1;
+    const int32_t acrossU = swrFloor((c * xScale) * 65536.0f + 0.5f);
+    const int32_t acrossV = swrFloor((-s * yScale) * 65536.0f + 0.5f);
+    const int32_t downU = swrFloor((s * xScale) * 65536.0f + 0.5f);
+    const int32_t downV = swrFloor((c * yScale) * 65536.0f + 0.5f);
+    const bool descending = acrossV < 0;
+    const uint32_t vStep = descending ? -acrossV : acrossV;
+    // The sine gate keeps vStep above one texel per pixel. A 29-bit
+    // reciprocal with a 4-bit distance shift fits the row bounds in 32 bits.
+    const uint32_t inverseStep = (1u << 29) / vStep;
+    // At most 16 rows and 29 pixels across a row, with scales below eight.
+    // 512 fixed-point units cover the step rounding and the float transform.
+    enum { texelBand = 512 };
+    swrVineCoverage(cache, src, pitch);
+    int previousY = minY - 2, previousX = 0;
+    int32_t startU = 0, startV = 0;
+    for (int y = minY; y < maxY; ++y) {
+        int left = leftOrigin + rows->left[y - dy + SWR_GROWTH_ROW_RADIUS];
+        int from = swrMax(left, minX), to = swrMin(left + rows->span, maxX);
+        if (from >= to) continue;
+        float oy = (float) y + 0.5f - pya;
+        if (y != previousY + 1 || (y & 15) == 0) {
+            float ox = (float) from + 0.5f - pxa;
+            float lx = (c * ox + s * oy) + pivotX;
+            float ly = (-s * ox + c * oy) + pivotY;
+            startU = swrFloor((lx * xScale) * 65536.0f + 0.5f);
+            startV = swrFloor((ly * yScale) * 65536.0f + 0.5f);
+        } else {
+            int delta = from - previousX;
+            startU += delta * acrossU + downU;
+            startV += delta * acrossV + downV;
+        }
+        previousY = y;
+        previousX = from;
+        // Alpha is binary. For every texture column this screen row could
+        // sample, find a conservative span of opaque source rows. Leave the
+        // exact sampler in charge near the fixed-point rounding margin.
+        int count = to - from;
+        int32_t endU = startU + (count - 1) * acrossU;
+        int firstTx = (swrMin(startU, endU) - texelBand) >> 16;
+        int lastTx = (swrMax(startU, endU) + texelBand) >> 16;
+        if (lastTx < 0 || firstTx >= SWR_VINE_W) continue;
+        int firstBlock = swrMax(firstTx, 0) >> SWR_VINE_BLOCK_SHIFT;
+        int lastBlock = swrMin(lastTx, SWR_VINE_W - 1) >> SWR_VINE_BLOCK_SHIFT;
+        SWVineCoverage opaque = cache->coverage[firstBlock][lastBlock];
+        if (opaque.first >= opaque.end) continue;
+        int32_t low = (opaque.first << 16) - texelBand, high = (opaque.end << 16) + texelBand - 1;
+        int32_t rowStart = startV, rowEnd = startV + (count - 1) * acrossV;
+        if (descending) {
+            int32_t save = low;
+            low = -high;
+            high = -save;
+            rowStart = -rowStart;
+            rowEnd = -rowEnd;
+        }
+        // Round the reciprocal and distance down. Any leftover edge pixels
+        // are tested normally; rounding cannot cut an opaque pixel.
+        int skipLeft = rowStart < low ? ((uint32_t) ((low - rowStart) >> 4) * inverseStep) >> 25 : 0;
+        int skipRight = rowEnd > high ? ((uint32_t) ((rowEnd - high) >> 4) * inverseStep) >> 25 : 0;
+        if (skipLeft + skipRight >= count) continue;
+        from += skipLeft;
+        to -= skipRight;
+        int32_t u = startU + skipLeft * acrossU, v = startV + skipLeft * acrossV;
+        uintpixel_t* dst;
+        if (capture != NULL) {
+            int row = y - minY;
+            capture->bounds[2 * row] = (uint16_t) (from - minX);
+            capture->bounds[2 * row + 1] = (uint16_t) (to - minX);
+            dst = capture->pixels + row * capture->width + from - minX;
+        } else {
+            dst = swr->fb + y * swr->fbPitch + from;
+            swrDirtyRow(swr, y, from, to);
+        }
+        for (int x = from; x < to; ++x, ++dst, u += acrossU, v += acrossV) {
+            int tx, ty;
+            if ((uint32_t) ((u & 0xffff) - texelBand) < 65536 - 2 * texelBand &&
+                (uint32_t) ((v & 0xffff) - texelBand) < 65536 - 2 * texelBand) {
+                tx = u >> 16;
+                ty = v >> 16;
+                if ((unsigned) tx >= SWR_VINE_W || (unsigned) ty >= SWR_VINE_H) continue;
+            } else {
+                float ox = (float) x + 0.5f - pxa;
+                float lx = (c * ox + s * oy) + pivotX;
+                float ly = (-s * ox + c * oy) + pivotY;
+                if (lx < 0.0f || ly < 0.0f || lx >= (float) dw || ly >= SWR_GROWTH_HEIGHT) continue;
+                tx = swrMin((int) (lx * xScale), SWR_VINE_W - 1);
+                ty = swrMin((int) (ly * yScale), SWR_VINE_H - 1);
+            }
+            uintpixel_t pixel = src[ty * pitch + tx];
+            if (swrIsOpaque(pixel)) *dst = pixel;
+        }
+    }
+}
+#endif
+
 static void swrDrawSpriteRotatedInternal(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
     uintpixel_t tintColor, int alpha,
     float angleDeg,
     float pivotX,
-    float pivotY
+    float pivotY,
+    SWRotatedCapture* capture,
+    bool floweyGrowth
 )
 {
     SWRenderer* swr = (SWRenderer*) renderer;
-    float angleRad = -angleDeg * M_PI / 180.0f;
     
     bool flipX = false, flipY = false;
     if (dw < 0) { dw = -dw; dx -= dw; pivotX = dw - pivotX; flipX = true; }
     if (dh < 0) { dh = -dh; dy -= dh; pivotY = dh - pivotY; flipY = true; }
     
-    float cosA = cosf(angleRad);
-    float sinA = sinf(angleRad);
+    SWRotation rotation = swrSpriteRotation(swr, angleDeg);
+    float cosA = rotation.cosine, sinA = rotation.sine;
     
     float cnrx[4], cnry[4];
     cnrx[0] = cnrx[3] = dx;
@@ -1738,7 +2385,51 @@ static void swrDrawSpriteRotatedInternal(
     
     // some final clip checks
     if (minXc >= maxXc || minYc >= maxYc) return;
+
+    bool cachedRows = false;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    if (floweyGrowth && capture == NULL && !flipX && !flipY && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH &&
+        dh == SWR_GROWTH_HEIGHT && sw == SWR_VINE_W && sh == SWR_VINE_H &&
+        sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        pivotY == 5.5f && swr->blendMode == bm_normal && alpha > 253 && swrFloweyVineBlockTarget(swr)) {
+        const SWVineGrowthRows* rows = swrVineGrowthRows(texture, rotation, (minYc & ~1) - dy, maxYc - dy);
+        if (rows != NULL) {
+            swrDrawFloweyVineBlocks(swr, rows, rotation, texture->buffer + sy * texture->width + sx,
+                                   texture->width, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, tintColor);
+            return;
+        }
+    }
+    const SWVineGrowthRows* growthRows = floweyGrowth ? swrVineGrowthRows(texture, rotation, minYc - dy, maxYc - dy) : NULL;
+    cachedRows = growthRows != NULL;
+    int growthLeft = cachedRows ? swrFloor(pxa) - 1 : 0;
+#else
+    (void) floweyGrowth;
+#endif
+
+    if (capture != NULL) {
+        int width = maxXc - minXc, height = maxYc - minYc;
+        size_t count = (size_t) width * height;
+        if (count > 160 * 1024 || width > 65535) return;
+        uintpixel_t* pixels = (uintpixel_t*) calloc(count + 2 * height, sizeof(*pixels));
+        if (pixels == NULL) return;
+        capture->pixels = pixels;
+        capture->bounds = (uint16_t*) (pixels + count);
+        capture->x = minXc;
+        capture->y = minYc;
+        capture->width = width;
+        capture->height = height;
+    }
     
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    if (cachedRows && dw >= 64 && dw <= SWR_GROWTH_MAX_WIDTH && dh == SWR_GROWTH_HEIGHT &&
+        sw == SWR_VINE_W && sh == SWR_VINE_H && sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        !flipX && !flipY && swr->blendMode == bm_normal && (tintColor & 0x7fff) == 0x7fff && alpha > 253) {
+        swrDrawGrowingVineRows(swr, growthRows, rotation, texture->buffer + sy * texture->width + sx,
+                              texture->width, texture->vineGrowthRows, dx, dy, dw, pxa, pya, minXc, minYc, maxXc, maxYc, capture);
+        return;
+    }
+#endif
+
     int sox = flipX ? sw - 1 : 0;
     int soy = flipY ? sh - 1 : 0;
     int six = flipX ? -1 : 1;
@@ -1751,6 +2442,9 @@ static void swrDrawSpriteRotatedInternal(
     ptrdiff_t srcOffset = (ptrdiff_t) sy * srcPitch + sx;
     
     int blendmode = swr->blendMode;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
+    bool copyHalfTint = blendmode == bm_normal && alpha > 253 && (tintColor & 0x7fff) == 0x4210;
+#endif
 
     // Half of the box round a turned sprite is outside the sprite, and the
     // test below costs a pixel there most of what one inside costs. So each
@@ -1760,13 +2454,19 @@ static void swrDrawSpriteRotatedInternal(
     // Each edge's x for a row is its x at its first corner plus the row's
     // distance from that corner times its slope; a level edge crosses no row.
     #define SWR_TURNED_SPARE 2.0f
-    float edgeSlope[4];
+    float edgeSlope[4], edgeLow[4], edgeHigh[4], edgeReach[4];
     bool edgeLevel[4];
-    for (int e = 0; e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
+    for (int e = 0; !cachedRows && e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
     {
-        float ex = quadX[(e + 1) & 3] - quadX[e], ey = quadY[(e + 1) & 3] - quadY[e];
+        int next = (e + 1) & 3;
+        float y0 = quadY[e], y1 = quadY[next];
+        float ex = quadX[next] - quadX[e], ey = y1 - y0;
         edgeLevel[e] = ey > -0.001f && ey < 0.001f;
-        edgeSlope[e] = edgeLevel[e] ? 0.0f : ex / ey;
+        float slope = edgeLevel[e] ? 0.0f : ex / ey;
+        edgeSlope[e] = slope;
+        edgeReach[e] = slope < 0.0f ? -slope : slope;
+        edgeLow[e] = (y0 < y1 ? y0 : y1) - 1.0f;
+        edgeHigh[e] = (y0 < y1 ? y1 : y0) + 1.0f;
     }
     
     // The numbers the loop needs as floats are worked out once: a conversion
@@ -1774,6 +2474,7 @@ static void swrDrawSpriteRotatedInternal(
     // These are the same values the conversions gave.
     float soxf = (float) sox, soyf = (float) soy, sixf = (float) six, siyf = (float) siy;
     float dwf = (float) dw, dhf = (float) dh;
+    float localPivotX = pxa - dx, localPivotY = pya - dy;
     
     // A pixel's distance across from the pivot depends on its column alone,
     // so it is worked out once for each column the draw can reach, by the
@@ -1787,6 +2488,22 @@ static void swrDrawSpriteRotatedInternal(
     #define SWR_TURNED_NEAR 2048
     #define SWR_TURNED_STEP_SPAN 2048
     #define SWR_TURNED_STEP_REACH 16000.0f
+    // The small pipe sprites take at most 96 steps at a scale ratio under 6.
+    // Step rounding contributes under 52 fixed units here. Keep a wider
+    // 256-unit margin for the float coordinate math and the texel boundaries.
+    int recheckBand = SWR_TURNED_NEAR;
+    if (sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H &&
+        maxXc - minXc <= 96 && dw >= 8 && dw <= 64 && dh >= 8 && dh <= 64 &&
+        pivotX >= 0.0f && pivotX <= dw && pivotY >= 0.0f && pivotY <= dh &&
+        dx >= -4096 && dx <= 4096 && dy >= -4096 && dy <= 4096)
+        recheckBand = 256;
+    // The growing vine's cached rows are at most 29 pixels wide. With
+    // source-to-screen ratios below eight and screen offsets below 512,
+    // float roundoff and 16.16 step rounding stay well inside 512 units.
+    // Recompute exact coordinates near texture edges and texel boundaries.
+    if (cachedRows && dw >= 64 && sw <= 511 && sh <= 33)
+        recheckBand = 512;
+    uint32_t steppedSpan = (uint32_t) (0x10000 - 2 * recheckBand);
     // A step across the screen moves the texel by this much each way.
     float texStepXf = cosA * sw_dw * 65536.0f, texStepYf = -sinA * sh_dh * 65536.0f;
     bool steppable = sw < 8192 && sh < 8192 &&
@@ -1804,38 +2521,55 @@ static void swrDrawSpriteRotatedInternal(
     {
         float cyf = (float) cy;
         
-        // Where the rectangle can be on this row.
         float rowY = cyf + 0.5f;
-        float rowLeft = FLT_MAX, rowRight = -FLT_MAX;
-        for (int i = 0; i < 4; i++)
-        {
-            float y0 = quadY[i], y1 = quadY[(i + 1) & 3];
-            float low = y0 < y1 ? y0 : y1, high = y0 < y1 ? y1 : y0;
-            if (rowY < low - 1.0f || rowY > high + 1.0f) continue;
-            if (edgeLevel[i]) {
-                float x0 = quadX[i], x1 = quadX[(i + 1) & 3];
-                if (rowLeft > x0) rowLeft = x0;
-                if (rowLeft > x1) rowLeft = x1;
-                if (rowRight < x0) rowRight = x0;
-                if (rowRight < x1) rowRight = x1;
-                continue;
-            }
-            // The crossing, and where it would be a row up and a row down:
-            // near a corner the edge may end short of this row's middle.
-            float at = quadX[i] + (rowY - y0) * edgeSlope[i];
-            float reach = edgeSlope[i] < 0.0f ? -edgeSlope[i] : edgeSlope[i];
-            if (rowLeft > at - reach) rowLeft = at - reach;
-            if (rowRight < at + reach) rowRight = at + reach;
-        }
-        if (rowLeft > rowRight) continue;
         int rowFrom = minXc, rowTo = maxXc;
-        if (rowLeft - SWR_TURNED_SPARE > (float) minXc) rowFrom = swrFloor(rowLeft - SWR_TURNED_SPARE);
-        if (rowRight + SWR_TURNED_SPARE < (float) maxXc) rowTo = swrCeiling(rowRight + SWR_TURNED_SPARE) + 1;
-        if (rowTo > maxXc) rowTo = maxXc;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+        if (cachedRows) {
+            // Pad for the pivot's fractional column. The original inverse
+            // sampler below still checks the exact texture edges and tip.
+            int left = growthLeft + growthRows->left[cy - dy + SWR_GROWTH_ROW_RADIUS];
+            rowFrom = swrMax(minXc, left);
+            rowTo = swrMin(maxXc, left + growthRows->span);
+        } else
+#endif
+        {
+            // Where the rectangle can be on this row.
+            float rowLeft = FLT_MAX, rowRight = -FLT_MAX;
+            for (int i = 0; i < 4; i++)
+            {
+                if (rowY < edgeLow[i] || rowY > edgeHigh[i]) continue;
+                if (edgeLevel[i]) {
+                    float x0 = quadX[i], x1 = quadX[(i + 1) & 3];
+                    if (rowLeft > x0) rowLeft = x0;
+                    if (rowLeft > x1) rowLeft = x1;
+                    if (rowRight < x0) rowRight = x0;
+                    if (rowRight < x1) rowRight = x1;
+                    continue;
+                }
+                // The crossing, and where it would be a row up and a row down:
+                // near a corner the edge may end short of this row's middle.
+                float at = quadX[i] + (rowY - quadY[i]) * edgeSlope[i];
+                float reach = edgeReach[i];
+                if (rowLeft > at - reach) rowLeft = at - reach;
+                if (rowRight < at + reach) rowRight = at + reach;
+            }
+            if (rowLeft > rowRight) continue;
+            if (rowLeft - SWR_TURNED_SPARE > (float) minXc) rowFrom = swrFloor(rowLeft - SWR_TURNED_SPARE);
+            if (rowRight + SWR_TURNED_SPARE < (float) maxXc) rowTo = swrCeiling(rowRight + SWR_TURNED_SPARE) + 1;
+            if (rowTo > maxXc) rowTo = maxXc;
+        }
         if (rowFrom >= rowTo) continue;
-        uintpixel_t *dstline = &swr->fb[cy * swr->fbPitch];
-        // Only this span can affect the buffer's next partial clear.
-        swrDirtyRow(swr, cy, rowFrom, rowTo);
+        uintpixel_t* dst;
+        if (capture != NULL) {
+            int row = cy - minYc;
+            capture->bounds[2 * row] = (uint16_t) (rowFrom - minXc);
+            capture->bounds[2 * row + 1] = (uint16_t) (rowTo - minXc);
+            dst = capture->pixels + row * capture->width + rowFrom - minXc;
+        } else {
+            dst = swr->fb + cy * swr->fbPitch + rowFrom;
+            swrDirtyRow(swr, cy, rowFrom, rowTo);
+        }
+        float oy = rowY - pya;
         
         // Along a row the texel a pixel takes moves by the same amount at
         // every step, so it is followed in whole numbers (sixteen bits below
@@ -1843,17 +2577,16 @@ static void swrDrawSpriteRotatedInternal(
         // That drifts from the sum by a few thousandths of a texel over a
         // row, which only matters to a pixel that lands that close to the
         // line between two texels or to the sprite's edge. Any pixel within
-        // SWR_TURNED_NEAR of one is worked out by the sum as before; for the
+        // the recheck band is worked out by the sum as before; for the
         // rest the two agree on the texel, so the picture is the same.
         bool stepped = steppable && rowTo - rowFrom <= SWR_TURNED_STEP_SPAN;
         int32_t texX = 0, texY = 0; // the unmirrored texel coordinate, 16.16
         if (stepped) {
             float ox = acrossHeld ? acrossKept[rowFrom - minXc] : (float) rowFrom + 0.5f - pxa;
-            float oy = cyf + 0.5f - pya;
             float lx =  cosA * ox + sinA * oy;
             float ly = -sinA * ox + cosA * oy;
-            lx += pxa - dx;
-            ly += pya - dy;
+            lx += localPivotX;
+            ly += localPivotY;
             lx = lx * sw_dw;
             ly = ly * sh_dh;
             if (lx > -SWR_TURNED_STEP_REACH && lx < SWR_TURNED_STEP_REACH && ly > -SWR_TURNED_STEP_REACH && ly < SWR_TURNED_STEP_REACH) {
@@ -1864,12 +2597,12 @@ static void swrDrawSpriteRotatedInternal(
             }
         }
         
-        for (int cx = rowFrom; cx < rowTo; cx++, texX += texStepX, texY += texStepY)
+        for (int cx = rowFrom; cx < rowTo; cx++, dst++, texX += texStepX, texY += texStepY)
         {
             int tx, ty;
             // Far enough from every line between texels (the sprite's edges are two of them)?
-            if (stepped && (uint32_t) ((texX & 0xFFFF) - SWR_TURNED_NEAR) < (uint32_t) (0x10000 - 2 * SWR_TURNED_NEAR) &&
-                           (uint32_t) ((texY & 0xFFFF) - SWR_TURNED_NEAR) < (uint32_t) (0x10000 - 2 * SWR_TURNED_NEAR))
+            if (stepped && (uint32_t) ((texX & 0xFFFF) - recheckBand) < steppedSpan &&
+                           (uint32_t) ((texY & 0xFFFF) - recheckBand) < steppedSpan)
             {
                 int wholeX = texX >> 16, wholeY = texY >> 16;
                 if ((uint32_t) wholeX >= (uint32_t) sw || (uint32_t) wholeY >= (uint32_t) sh) continue;
@@ -1884,15 +2617,14 @@ static void swrDrawSpriteRotatedInternal(
             {
                 // we need to determine the texture-space coordinate of cx/cy
                 float ox = acrossHeld ? acrossKept[cx - minXc] : (float) cx + 0.5f - pxa;
-                float oy = cyf + 0.5f - pya;
                 
                 // "undo" the rotation
                 float lx =  cosA * ox + sinA * oy;
                 float ly = -sinA * ox + cosA * oy;
                 
                 // turn it into a texture-local coordinate
-                lx += pxa - dx;
-                ly += pya - dy;
+                lx += localPivotX;
+                ly += localPivotY;
                 
                 if (lx < 0 || ly < 0 || lx >= dwf || ly >= dhf) continue;
                 
@@ -1911,11 +2643,18 @@ static void swrDrawSpriteRotatedInternal(
             
             uintpixel_t src = srcPixels[srcOffset + (ptrdiff_t) ty * srcPitch + tx];
 
-            if (swrIsOpaque(src))
-                alphaBlend(&dstline[cx], tint(tintColor, src), blendmode, alpha);
+            if (swrIsOpaque(src)) {
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
+                if (copyHalfTint) {
+                    *dst = swrTintHalf(src);
+                    continue;
+                }
+#endif
+                alphaBlend(dst, tint(tintColor, src), blendmode, alpha);
+            }
 #ifndef SW_NO_SEMI_TRANSPARENT_TEXTURE_SUPPORT
             else if (!swrIsFullyTransparent(src))
-                swrCalculateAlphaBlending(&dstline[cx], src, tintColor, alpha, blendmode);
+                swrCalculateAlphaBlending(dst, src, tintColor, alpha, blendmode);
 #endif
         }
     }
@@ -2467,6 +3206,208 @@ void swrTrailEnd(void)
 #endif
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+typedef struct { int from, to; } SWPipeSpan;
+
+typedef struct {
+    const SWPipeLayer* layer;
+    const uintpixel_t* upper;
+    const uintpixel_t* lower;
+    const uint8_t* coverage;
+    SWPipeSpan visible, solid;
+} SWPipeRow;
+
+// Cache one guaranteed opaque interval per row for each sampler. A shorter
+// interval misses some opportunities to skip work, but cannot hide a hole.
+static const uint16_t* swrPipeSolidBounds(SWTexture* texture)
+{
+    if (texture->pipeSolidBounds != NULL) return texture->pipeSolidBounds;
+    int width = texture->width, height = texture->height;
+    uint16_t* bounds = malloc((size_t) height * 4 * sizeof(*bounds));
+    if (bounds == NULL) return NULL;
+    for (int mode = 0; mode < 2; ++mode) {
+        for (int y = 0; y < height; ++y) {
+            const uintpixel_t* row = texture->buffer + y * width;
+            const uintpixel_t* next = mode && y + 1 < height ? row + width : NULL;
+            int start = 0, bestStart = 0, bestEnd = 0;
+            for (int x = 0; x < width; ++x) {
+                if (!swrIsOpaque(row[x]) || (mode && (next == NULL || !swrIsOpaque(next[x])))) {
+                    start = x + 1;
+                } else if (x + 1 - start > bestEnd - bestStart) {
+                    bestStart = start;
+                    bestEnd = x + 1;
+                }
+            }
+            if (mode && bestEnd > bestStart) --bestEnd; // the right-hand tap must also be opaque
+            bounds[(mode * height + y) * 2] = (uint16_t) bestStart;
+            bounds[(mode * height + y) * 2 + 1] = (uint16_t) bestEnd;
+        }
+    }
+    texture->pipeSolidBounds = bounds;
+    return bounds;
+}
+
+static SWPipeRow swrPipeRow(const SWPipeLayer* layer, int y)
+{
+    enum { UNIT = 1 << 14 };
+    SWPipeRow row = { .layer = layer };
+    if (y < layer->dy || y >= layer->dy + layer->dh) return row;
+    int sy = layer->sy + ((y - layer->dy) * layer->ystep) / UNIT;
+    if (layer->box && sy > layer->bottom) return row;
+    int sy2 = layer->box && sy < layer->bottom ? sy + 1 : -1;
+    row.upper = layer->pixels + sy * layer->pitch;
+    if (sy2 >= 0) row.lower = layer->pixels + sy2 * layer->pitch;
+    if (layer->coverage != NULL) row.coverage = layer->coverage + sy * layer->pitch;
+
+    int from = 0, to = layer->dw;
+    if (layer->box) {
+        to = swrMin(to, swrFirstSampleAtColumn(layer->right - layer->sx + 1, layer->xstep, UNIT));
+        if (layer->bounds != NULL)
+            swrBoxSampleSpan(layer->bounds, sy, sy2, layer->sx, layer->right, layer->xstep, UNIT, &from, &to);
+    } else if (layer->bounds != NULL) {
+        swrPointSampleSpan(layer->bounds + sy * 2, layer->sx, layer->dw, layer->xstep, UNIT,
+                           layer->flipX, &from, &to);
+    }
+    row.visible = (SWPipeSpan) { layer->dx + from, layer->dx + to };
+    if (layer->solidBounds != NULL && (!layer->box || row.lower != NULL)) {
+        const uint16_t* solid = layer->solidBounds + sy * 2;
+        uint16_t limits[] = { solid[0], solid[1] };
+        if (layer->box && limits[1] > layer->right) limits[1] = (uint16_t) layer->right;
+        if (limits[0] < limits[1]) {
+            swrPointSampleSpan(limits, layer->sx, layer->dw, layer->xstep, UNIT, layer->flipX, &from, &to);
+            row.solid = (SWPipeSpan) { layer->dx + from, layer->dx + to };
+        }
+    }
+    return row;
+}
+
+static void swrDrawPipeSpan(const SWPipeRow* row, uintpixel_t* dst, int from, int to)
+{
+    if (from >= to) return;
+    const SWPipeLayer* layer = row->layer;
+    int col = from - layer->dx;
+    int step = layer->xstep;
+    if (layer->flipX) { col = layer->dw - 1 - col; step = -step; }
+    int xs = col * layer->xstep;
+    const uintpixel_t* upper = row->upper + layer->sx;
+    uint32_t lastColor = UINT32_MAX;
+    uintpixel_t lastTinted = 0;
+
+    if (row->coverage == NULL && !layer->box) {
+        bool untinted = (layer->tint & 0x7fff) == 0x7fff;
+        for (int x = from; x < to; ++x, xs += step) {
+            uintpixel_t color = upper[xs >> 14];
+            if (!swrIsOpaque(color)) continue;
+            if (color != lastColor) {
+                lastTinted = untinted ? color : tint(layer->tint, color);
+                lastColor = color;
+            }
+            dst[x] = lastTinted;
+        }
+        return;
+    }
+
+    for (int x = from; x < to; ++x, xs += step) {
+        int sourceX = layer->sx + (xs >> 14);
+        uintpixel_t color = row->upper[sourceX];
+        int covered;
+        if (row->coverage != NULL) {
+            covered = row->coverage[sourceX];
+        } else {
+            bool next = sourceX < layer->right;
+            uintpixel_t right = next ? row->upper[sourceX + 1] : 0;
+            uintpixel_t lower = row->lower != NULL ? row->lower[sourceX] : 0;
+            uintpixel_t lowerRight = row->lower != NULL && next ? row->lower[sourceX + 1] : 0;
+            covered = swrAverageBox(color, right, lower, lowerRight, &color);
+        }
+        if (covered == 0) continue;
+        if (color != lastColor) {
+            lastTinted = tint(layer->tint, color);
+            lastColor = color;
+        }
+        int alpha = (layer->alpha * covered) >> 2;
+        if (alpha > 253) dst[x] = lastTinted;
+        else dst[x] = swrBlendPremultiplied(dst[x], swrSpreadRedBlue(lastTinted) * alpha,
+                                           swrGreen(lastTinted) * alpha, 256 - alpha);
+    }
+}
+
+// Cut out the later opaque spans, then draw the remaining pieces in the
+// original order so the partial-coverage edges blend against the same pixels.
+static void swrDrawPipeRow(const SWPipeRow* row, uintpixel_t* dst, SWPipeSpan first, SWPipeSpan second)
+{
+    if (first.from > second.from) {
+        SWPipeSpan swap = first;
+        first = second;
+        second = swap;
+    }
+    int from = row->visible.from, to = row->visible.to;
+    SWPipeSpan covers[] = { first, second };
+    for (int i = 0; i < 2; ++i) {
+        if (covers[i].from >= covers[i].to || covers[i].to <= from || covers[i].from >= to) continue;
+        swrDrawPipeSpan(row, dst, from, covers[i].from);
+        from = covers[i].to;
+    }
+    swrDrawPipeSpan(row, dst, from, to);
+}
+
+static void swrComposePipeLayers(SWRenderer* swr)
+{
+    SWPipeLayer layers[3] = {0};
+    int top = swr->maxY, bottom = swr->portY;
+    swr->pipeCount = 0;
+    // Prepare back to front so the first half-size draw still picks the phase.
+    for (int i = 0; i < 3; ++i) {
+        const SWSpriteCall* call = &swr->pipeCalls[i];
+        swr->pipePlan = &layers[i];
+        swrDrawSpriteInternal(&swr->base, call->dx, call->dy, call->dw, call->dh, call->texture,
+                              call->sx, call->sy, call->sw, call->sh, call->tintColor, call->alpha,
+                              false, SWR_CONTRAST_NONE);
+        if (layers[i].dh == 0) continue;
+        top = swrMin(top, layers[i].dy);
+        bottom = swrMax(bottom, layers[i].dy + layers[i].dh);
+    }
+    swr->pipePlan = NULL;
+    for (int y = top; y < bottom; ++y) {
+        SWPipeRow back = swrPipeRow(&layers[0], y), middle = swrPipeRow(&layers[1], y), front = swrPipeRow(&layers[2], y);
+        int from = swr->maxX, to = swr->portX;
+        SWPipeSpan spans[] = { back.visible, middle.visible, front.visible };
+        for (int i = 0; i < 3; ++i) {
+            if (spans[i].from >= spans[i].to) continue;
+            from = swrMin(from, spans[i].from);
+            to = swrMax(to, spans[i].to);
+        }
+        if (from >= to) continue;
+        swrDirtyRow(swr, y, from, to);
+        uintpixel_t* dst = swr->fb + y * swr->fbPitch;
+        swrDrawPipeRow(&back, dst, middle.solid, front.solid);
+        swrDrawPipeRow(&middle, dst, front.solid, (SWPipeSpan) {0, 0});
+        swrDrawPipeSpan(&front, dst, front.visible.from, front.visible.to);
+    }
+}
+
+static bool swrHoldPipeLayer(SWRenderer* swr, const SWSpriteCall* call)
+{
+    // This footprint is the three normal, opaque Flowey background-pipe draws.
+    bool eligible = swr->overlayMergeAllowed && swr->fb == swr->mainFb && swr->blendMode == bm_normal &&
+        !swrTrailMissed.known && call->texture->width <= 512 && call->texture->height <= 512 && call->sw == 190 && call->sh == 181 && call->alpha > 253 && call->texture->immutable &&
+        call->dw >= -384 && call->dw <= 384 && call->dw != 0 && call->dh > 0 && call->dh <= 384;
+#ifdef SW_DRAW_PROFILE
+    eligible = eligible && swrProbeStop == 0;
+#endif
+    if (swr->pipeCount != 0) {
+        const SWSpriteCall* first = &swr->pipeCalls[0];
+        if (!eligible || first->texture != call->texture || first->sx != call->sx || first->sy != call->sy ||
+            (first->dw < 0) != (call->dw < 0)) swrOverlayFlush(swr);
+    }
+    if (!eligible) return false;
+    if (swr->pipeCount == 0) swrOverlayFlush(swr);
+    swr->pipeCalls[swr->pipeCount++] = *call;
+    if (swr->pipeCount == 3) swrComposePipeLayers(swr);
+    return true;
+}
+#endif
+
 void swrDrawSprite(
     Renderer* renderer, float dx, float dy, float dw, float dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -2479,6 +3420,11 @@ void swrDrawSprite(
     swrTransformSizeIfNeeded(swr, &dw, &dh);
     
 #ifdef SW_HAS_PREMUL_BLEND
+    if (swr->pipeCount != 0 || (sw == 190 && sh == 181)) {
+        const SWSpriteCall call = { swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh), texture,
+                                   sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha) };
+        if (swrHoldPipeLayer(swr, &call)) return;
+    }
     if (swrFavorSpeed && swr->overlayMergeAllowed) {
         SWTrailStamp stamp = { true, swr->fb, texture, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
                                sx, sy, sw, sh, swrIntAlpha(alpha), swrConvertPixel(tintColor) };
@@ -3043,13 +3989,760 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 #endif
 }
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+// Keep translated pipe and eye poses separate from stationary vine poses.
+enum { SWR_RASTER_SLOTS = 64,
+       SWR_RASTER_BYTES = 192 * 1024, SWR_RASTER_BUILDS = 8,
+       SWR_VINE_SLOTS = 12, SWR_VINE_BYTES = 256 * 1024,
+       SWR_SPEED_VINE_SLOTS = 16, SWR_SPEED_VINE_BUILDS = 2,
+       SWR_EYE_SIZE = 40, SWR_EYE_BYTES = 128 * 1024, SWR_EYE_BUILDS = 2,
+       SWR_TOTAL_RASTER_BYTES = SWR_RASTER_BYTES + SWR_VINE_BYTES + SWR_EYE_BYTES };
+typedef struct {
+    int sx, sy, sw, sh, dw, dh;
+    float angle, px, py;
+    uint32_t tint;
+    int screenX, screenY, portX, portY, portW, portH;
+} SWRasterKey;
+typedef struct { int16_t x, y; uint16_t count, offset; } SWRasterSpan;
+typedef struct {
+    SWRasterKey key;
+    size_t bytes;
+    int count;
+    SWRasterSpan spans[];
+} SWRotatedRaster;
+typedef struct SWRotatedRasterCache {
+    SWRotatedRaster* entries[SWR_RASTER_SLOTS];
+    size_t bytes;
+    uint32_t frame;
+    int first, count, builds;
+} SWRotatedRasterCache;
+
+static size_t swrRotatedRasterBytes;
+
+static bool swrFloweyVineAnchor(const SWRenderer* swr, SWRasterKey* key, int x, int y)
+{
+    enum { margin = 4 };
+    if (key->dw != (SWR_VINE_W + 1) / 2 || key->dh != SWR_GROWTH_HEIGHT || key->px != 6.5f || key->py != 5.5f ||
+        swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->portX != 0 || swr->portY != 0 ||
+        swr->portW != 320 || swr->portH != 240 || swr->viewX < -2 * margin || swr->viewX > 2 * margin ||
+        swr->viewY < -2 * margin || swr->viewY > 2 * margin) return false;
+    // Half-grid pivots preserve the sampler's offsets under integer shifts.
+    // Cover the pixels a shake can expose, then clip at the actual viewport on replay.
+    key->screenX = x + swrFloor(swr->viewX * 0.5f);
+    key->screenY = y + swrFloor(swr->viewY * 0.5f);
+    key->portX = key->portY = -margin;
+    key->portW = 320 + 2 * margin;
+    key->portH = 240 + 2 * margin;
+    return true;
+}
+
+static void swrDropRotatedRaster(SWRotatedRasterCache* cache)
+{
+    SWRotatedRaster* entry = cache->entries[cache->first];
+    cache->bytes -= entry->bytes;
+    swrRotatedRasterBytes -= entry->bytes;
+    free(entry);
+    cache->first = (cache->first + 1) % SWR_RASTER_SLOTS;
+    cache->count--;
+}
+
+static SWRotatedRaster* swrBuildRotatedRaster(SWRenderer* swr, SWRotatedRasterCache* cache,
+                                              SWTexture* texture, const SWRasterKey* key,
+                                              int radius, bool stationary, bool speedVine, int slots, size_t limit)
+{
+    SWRotatedCapture raster = {0};
+    if (stationary && key->portX >= 0) {
+        // Keep the real viewport and coordinates for the long vine's sampler.
+        swrDrawSpriteRotatedInternal(&swr->base, key->screenX, key->screenY, key->dw, key->dh, texture,
+                                     key->sx, key->sy, key->sw, key->sh,
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster,
+                                     speedVine && key->dw == (SWR_VINE_W + 1) / 2 && key->dh == SWR_GROWTH_HEIGHT &&
+                                     key->py == 5.5f);
+        if (raster.pixels == NULL) return NULL;
+        raster.x -= key->screenX;
+        raster.y -= key->screenY;
+    } else {
+        int side = radius * 2 + 1;
+        int x = radius + (key->dw < 0 ? (int) key->px : -(int) key->px);
+        int y = radius + (key->dh < 0 ? (int) key->py : -(int) key->py);
+        SWRenderer scratch = {0};
+        scratch.portW = scratch.maxX = scratch.portH = scratch.maxY = side;
+        scratch.blendMode = bm_normal;
+        if (stationary) {
+            // The negative clip starts mark a vine captured with a shake margin.
+            x = key->screenX;
+            y = key->screenY;
+            scratch.portX = key->portX;
+            scratch.portY = key->portY;
+            scratch.portW = key->portW;
+            scratch.portH = key->portH;
+            scratch.maxX = scratch.portX + scratch.portW;
+            scratch.maxY = scratch.portY + scratch.portH;
+        }
+        swrDrawSpriteRotatedInternal(&scratch.base, x, y, key->dw, key->dh, texture,
+                                     key->sx, key->sy, key->sw, key->sh,
+                                     (uintpixel_t) key->tint, 256, key->angle, key->px, key->py, &raster, stationary);
+        if (raster.pixels == NULL) return NULL;
+        raster.x -= x;
+        raster.y -= y;
+    }
+
+    int spans = 0, opaque = 0;
+    for (int row = 0; row < raster.height; ++row) {
+        bool inside = false;
+        int from = raster.bounds[2 * row], to = raster.bounds[2 * row + 1];
+        for (int col = from; col < to; ++col) {
+            bool covered = swrIsOpaque(raster.pixels[row * raster.width + col]);
+            spans += covered && !inside;
+            opaque += covered;
+            inside = covered;
+        }
+    }
+    size_t bytes = sizeof(SWRotatedRaster) + spans * sizeof(SWRasterSpan) + opaque * sizeof(*raster.pixels);
+    if (opaque > UINT16_MAX || bytes > limit - sizeof(*cache)) {
+        free(raster.pixels);
+        return NULL;
+    }
+    while (cache->count > 0 && (cache->count >= slots || bytes > limit - cache->bytes ||
+                                bytes > SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes))
+        swrDropRotatedRaster(cache);
+    SWRotatedRaster* entry = bytes <= SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes ? malloc(bytes) : NULL;
+    if (entry != NULL) {
+        entry->key = *key;
+        entry->bytes = bytes;
+        entry->count = spans;
+        uintpixel_t* colors = (uintpixel_t*) (entry->spans + spans);
+        int index = 0, offset = 0;
+        for (int row = 0; row < raster.height; ++row) {
+            const uintpixel_t* line = raster.pixels + row * raster.width;
+            int from = raster.bounds[2 * row], to = raster.bounds[2 * row + 1];
+            for (int col = from; col < to; ) {
+                if (!swrIsOpaque(line[col])) { ++col; continue; }
+                int first = col++;
+                while (col < to && swrIsOpaque(line[col])) ++col;
+                int length = col - first;
+                entry->spans[index++] = (SWRasterSpan) { first + raster.x, row + raster.y, length, offset };
+                memcpy(colors + offset, line + first, (size_t) length * sizeof(*colors));
+                offset += length;
+            }
+        }
+        cache->entries[(cache->first + cache->count++) % SWR_RASTER_SLOTS] = entry;
+        cache->bytes += bytes;
+        swrRotatedRasterBytes += bytes;
+    }
+    free(raster.pixels);
+    return entry;
+}
+
+static SWRasterPath swrDrawRotatedRaster(SWRenderer* swr, SWTexture* texture, int x, int y,
+                                         const SWRasterKey* key, bool stationary, bool speedVine,
+                                         uintpixel_t replayTint)
+{
+    if (x < -4096 || x > 4096 || y < -4096 || y > 4096 || !isfinite(key->angle)) return SWR_RASTER_OTHER;
+    // With a half-grid pivot and bounded integer positions, translating the
+    // draw preserves the inverse sampler's pixel-center offsets exactly.
+    if (!stationary && (key->dw == 0 || key->dw < -64 || key->dw > 64 ||
+                        key->dh == 0 || key->dh < -64 || key->dh > 64)) return SWR_RASTER_OTHER;
+    int w = swrAbs(key->dw), h = swrAbs(key->dh);
+    if (!(key->px >= 0.0f && key->px <= w && key->py >= 0.0f && key->py <= h) ||
+        (!stationary && (key->px * 2 != (int) (key->px * 2) || key->py * 2 != (int) (key->py * 2)))) return SWR_RASTER_PIVOT;
+    bool eye = key->sw == SWR_EYE_SIZE;
+    SWRotatedRasterCache** slot = stationary ? &texture->stationaryRasters :
+                                eye ? &texture->eyeRasters : &texture->rotatedRasters;
+    SWRotatedRasterCache* cache = *slot;
+    if (cache == NULL) {
+        if (sizeof(*cache) > SWR_TOTAL_RASTER_BYTES - swrRotatedRasterBytes) return SWR_RASTER_OTHER;
+        cache = calloc(1, sizeof(*cache));
+        if (cache == NULL) return SWR_RASTER_OTHER;
+        *slot = cache;
+        cache->bytes = sizeof(*cache);
+        swrRotatedRasterBytes += sizeof(*cache);
+    }
+    const SWRotatedRaster* entry = NULL;
+    for (int i = 0; i < cache->count; ++i) {
+        const SWRotatedRaster* have = cache->entries[(cache->first + i) % SWR_RASTER_SLOTS];
+        if (memcmp(&have->key.angle, &key->angle, sizeof(key->angle)) == 0 &&
+            memcmp(&have->key, key, sizeof(*key)) == 0) {
+            entry = have;
+            break;
+        }
+    }
+    SWRasterPath path = SWR_RASTER_WARM;
+    if (entry == NULL) {
+        if (cache->frame != swr->frameCounter) {
+            cache->frame = swr->frameCounter;
+            cache->builds = 0;
+        }
+        int buildLimit = speedVine ? SWR_SPEED_VINE_BUILDS : stationary ? 1 :
+                         eye ? SWR_EYE_BUILDS : SWR_RASTER_BUILDS;
+        if (cache->builds >= buildLimit) return SWR_RASTER_OTHER;
+        // The Manhattan extent bounds the rotated corners in both axes.
+        int radius = stationary ? 0 : swrCeiling(fmaxf(key->px, w - key->px) + fmaxf(key->py, h - key->py)) + 2;
+        if (radius > 64) return SWR_RASTER_OTHER;
+        cache->builds++;
+        int slots = speedVine ? SWR_SPEED_VINE_SLOTS : stationary ? SWR_VINE_SLOTS : SWR_RASTER_SLOTS;
+        size_t limit = stationary ? SWR_VINE_BYTES : eye ? SWR_EYE_BYTES : SWR_RASTER_BYTES;
+        entry = swrBuildRotatedRaster(swr, cache, texture, key, radius, stationary, speedVine, slots, limit);
+        if (entry == NULL) return SWR_RASTER_OTHER;
+        path = SWR_RASTER_BUILT;
+    }
+    int right = swr->portX + swr->portW, bottom = swr->portY + swr->portH;
+    const uintpixel_t* colors = (const uintpixel_t*) (entry->spans + entry->count);
+    bool tinted = (replayTint & 0x7fff) != 0x7fff;
+    for (int i = 0; i < entry->count; ++i) {
+        SWRasterSpan span = entry->spans[i];
+        int row = y + span.y;
+        if (row < swr->portY || row >= bottom) continue;
+        int col = x + span.x;
+        int first = swrMax(col, swr->portX), last = swrMin(col + span.count, right);
+        if (first >= last) continue;
+        swrDirtyRow(swr, row, first, last);
+        uintpixel_t* dst = swr->fb + row * swr->fbPitch + first;
+        const uintpixel_t* src = colors + span.offset + first - col;
+        int count = last - first;
+        if (tinted) {
+            for (int i = 0; i < count; ++i) dst[i] = tint(replayTint, src[i]);
+        } else {
+            swrCopyPixels(dst, src, count);
+        }
+    }
+    return path;
+}
+
+static void swrFreeRasterCache(SWRotatedRasterCache** slot)
+{
+    SWRotatedRasterCache* cache = *slot;
+    if (cache == NULL) return;
+    while (cache->count > 0) swrDropRotatedRaster(cache);
+    swrRotatedRasterBytes -= sizeof(*cache);
+    free(cache);
+    *slot = NULL;
+}
+#endif
+
+void swrFreeRotatedRasters(SWTexture* texture)
+{
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    swrFreeRasterCache(&texture->rotatedRasters);
+    swrFreeRasterCache(&texture->stationaryRasters);
+    swrFreeRasterCache(&texture->eyeRasters);
+    free(texture->vineGrowthRows);
+    texture->vineGrowthRows = NULL;
+#else
+    (void) texture;
+#endif
+}
+
+#ifdef SW_HAS_PREMUL_BLEND
+typedef struct SWFloweyArtRows {
+    int sx, sy, sw, sh, width, height, kind;
+    SWBoxRow rows[];
+} SWFloweyArtRows;
+
+static uintpixel_t swrFloweyArtBlock(const SWTexture* texture, int sx, int sy, int w, int h)
+{
+    const uintpixel_t* row = texture->buffer + sy * texture->width + sx;
+    const uintpixel_t* next = row + (h > 1 ? texture->width : 0);
+    uintpixel_t color = 0;
+    return swrAverageBox(row[0], w > 1 ? row[1] : 0,
+                         h > 1 ? next[0] : 0, w > 1 && h > 1 ? next[1] : 0, &color) ? color : 0;
+}
+
+static const SWFloweyArtRows* swrFloweyArtRows(SWTexture* texture, int sx, int sy, int sw, int sh, int kind)
+{
+    SWFloweyArtRows* art = texture->floweyArtRows;
+    if (art != NULL)
+        return art->sx == sx && art->sy == sy && art->sw == sw && art->sh == sh && art->kind == kind ? art : NULL;
+
+    bool screen = kind == SWR_FLOWEY_ART_SCREEN;
+    int width = screen ? 65 : (sw + 1) / 2;
+    int height = screen ? sh : (sh + 1) / 2;
+    size_t pixels = (size_t) width * height;
+    art = malloc(sizeof(*art) + height * sizeof(SWBoxRow) +
+                 pixels * sizeof(uintpixel_t) * (kind == SWR_FLOWEY_ART_ARM ? 2 : 1));
+    if (art == NULL) return NULL;
+    *art = (SWFloweyArtRows) { sx, sy, sw, sh, width, height, kind };
+    uintpixel_t* colors = (uintpixel_t*) (art->rows + height);
+    if (screen) {
+        // The old TV animation retains its current frame and palette. Only
+        // the little horizontal stretch is fixed so each row can be copied.
+        int xstep = (sw << 14) / width;
+        for (int y = 0; y < height; ++y) {
+            const uintpixel_t* source = texture->buffer + (sy + y) * texture->width + sx;
+            for (int x = 0; x < width; ++x)
+                colors[y * width + x] = source[(x * xstep) >> 14];
+        }
+    } else {
+        // Share one color over each 2x2 block on screen, with a separate
+        // coverage test for each pixel to retain the claws and TV aperture.
+        for (int y = 0; y < height; y += 2) {
+            for (int x = 0; x < width; x += 2) {
+                int cols = swrMin(2, width - x), rows = swrMin(2, height - y);
+                uintpixel_t blocks[4] = {0}, shade = 0;
+                for (int j = 0; j < rows; ++j)
+                    for (int i = 0; i < cols; ++i) {
+                        int u = 2 * (x + i), v = 2 * (y + j);
+                        blocks[2 * j + i] = swrFloweyArtBlock(texture, sx + u, sy + v, sw - u, sh - v);
+                    }
+                swrAverageBox(blocks[0], blocks[1], blocks[2], blocks[3], &shade);
+                for (int j = 0; j < rows; ++j)
+                    for (int i = 0; i < cols; ++i)
+                        colors[(y + j) * width + x + i] = blocks[2 * j + i] ? shade : 0;
+            }
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        const uintpixel_t* row = colors + y * width;
+        int first = width, end = 0, start = 0, solidFrom = 0, solidTo = 0;
+        for (int x = 0; x < width; ++x) {
+            if (!swrIsOpaque(row[x])) {
+                start = x + 1;
+                continue;
+            }
+            if (first == width) first = x;
+            end = x + 1;
+            if (end - start > solidTo - solidFrom) {
+                solidFrom = start;
+                solidTo = end;
+            }
+        }
+        art->rows[y] = (SWBoxRow) { first, end, solidFrom, solidTo };
+        if (kind == SWR_FLOWEY_ART_ARM)
+            for (int x = 0; x < width; ++x)
+                colors[pixels + y * width + x] = row[width - x - 1];
+    }
+    texture->floweyArtRows = art;
+    return art;
+}
+#endif
+
+SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    // Leave transparent rows under the coils so the composite stays within
+    // the sparse-run cache's half-coverage limit.
+    enum { WIDTH = SWR_FLOWEY_BACKDROP_WIDTH, HEIGHT = SWR_FLOWEY_BACKDROP_HEIGHT, PIPE_WIDTH = 190, PIPE_HEIGHT = 181 };
+    if (sx < 0 || sy < 0 || sx + PIPE_WIDTH > pipe->width || sy + PIPE_HEIGHT > pipe->height)
+        return NULL;
+    SWTexture* art = calloc(1, sizeof(*art));
+    if (art == NULL) return NULL;
+    art->buffer = calloc(WIDTH * HEIGHT, sizeof(*art->buffer));
+    if (art->buffer == NULL) {
+        free(art);
+        return NULL;
+    }
+    art->width = WIDTH;
+    art->height = HEIGHT;
+    art->immutable = true;
+
+    // The six ordinary back-pipe draws in a neutral pose, at 320x240.
+    // Leave the gaps transparent so the held-clear path can retain the base.
+    static const int left[] = { 200, 210, 229, 15, 5, -14 };
+    static const int top[] = { -10, -5, 0, -13, -8, -3 };
+    for (int layer = 0; layer < 6; ++layer) {
+        int brightness = layer == 2 || layer == 5 ? 2 : 1;
+        for (int y = swrMax(0, top[layer]); y < top[layer] + (PIPE_HEIGHT + 1) / 2; ++y) {
+            int v = 2 * (y - top[layer]);
+            for (int x = swrMax(0, left[layer]); x < swrMin(WIDTH, left[layer] + PIPE_WIDTH / 2); ++x) {
+                int col = x - left[layer];
+                int u = 2 * (layer < 3 ? col : PIPE_WIDTH / 2 - 1 - col);
+                uintpixel_t color = swrFloweyArtBlock(pipe, sx + u, sy + v, PIPE_WIDTH - u, PIPE_HEIGHT - v);
+                if (!swrIsOpaque(color)) continue;
+                int gray = (((color >> 10) & 31) + 2 * ((color >> 5) & 31) + (color & 31)) / 4;
+                int shade = 2 + gray / 4 * brightness;
+                art->buffer[y * WIDTH + x] = (uintpixel_t) (0x8000 | (shade << 10) | (shade << 5) | shade);
+            }
+        }
+    }
+    return art;
+#else
+    (void) pipe; (void) sx; (void) sy;
+    return NULL;
+#endif
+}
+
+void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
+                               const TexturePageItem* item, unsigned layer)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    // Back to front, using each stock layer's neutral pose at 320x240.
+    static const struct { int w, h, trimX, trimY, left, right, top; } poses[SWR_FLOWEY_BACKDROP_VINE_LAYERS] = {
+        { 298, 131, 2, 14, -44, 227, 95 },
+        { 298, 102, 2, 12, -64, 207, 94 },
+        { 297, 150, 3,  0, -55, 217, 88 },
+    };
+    if (layer >= SWR_FLOWEY_BACKDROP_VINE_LAYERS) return;
+    int sw = poses[layer].w, sh = poses[layer].h;
+    if (item->sourceWidth != sw || item->sourceHeight != sh || item->targetWidth != sw || item->targetHeight != sh ||
+        item->targetX != poses[layer].trimX || item->targetY != poses[layer].trimY ||
+        sx < 0 || sy < 0 || sx + sw > vine->width || sy + sh > vine->height) return;
+    int width = (sw + 1) / 2, top = poses[layer].top;
+    int height = swrMin((sh + 1) / 2, art->height - top);
+    for (int side = 0; side < 2; ++side) {
+        int left = side == 0 ? poses[layer].left : poses[layer].right;
+        for (int row = 0; row < height; ++row) {
+            int v = 2 * row;
+            uintpixel_t* dst = art->buffer + (top + row) * art->width;
+            for (int x = swrMax(0, left); x < swrMin(art->width, left + width); ++x) {
+                int col = x - left;
+                int u = 2 * (side == 0 ? width - 1 - col : col);
+                uintpixel_t color = swrFloweyArtBlock(vine, sx + u, sy + v, sw - u, sh - v);
+                // Keep the pipes where the two decorations meet. Half-bright
+                // vines sit behind all of the live sprites and warning cues.
+                if (swrIsOpaque(color) && (top + row >= 91 || !swrIsOpaque(dst[x])))
+                    dst[x] = 0x8000u | ((color & 0x7bdeu) >> 1);
+            }
+        }
+    }
+#else
+    (void) art; (void) vine; (void) sx; (void) sy; (void) item; (void) layer;
+#endif
+}
+
+void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { SOURCE_W = 45, SOURCE_H = 31, STAMP_W = 17, STAMP_H = 11, PIVOT_X = 8, PIVOT_Y = 6 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return;
+    // Sample the left coils from the stock vine phase at 320x240 and mirror
+    // them for the right. Smaller stamps keep the scenery away from cues.
+    static const struct { int16_t x, y, angle; } stamps[] = {
+        { 144, 30, 50 }, { 144, 17, 90 }, { 135, 7, 130 }, { 121, 5, 170 },
+        { 108, 12, 210 }, { 101, 25, 250 }, { 103, 39, 290 }, { 115, 48, 330 },
+    };
+    SWRenderer bake = {0};
+    bake.portW = bake.maxX = art->width;
+    bake.portH = bake.maxY = art->height;
+    bake.blendMode = bm_normal;
+    uintpixel_t tintColor = swrConvertPixel(0x777777);
+    for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
+        for (int side = 0; side < 2; ++side) {
+            int direction = side == 0 ? 1 : -1;
+            int x = side == 0 ? stamps[i].x : 321 - stamps[i].x;
+            SWRotatedCapture stamp = {0};
+            swrDrawSpriteRotatedInternal(&bake.base, x - direction * PIVOT_X, stamps[i].y - PIVOT_Y,
+                                         direction * STAMP_W, STAMP_H, pipe, sx, sy, SOURCE_W, SOURCE_H,
+                                         tintColor, 256, direction * stamps[i].angle, PIVOT_X, PIVOT_Y, &stamp, false);
+            for (int row = 0; row < stamp.height; ++row) {
+                const uintpixel_t* src = stamp.pixels + row * stamp.width;
+                uintpixel_t* dst = art->buffer + (stamp.y + row) * art->width + stamp.x;
+                for (int col = 0; col < stamp.width; ++col)
+                    if (swrIsOpaque(src[col]) && !swrIsOpaque(dst[col])) dst[col] = src[col];
+            }
+            free(stamp.pixels);
+        }
+    }
+#else
+    (void) art; (void) pipe; (void) sx; (void) sy;
+#endif
+}
+
+void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { SOURCE_W = 45, SOURCE_H = 31 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return;
+
+    // Bake the lower eye pipes from a stock 320x240 pose behind the
+    // foreground sprites, especially the attack warning lines.
+    static const struct { int16_t x, y, angle; } stamps[] = {
+        { 105, 84, 30 }, { 98, 90, 50 }, { 94, 98, 70 }, { 92, 106, 90 },
+        { 94, 114, 110 }, { 99, 121, 130 }, { 106, 125, 150 }, { 115, 127, 170 },
+        { 124, 127, 190 }, { 132, 124, 210 },
+    };
+    SWRenderer bake = {0};
+    bake.fb = art->buffer;
+    bake.fbPitch = bake.portW = bake.maxX = art->width;
+    bake.portH = bake.maxY = art->height;
+    bake.blendMode = bm_normal;
+    uintpixel_t tintColor = swrConvertPixel(0x808080);
+    for (int side = 0; side < 2; ++side) {
+        for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
+            int x = side == 0 ? stamps[i].x : 300 - stamps[i].x;
+            int angle = side == 0 ? stamps[i].angle : 180 - stamps[i].angle;
+            swrDrawSpriteRotatedInternal(&bake.base, x, stamps[i].y, 23, 16,
+                                         pipe, sx, sy, SOURCE_W, SOURCE_H, tintColor, 256, angle, 10.5f, 8.0f, NULL, false);
+        }
+    }
+#else
+    (void) art; (void) pipe; (void) sx; (void) sy;
+#endif
+}
+
+SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    enum { LEFT = 60, TOP = 29, WIDTH = 200, HEIGHT = 65, SOURCE_W = 45, SOURCE_H = 31 };
+    if (sx < 0 || sy < 0 || sx + SOURCE_W > pipe->width || sy + SOURCE_H > pipe->height) return NULL;
+    SWTexture* art = calloc(1, sizeof(*art));
+    if (art == NULL) return NULL;
+    art->buffer = calloc(WIDTH * HEIGHT, sizeof(*art->buffer));
+    if (art->buffer == NULL) {
+        free(art);
+        return NULL;
+    }
+    art->width = WIDTH;
+    art->height = HEIGHT;
+    art->originX = LEFT;
+    art->originY = TOP;
+    art->immutable = true;
+
+    // Stock side-stalk surrounds in a held 320x240 pose. The crop stays
+    // above the vine warning lines. Mirror the texture and angle for the right.
+    static const struct { int16_t x, y, angle; } stamps[] = {
+        { 140, 68, 30 }, { 127, 75, 18 }, { 113, 81, 6 }, { 99, 82, -6 },
+        { 87, 80, -18 }, { 78, 74, -30 }, { 73, 66, -70 }, { 73, 57, -90 },
+        { 77, 49, -126 }, { 86, 44, -148 }, { 97, 43, -170 },
+        { 111, 46, -192 }, { 125, 52, -214 },
+    };
+    SWRenderer bake = {0};
+    bake.fb = art->buffer;
+    bake.fbPitch = bake.portW = bake.maxX = WIDTH;
+    bake.portH = bake.maxY = HEIGHT;
+    bake.blendMode = bm_normal;
+    uintpixel_t tintColor = swrConvertPixel(0xc0c0c0);
+    for (int side = 0; side < 2; ++side) {
+        int direction = side == 0 ? 1 : -1;
+        for (unsigned i = 0; i < sizeof(stamps) / sizeof(stamps[0]); ++i) {
+            int x = side == 0 ? stamps[i].x : 320 - stamps[i].x;
+            swrDrawSpriteRotatedInternal(&bake.base, x - LEFT - direction * 10, stamps[i].y - TOP - 7,
+                                         direction * 23, 14, pipe, sx, sy, SOURCE_W, SOURCE_H,
+                                         tintColor, 256, direction * stamps[i].angle, 10.5f, 7.0f, NULL, false);
+        }
+    }
+    return art;
+#else
+    (void) pipe; (void) sx; (void) sy;
+    return NULL;
+#endif
+}
+
+void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const TexturePageItem* item)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    // spr_floweyx_behind at (140, 10), including its trim, starts at (70, 6) at half resolution.
+    enum { LEFT = 70, TOP = 6, SOURCE_W = 354, SOURCE_H = 269 };
+    int sx = item->sourceX - backing->originX, sy = item->sourceY - backing->originY;
+    int top = 2 * (art->originY - TOP);
+    if (item->sourceWidth != SOURCE_W || item->sourceHeight != SOURCE_H ||
+        item->targetWidth != SOURCE_W || item->targetHeight != SOURCE_H ||
+        item->targetX != 0 || item->targetY != 2 ||
+        sx < 0 || sy < 0 || sx + SOURCE_W > backing->width || sy + SOURCE_H > backing->height ||
+        top < 0 || top + 2 * art->height > SOURCE_H) return;
+
+    // Keep the original black silhouette only inside each cached rim.
+    int left = LEFT - art->originX, half = art->width / 2;
+    uintpixel_t black = swrConvertPixel(0);
+    for (int y = 0; y < art->height; ++y) {
+        uintpixel_t* row = art->buffer + y * art->width;
+        for (int side = 0; side < 2; ++side) {
+            int first = side * half, last = first + half - 1;
+            while (first < last && !swrIsOpaque(row[first])) ++first;
+            while (last > first && !swrIsOpaque(row[last])) --last;
+            int end = swrMin(last, left + SOURCE_W / 2);
+            for (int x = swrMax(first + 1, left); x < end; ++x) {
+                if (!swrIsOpaque(row[x]) &&
+                    swrIsOpaque(swrFloweyArtBlock(backing, sx + 2 * (x - left), sy + top + 2 * y, 2, 2)))
+                    row[x] = black;
+            }
+        }
+    }
+#else
+    (void) art; (void) backing; (void) item;
+#endif
+}
+
+bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                       int sx, int sy, int sw, int sh, uint32_t color)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 || sw < 2 || sh < 2 ||
+        sw > 81 || sh > 148 || texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !isfinite(dx) || !isfinite(dy) || fabsf(dx) > 8192.0f || fabsf(dy) > 8192.0f ||
+        !(fabsf(dw) >= 0.75f * sw && fabsf(dw) <= 1.1f * sw) ||
+        !(dh >= 0.75f * sh && dh <= 1.1f * sh)) return false;
+    // A final partial block may touch transparent padding, but never another
+    // atlas item: the size checks above restrict this path to isolated crops.
+    if (!swrHalfTexture(texture, sx, sy) || texture->halfPhaseX != sx || texture->halfPhaseY != sy) return false;
+    SWTexture half = *texture;
+    half.buffer = texture->halfBuffer;
+    half.width = (texture->width + sx + 1) / 2;
+    half.height = (texture->height + sy + 1) / 2;
+    half.solid = texture->halfSolid;
+    half.immutable = false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrTransformSizeIfNeeded(swr, &dw, &dh);
+    swrOverlayFlush(swr);
+    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
+                          &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(color), 256, false, SWR_CONTRAST_NONE);
+    return true;
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) color;
+    return false;
+#endif
+}
+
+bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                      int sx, int sy, int sw, int sh, int kind, uint32_t color)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    bool mirrored = dw < 0.0f;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 ||
+        sw <= 0 || sw > 171 || sh <= 0 || sh > 275 ||
+        texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !(dh > 0.0f && dh <= 310.0f) || (mirrored && kind != SWR_FLOWEY_ART_ARM)) return false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrTransformSizeIfNeeded(swr, &dw, &dh);
+    if (kind == SWR_FLOWEY_ART_SCREEN) dx += (dw - 65.0f) * 0.5f;
+    if (!(fabsf(dx) < 8192.0f && fabsf(dy) < 8192.0f)) return false;
+
+    const SWFloweyArtRows* art = swrFloweyArtRows(texture, sx, sy, sw, sh, kind);
+    if (art == NULL) return false;
+    int width = art->width, height = swrCeiling(dh);
+    int left = swrFloor(dx) - (mirrored ? width : 0), top = swrFloor(dy);
+    int clipLeft = swrMax(0, swr->portX - left), clipRight = swrMin(width, swr->maxX - left);
+    int firstRow = swrMax(0, swr->portY - top), endRow = swrMin(height, swr->maxY - top);
+    if (clipLeft >= clipRight || firstRow >= endRow) return true;
+
+    const uintpixel_t* colors = (const uintpixel_t*) (art->rows + art->height);
+    if (mirrored) colors += (size_t) width * art->height;
+    int ystep = (art->height << 14) / height;
+    const bool untinted = color == 0xffffff;
+    const uintpixel_t tintColor = swrConvertPixel(color);
+    swrOverlayFlush(swr);
+    for (int y = firstRow; y < endRow; ++y) {
+        int row = (y * ystep) >> 14;
+        SWBoxRow bounds = art->rows[row];
+        if (bounds.from >= bounds.to) continue;
+        int first = swrMax(clipLeft, mirrored ? width - bounds.to : bounds.from);
+        int end = swrMin(clipRight, mirrored ? width - bounds.from : bounds.to);
+        if (first >= end) continue;
+        int solidFrom = swrMin(end, swrMax(first, mirrored ? width - bounds.solidTo : bounds.solidFrom));
+        int solidTo = swrMax(solidFrom, swrMin(end, mirrored ? width - bounds.solidFrom : bounds.solidTo));
+        swrDirtyRow(swr, top + y, left + first, left + end);
+        uintpixel_t* dst = swr->fb + (top + y) * swr->fbPitch + left + first;
+        const uintpixel_t* src = colors + row * width;
+        if (untinted) {
+            swrCopyPixels(dst + solidFrom - first, src + solidFrom, solidTo - solidFrom);
+        } else {
+            for (int x = solidFrom; x < solidTo; ++x) dst[x - first] = tint(tintColor, src[x]);
+        }
+        for (int x = first; x < solidFrom; ++x)
+            if (swrIsOpaque(src[x])) dst[x - first] = untinted ? src[x] : tint(tintColor, src[x]);
+        for (int x = solidTo; x < end; ++x)
+            if (swrIsOpaque(src[x])) dst[x - first] = untinted ? src[x] : tint(tintColor, src[x]);
+    }
+    return true;
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) color; (void) kind;
+    return false;
+#endif
+}
+
+#ifdef SW_HAS_PREMUL_BLEND
+static bool swrDrawFloweyStalkPixels(Renderer* renderer, SWTexture* texture, float dx, float dy,
+                                    int sx, int sy, int w, int h, bool mirrored, uint32_t color)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (!isfinite(dx) || !isfinite(dy)) return false;
+    swrTransformPosIfNeeded(swr, &dx, &dy);
+    swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), mirrored ? -w : w, h,
+                          texture, sx, sy, w, h, swrConvertPixel(color), 256, true, SWR_CONTRAST_NONE);
+    return true;
+}
+
+#if defined(OF_PC) && !defined IS_BIG_ENDIAN
+static void swrCaptureFloweyStalk(const SWTexture* half, int sx, int sy, int w, int h, unsigned pose)
+{
+    static uint16_t captured;
+    static bool checked;
+    static const char* dir;
+    if (!checked) {
+        dir = getenv("BS_FLOWEY_STALKS_OUT");
+        checked = true;
+    }
+    if (dir == NULL || (captured & (1u << pose))) return;
+    captured |= (uint16_t) (1u << pose);
+
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%u.rgb555", dir, pose);
+    FILE* out = length >= 0 && length < (int) sizeof(path) ? fopen(path, "wbx") : NULL;
+    if (out == NULL) {
+        logError("SWR: Could not create Flowey stalk capture %u\n", pose);
+        return;
+    }
+    uint16_t shape[2] = {(uint16_t) w, (uint16_t) h};
+    bool ok = fwrite(shape, sizeof(*shape), 2, out) == 2;
+    for (int y = 0; ok && y < h; ++y)
+        ok = fwrite(half->buffer + (size_t) (sy + y) * half->width + sx, sizeof(*half->buffer), (size_t) w, out) == (size_t) w;
+    if (fclose(out) != 0 || !ok) {
+        remove(path);
+        logError("SWR: Could not write Flowey stalk capture %u\n", pose);
+    }
+}
+#endif
+#endif
+
+bool swrDrawPackedFloweyStalk(Renderer* renderer, SWTexture* texture, float dx, float dy, bool mirrored, uint32_t color)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    return swrDrawFloweyStalkPixels(renderer, texture, dx, dy, 0, 0, texture->width, texture->height, mirrored, color);
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy; (void) mirrored; (void) color;
+    return false;
+#endif
+}
+
+bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
+                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color, unsigned pose)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->blendMode != bm_normal ||
+        !texture->immutable || sx < 0 || sx > 1 || sy < 0 || sy > 1 ||
+        sw < 2 || (sw & 1) || sh < 2 || texture->width < sx + sw || texture->width > sx + sw + 1 ||
+        texture->height < sy + sh || texture->height > sy + sh + 1 ||
+        !isfinite(dx) || !isfinite(dy)) return false;
+    if (!swrHalfTexture(texture, sx, sy) || texture->halfPhaseX != sx || texture->halfPhaseY != sy)
+        return false;
+
+    /* Treat any coverage as opaque on this decorative art. Use whole 2x2
+     * blocks inside the crop so a packed item's border cannot bleed in. */
+    SWTexture half = *texture;
+    half.buffer = texture->halfBuffer;
+    half.width = (texture->width + sx + 1) / 2;
+    half.height = (texture->height + sy + 1) / 2;
+    half.solid = texture->halfSolid;
+    half.immutable = false; // the stack view cannot own additional caches
+#if defined(OF_PC) && !defined IS_BIG_ENDIAN
+    swrCaptureFloweyStalk(&half, sx, sy, sw / 2, sh / 2, pose);
+#else
+    (void) pose;
+#endif
+    return swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
+#else
+    (void) renderer; (void) texture; (void) dx; (void) dy;
+    (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color; (void) pose;
+    return false;
+#endif
+}
+
 void swrDrawSpriteRotated(
     Renderer* renderer, float dx, float dy, float dw, float dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
     uint32_t tintColor, float alpha,
     float angleDeg,
     float pivotX,
-    float pivotY
+    float pivotY,
+    bool floweyVine
 )
 {
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -3057,21 +4750,55 @@ void swrDrawSpriteRotated(
     swrTransformPosIfNeeded(swr, &dx, &dy);
     swrTransformSizeIfNeeded(swr, &pivotX, &pivotY);
     swrTransformSizeIfNeeded(swr, &dw, &dh);
+    int x = swrFloor(dx), y = swrFloor(dy), w = swrCeiling(dw), h = swrCeiling(dh);
+    uintpixel_t packed = swrConvertPixel(tintColor);
+    int opacity = swrIntAlpha(alpha);
+
+    bool floweyGrowth = false;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    bool pipe = sw == SWR_PIPE_RASTER_W && sh == SWR_PIPE_RASTER_H;
+    bool eye = sw == SWR_EYE_SIZE && sh == SWR_EYE_SIZE && (packed & 0x7fff) == 0x7fff &&
+               w >= -SWR_EYE_SIZE && w <= SWR_EYE_SIZE && h >= -SWR_EYE_SIZE && h <= SWR_EYE_SIZE;
+    bool vine = sw == SWR_VINE_W && sh == SWR_VINE_H && (floweyVine || (packed & 0x7fff) == 0x7fff) &&
+                ((w == SWR_VINE_W && h == SWR_VINE_H) ||
+                 (w == (SWR_VINE_W + 1) / 2 && h == (SWR_VINE_H + 1) / 2)) &&
+                swr->portX >= 0 && swr->portY >= 0 && swr->maxX <= 640 && swr->maxY <= 480 &&
+                swr->maxX == swr->portX + swr->portW && swr->maxY == swr->portY + swr->portH;
+    floweyGrowth = floweyVine && texture->immutable && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
+                   w > 0 && w <= SWR_GROWTH_MAX_WIDTH &&
+                   h == SWR_GROWTH_HEIGHT && pivotY == 5.5f &&
+                   pivotX >= 0.0f && pivotX <= w && x >= -4096 && x <= 4096 && y >= -4096 && y <= 4096;
+    // Avoid building a full-resolution raster when the coarse sampler will
+    // handle the fully extended vine in the same way as the growing strike.
+    bool coarseVine = vine && floweyGrowth && swrFloweyVineBlockTarget(swr) &&
+                      fabsf(swrSpriteRotation(swr, angleDeg).sine) >= 0.7f;
+    if ((pipe || (vine && !coarseVine) || eye) && texture->immutable &&
+        sx >= 0 && sy >= 0 && sx <= texture->width - sw && sy <= texture->height - sh &&
+        swr->blendMode == bm_normal && opacity > 253) {
+        SWRasterKey key = { .sx = sx, .sy = sy, .sw = sw, .sh = sh, .dw = w, .dh = h, .angle = angleDeg,
+                            .px = pivotX, .py = pivotY, .tint = packed };
+        bool speedVine = vine && floweyVine;
+        if (vine && !(speedVine && swrFloweyVineAnchor(swr, &key, x, y))) {
+            key.screenX = x; key.screenY = y;
+            key.portX = swr->portX; key.portY = swr->portY;
+            key.portW = swr->portW; key.portH = swr->portH;
+        }
+        // The fully extended Speed vine briefly changes tint without changing
+        // its texture samples. Store them once and tint the covered pixels.
+        if (speedVine) key.tint = swrConvertPixel(0xffffff);
+        SWRasterPath path = swrDrawRotatedRaster(swr, texture, x, y, &key, vine, speedVine,
+                                               speedVine ? packed : swrConvertPixel(0xffffff));
+#ifdef SW_DRAW_PROFILE
+        if (pipe && swrCallNotes && swrDrawTimed) swrLastPipeRasterPath = path;
+#endif
+        if (path == SWR_RASTER_WARM || path == SWR_RASTER_BUILT) return;
+    }
+#else
+    (void) floweyVine;
+#endif
     
     swrDrawSpriteRotatedInternal(
-        renderer,
-        swrFloor(dx),
-        swrFloor(dy),
-        swrCeiling(dw),
-        swrCeiling(dh),
-        texture,
-        sx, sy,
-        sw, sh,
-        swrConvertPixel(tintColor),
-        swrIntAlpha(alpha),
-        angleDeg,
-        pivotX,
-        pivotY
+        renderer, x, y, w, h, texture, sx, sy, sw, sh, packed, opacity, angleDeg, pivotX, pivotY, NULL, floweyGrowth
     );
 }
 

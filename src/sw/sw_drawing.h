@@ -8,6 +8,7 @@ enum {
 };
 
 bool swrSwitchToSurface(Renderer* renderer, int32_t targetSurfaceId, bool restoreOldView);
+void swrFreeRotatedRasters(SWTexture* texture);
 // When true, sprites drawn at roughly half size are box-filtered instead of point-sampled.
 extern bool swrSmoothMinify;
 // Frame skipping: while true, nothing is drawn to the screen. The game's Draw
@@ -26,6 +27,27 @@ bool swrMirrorHoldFill(Renderer* renderer, float x1, float y1, float x2, float y
 
 void swrPlotPixel(Renderer* renderer, float x, float y, uintpixel_t color, float alpha);
 void swrDrawLine(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uintpixel_t color, uintpixel_t color2, float alpha, int alignment);
+SWTexture* swrMakeFloweyPipeBackdrop(const SWTexture* pipe, int sx, int sy);
+void swrAddFloweyEyePipes(SWTexture* art, SWTexture* pipe, int sx, int sy);
+SWTexture* swrMakeFloweyStalkEyePipes(SWTexture* pipe, int sx, int sy);
+void swrAddFloweyStalkEyeBacking(SWTexture* art, const SWTexture* backing, const TexturePageItem* item);
+void swrAddFloweyBackdropPipeSegments(SWTexture* art, SWTexture* pipe, int sx, int sy);
+enum {
+    SWR_FLOWEY_BACKDROP_WIDTH = 320,
+    SWR_FLOWEY_BACKDROP_HEIGHT = 184,
+    SWR_FLOWEY_BACKDROP_VINE_LAYERS = 3,
+    SWR_FLOWEY_BACKDROP_SHADOW = SWR_FLOWEY_BACKDROP_VINE_LAYERS
+};
+void swrAddFloweyBackdropVines(SWTexture* art, const SWTexture* vine, int sx, int sy,
+                               const TexturePageItem* item, unsigned layer);
+bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, float dy,
+                           int sx, int sy, int sw, int sh, bool mirrored, uint32_t color, unsigned pose);
+bool swrDrawPackedFloweyStalk(Renderer* renderer, SWTexture* texture, float dx, float dy, bool mirrored, uint32_t color);
+enum { SWR_FLOWEY_ART_NONE, SWR_FLOWEY_ART_ARM, SWR_FLOWEY_ART_CASE, SWR_FLOWEY_ART_SCREEN };
+bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                       int sx, int sy, int sw, int sh, uint32_t color);
+bool swrDrawFloweyArt(Renderer* renderer, SWTexture* texture, float dx, float dy, float dw, float dh,
+                      int sx, int sy, int sw, int sh, int kind, uint32_t color);
 void swrDrawRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t color, float alpha);
 void swrDrawRectangleColor(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t color1, uintpixel_t color2, uintpixel_t color3, uintpixel_t color4, float alpha);
 void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t color, float alpha);
@@ -63,7 +85,7 @@ bool swrDrawHintedGlyph(Renderer* renderer, float dx, float dy, float dw, float 
                         const SWHintedGlyphAsset* asset);
 // Point-samples a verified doubled font at exact half size; otherwise draws normally.
 void swrDrawDoubledGlyph(Renderer* renderer, float dx, float dy, float dw, float dh, SWTexture* texture, int sx, int sy, int sw, int sh, uint32_t tintColor, float alpha);
-void swrDrawSpriteRotated(Renderer* renderer, float dx, float dy, float dw, float dh, SWTexture* texture, int sx, int sy, int sw, int sh, uint32_t tintColor, float alpha, float angleDeg, float pivotX, float pivotY);
+void swrDrawSpriteRotated(Renderer* renderer, float dx, float dy, float dw, float dh, SWTexture* texture, int sx, int sy, int sw, int sh, uint32_t tintColor, float alpha, float angleDeg, float pivotX, float pivotY, bool floweyVine);
 void swrDrawTriangle(Renderer* renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha);
 
 #endif//_SW_DRAWING_H

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <float.h>
 #include <assert.h>
@@ -24,6 +25,15 @@ static int swrPendingCount = 0; // tile pictures being held (see the tile run ca
 bool swrCallNotes = false;
 bool swrDrawTimed = true;
 int swrProbeStop = 0, swrProbePath = 0;
+SWRasterPath swrLastPipeRasterPath;
+static SWPipeRasterNotes swrPipeRasterNotes;
+
+void swrPipeRasterTake(SWPipeRasterNotes* out)
+{
+    if (out != NULL) *out = swrPipeRasterNotes;
+    memset(&swrPipeRasterNotes, 0, sizeof(swrPipeRasterNotes));
+}
+
 #ifdef SW_DRAW_PROFILE
 static bool swrProbing = false;   // no counting of calls, and so no audio top-ups, while the probe times them
 static int32_t swrProbeGridSprite = -1;
@@ -334,6 +344,7 @@ static void SWRenderer_init(Renderer* renderer, DataWin* dataWin)
 static void SWRenderer_destroy(Renderer* renderer)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
+    if (swr->pipeCount != 0) swrOverlayFlush(swr);
     VMBuiltins_resetD3D(renderer);
 
     swr->primitiveBegun = false;
@@ -354,6 +365,10 @@ static void SWRenderer_destroy(Renderer* renderer)
     }
     }
     swrFreeItemTextures(swr);
+    swrFreeTexture(swr->floweyPipeBackdrop);
+    swrFreeTexture(swr->floweyStalkEyePipes);
+    for (unsigned pose = 0; pose < SWR_FLOWEY_STALK_POSES; ++pose)
+        swrFreeTexture(swr->floweyStalkPoses[pose]);
     free(swr->textures);
     swr->textureCount = 0;
     swr->totalTextureCount = 0;
@@ -561,6 +576,128 @@ static void SWRenderer_endGUI(Renderer* renderer)
     UNIMP2();
 }
 
+static bool swrDrawFloweySideStalk(SWRenderer* swr, int32_t item, float x, float y,
+                                  float originX, float originY, float xscale, uint32_t color)
+{
+    DataWin* dw = swr->base.dataWin;
+    const Sprite* sprite = &dw->sprt.sprites[swr->floweyStalkSprite];
+    for (uint32_t frame = 0; frame < sprite->textureCount; ++frame) {
+        if (sprite->tpagIndices[frame] != item) continue;
+        /* Hold one visual pose for six animation frames, while the draw event
+         * continues to advance the authored animation and its position. */
+        unsigned pose = frame / SWR_FLOWEY_STALK_HOLD;
+        int32_t held = sprite->tpagIndices[pose * SWR_FLOWEY_STALK_HOLD];
+        const TexturePageItem* tpag = &dw->tpag.items[held];
+        float dx = x + (tpag->targetX - originX) * xscale;
+        float dy = y + (tpag->targetY - originY);
+        if (!(swr->floweyStalkLoadTried & (1u << pose))) {
+            swr->floweyStalkLoadTried |= (uint16_t) (1u << pose);
+            swr->floweyStalkPoses[pose] = swrLoadPackedFloweyStalk(swr, pose, tpag->sourceWidth / 2, tpag->sourceHeight / 2);
+        }
+        SWTexture* packed = swr->floweyStalkPoses[pose];
+        if (packed != NULL && swrDrawPackedFloweyStalk(&swr->base, packed, dx, dy, xscale < 0.0f, color))
+            return true;
+        SWTexture* texture = swrTextureForItem(swr, held);
+        if (texture == NULL) return false;
+        return swrDrawFloweyStalkHalf(&swr->base, texture, dx, dy,
+            tpag->sourceX - texture->originX, tpag->sourceY - texture->originY,
+            tpag->sourceWidth, tpag->sourceHeight, xscale < 0.0f, color, pose);
+    }
+    return false;
+}
+
+static SWTexture* swrBuildFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag)
+{
+    SWTexture* source = swrTextureForItem(swr, item);
+    if (source == NULL) return NULL;
+    SWTexture* art = swrMakeFloweyPipeBackdrop(source, tpag->sourceX - source->originX, tpag->sourceY - source->originY);
+    if (art == NULL) return NULL;
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+    unsigned layers = 0;
+#endif
+    for (unsigned layer = 0; layer < SWR_FLOWEY_BACKDROP_VINE_LAYERS; ++layer) {
+        int32_t vineItem = swr->floweyBackdropItems[layer];
+        if (vineItem < 0) continue;
+        const TexturePageItem* vinePage = &swr->base.dataWin->tpag.items[vineItem];
+        SWTexture* vine = swrTextureForItem(swr, vineItem);
+        if (vine == NULL) {
+            swrFreeTexture(art);
+            return NULL;
+        }
+        swrAddFloweyBackdropVines(art, vine, vinePage->sourceX - vine->originX,
+                                 vinePage->sourceY - vine->originY, vinePage, layer);
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+        ++layers;
+#endif
+    }
+    int32_t segmentItem = swr->floweyPipeSegmentItem;
+    if (segmentItem >= 0) {
+        const TexturePageItem* segmentPage = &swr->base.dataWin->tpag.items[segmentItem];
+        SWTexture* segment = swrTextureForItem(swr, segmentItem);
+        if (segment != NULL) {
+            int sx = segmentPage->sourceX - segment->originX;
+            int sy = segmentPage->sourceY - segment->originY;
+            swrAddFloweyBackdropPipeSegments(art, segment, sx, sy);
+            swrAddFloweyEyePipes(art, segment, sx, sy);
+#if defined(OF_PC) && PIXEL_SIZE == 16 && !defined IS_BIG_ENDIAN
+            const char* path = getenv("BS_FLOWEY_BACKDROP_OUT");
+            if (path != NULL && layers == SWR_FLOWEY_BACKDROP_VINE_LAYERS) {
+                FILE* out = fopen(path, "wbx");
+                if (out != NULL) {
+                    size_t count = (size_t) art->width * art->height;
+                    size_t written = fwrite(art->buffer, sizeof(*art->buffer), count, out);
+                    if (fclose(out) != 0 || written != count) {
+                        remove(path);
+                        logError("SWR: Could not write Flowey backdrop to %s\n", path);
+                    }
+                } else {
+                    logError("SWR: Could not create Flowey backdrop at %s\n", path);
+                }
+            }
+#endif
+        } else {
+            swrFreeTexture(art);
+            return NULL;
+        }
+    }
+    return art;
+}
+
+static bool swrDrawFloweyPipeBackdrop(SWRenderer* swr, int32_t item, const TexturePageItem* tpag, uint32_t color)
+{
+    // The rear layer's normal tint is 60% white. During the intro it fades
+    // up from black. Apply that fade to the whole neutral-pose composite.
+    const uint32_t normalShade = 0x99;
+    uint32_t shade = color & 0xff;
+    if (shade > normalShade || color != shade * 0x010101) return false;
+    if (swr->floweyPipeBackdrop == NULL) {
+        swr->floweyPipeBackdrop = swrLoadPackedFloweyBackdrop(swr);
+        if (swr->floweyPipeBackdrop == NULL)
+            swr->floweyPipeBackdrop = swrBuildFloweyPipeBackdrop(swr, item, tpag);
+        if (swr->floweyPipeBackdrop == NULL) return false;
+    }
+    SWTexture* art = swr->floweyPipeBackdrop;
+    uint32_t fade = (shade * 255 + normalShade / 2) / normalShade;
+    // Keep the static backdrop in screen space through the TV's camera shake.
+    swrDrawSprite(&swr->base, swr->viewX, swr->viewY, art->width * 2, art->height * 2, art,
+                  0, 0, art->width, art->height, fade * 0x010101, 1.0f);
+    swr->floweyPipeFrame = swr->frameCounter;
+    return true;
+}
+
+static bool swrFloweyScreenItem(const SWRenderer* swr, int32_t item)
+{
+    if (swr->floweyTvScreenSprite < 0) return false;
+    const Sprite* screen = &swr->base.dataWin->sprt.sprites[swr->floweyTvScreenSprite];
+    for (uint32_t frame = 0; frame < screen->textureCount; ++frame)
+        if (screen->tpagIndices[frame] == item) return true;
+    return false;
+}
+
+enum {
+    FLOWEY_MOUTH_EDGE, FLOWEY_MOUTH_FLAP, FLOWEY_EYE_HOLDER, FLOWEY_EYE_BG, FLOWEY_EYE_OVERLAY
+};
+
 static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y,
                                   float originX, float originY, float xscale, float yscale,
                                   float angleDeg, uint32_t color, float alpha)
@@ -580,6 +717,47 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) {
         logError("%s: tpagIndex of %d is invalid, as pageId of %d is invalid\n", __func__, tpagIndex, pageId);
         return;
+    }
+    bool floweySpeed = swr->floweySpeedRoom && swrSmoothMinify && swr->fb == swr->mainFb && !swr->drawingToSurface;
+    if (floweySpeed) {
+        if (tpagIndex == swr->floweyPipeItem) {
+            // Submit at the first ordinary back-pipe call, in its original
+            // place behind the boss and projectiles. Later layers are baked in.
+            if (swr->floweyPipeFrame == swr->frameCounter) return;
+            if (swr->blendMode == bm_normal &&
+                fabsf(x - 400.0f) <= 1.01f && fabsf(y + 20.0f) <= 0.51f &&
+                fabsf(xscale - 1.0f) <= 0.0051f && yscale == 1.0f && angleDeg == 0.0f &&
+                alpha == 1.0f && originX == 0.0f && originY == 0.0f &&
+                tpag->sourceWidth == 190 && tpag->sourceHeight == 181 &&
+                tpag->targetX == 0 && tpag->targetY == 0 && tpag->targetWidth == 190 && tpag->targetHeight == 181 &&
+                swr->portX == 0 && swr->portY == 0 && swr->maxX == 320 && swr->maxY == 240 &&
+                swr->scaleX == 0.5f && swr->scaleY == 0.5f && swrDrawFloweyPipeBackdrop(swr, tpagIndex, tpag, color))
+                return;
+        }
+        if (swr->floweyPipeBackdrop != NULL && swr->floweyPipeFrame == swr->frameCounter) {
+            for (unsigned i = 0; i < swr->floweyBackdropCount; ++i)
+                if (swr->floweyBackdropItems[i] == tpagIndex) return;
+        }
+        if (swr->blendMode == bm_normal) {
+            if (tpagIndex == swr->floweyOuterEyeShadow && color == 0 && alpha == 1.0f) return;
+            if (angleDeg != 0.0f && fabsf(angleDeg) <= 2.0f) {
+                for (unsigned i = FLOWEY_MOUTH_EDGE; i <= FLOWEY_EYE_BG; ++i)
+                    if (swr->floweyTrimItems[i] == tpagIndex) angleDeg = 0.0f;
+            }
+            if (swr->floweyStalkSprite >= 0 && tpagIndex >= swr->floweyStalkFirst &&
+                tpagIndex <= swr->floweyStalkLast && swr->scaleX == 0.5f && swr->scaleY == 0.5f &&
+                (xscale == 1.0f || xscale == -1.0f) && yscale >= 0.98f && yscale <= 1.02f &&
+                // Keep using the held pose through the grayscale intro fade.
+                angleDeg == 0.0f && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
+                swrDrawFloweySideStalk(swr, tpagIndex, x, y, originX, originY, xscale, color)) return;
+        }
+        if (tpagIndex == swr->floweyVineItem && swr->blendMode == bm_normal &&
+            alpha >= 0.0f && alpha < 1.0f) {
+            // Keep the original art and reach. The vine can deal damage
+            // while its alpha exceeds 0.3, so draw it solid until that ends.
+            if (alpha <= 0.3f) return;
+            alpha = 1.0f;
+        }
     }
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);
     if (!texture) {
@@ -601,6 +779,32 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
     dy *= yscale;
     dx += x;
     dy += y;
+
+    // Reuse the original rims and mouth trim upright through small rotations.
+    if (floweySpeed && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
+        ((tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_OVERLAY] && fabsf(angleDeg) <= 4.0f) ||
+         ((tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_EDGE] ||
+           tpagIndex == swr->floweyTrimItems[FLOWEY_MOUTH_FLAP] ||
+           tpagIndex == swr->floweyTrimItems[FLOWEY_EYE_HOLDER]) && fabsf(angleDeg) <= 2.0f)) &&
+        sw == tpag->targetWidth && sh == tpag->targetHeight &&
+        swrDrawFloweyTrim(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, color)) return;
+
+    // The idle arm is a separate item from the attack's stem and strike.
+    // The TV's warnings and flashes also use separate items or fills.
+    if (floweySpeed && angleDeg == 0.0f && color == (color & 0xff) * 0x010101 && alpha == 1.0f &&
+        sw == tpag->targetWidth && sh == tpag->targetHeight) {
+        int kind = SWR_FLOWEY_ART_NONE;
+        if (tpagIndex == swr->floweyArmItem && sw == 171 && sh == 275 &&
+            (xscale == 1.0f || xscale == -1.0f) && yscale >= 0.96f && yscale <= 1.04f)
+            kind = SWR_FLOWEY_ART_ARM;
+        else if (tpagIndex == swr->floweyTvCaseItem && sw == 155 && sh == 167 && xscale == 1.0f && yscale == 1.0f)
+            kind = SWR_FLOWEY_ART_CASE;
+        else if (sw == 90 && sh == 105 && xscale >= 1.39f && xscale <= 1.51f &&
+                 yscale >= 0.89f && yscale <= 1.01f && swrFloweyScreenItem(swr, tpagIndex))
+            kind = SWR_FLOWEY_ART_SCREEN;
+        if (kind != SWR_FLOWEY_ART_NONE &&
+            swrDrawFloweyArt(renderer, texture, dx, dy, dw, dh, sx, sy, sw, sh, kind, color)) return;
+    }
     
     if (UNLIKELY(swrMustRotate(angleDeg)))
     {
@@ -613,7 +817,8 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
             pivotY *= (float)tpag->targetHeight/ tpag->sourceHeight;
         
         swrOverlayFlush(swr);
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY,
+                             floweySpeed && tpagIndex == swr->floweyVineItem);
     }
     else
     {
@@ -687,7 +892,7 @@ static void SWRenderer_drawSpritePart(Renderer* renderer, int32_t tpagIndex,
     
     if (UNLIKELY(swrMustRotate(angleDeg)))
     {
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX * dw, pivotY * dh);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, color, alpha, angleDeg, pivotX * dw, pivotY * dh, false);
     }
     else
     {
@@ -753,7 +958,7 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
         // held clear, it is the clear's colour again, so the fill below takes
         // the clear instead of writing it out first (a battle's backdrop over
         // the room's floor grid).
-        if (swr->clearHeld && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0) {
+        if (swr->clearHeld && swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0) {
             swr->uniformValid = true;
             swr->uniformColor = swr->clearHeldColor;
         }
@@ -763,7 +968,7 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
 #endif
     
     // Still one colour if the flush has nothing to draw; a fill with that colour is then redundant.
-    bool nothingHeld = swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0;
+    bool nothingHeld = swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
 #if PIXEL_SIZE == 16
     // A translucent fill of the whole buffer over a held clear and its tiled
     // passes, with nothing else held: it joins them (swrFillHold).
@@ -912,7 +1117,7 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
     // A clear of the whole main buffer still held, with nothing over it but
     // tiled passes held already: this one can be held with them.
     bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
-                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0;
+                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
     DataWin* dwin = renderer->dataWin;
 
     if (0 > tpagIndex || dwin->tpag.count <= (uint32_t) tpagIndex) return;
@@ -1460,6 +1665,9 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
     localSurface.glyphHints = NULL;
     localSurface.buttonCache = NULL;
     localSurface.rowBounds = NULL;
+    localSurface.boxRows = NULL;
+    localSurface.floweyArtRows = NULL;
+    localSurface.pipeSolidBounds = NULL;
     localSurface.halfRowBounds = NULL;
     localSurface.halfFullBounds = NULL;
     localSurface.spans = localSurface.halfSpans = NULL;
@@ -1514,7 +1722,7 @@ static void SWRenderer_drawSurface(Renderer* renderer, int32_t surfaceID,
         if (th != sh)
             pivotY *= (float)th / sh;
         
-        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, surface, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY);
+        swrDrawSpriteRotated(renderer, dx, dy, dw, dh, surface, sx, sy, sw, sh, color, alpha, angleDeg, pivotX, pivotY, false);
     }
     else
     {
@@ -2264,7 +2472,7 @@ static bool SWRenderer_drawSpriteGrid(Renderer* renderer, int32_t spriteIndex, c
     
     // A grid joins the ones held if nothing has been drawn or held since:
     // only tile pictures can have been, over grids that lie under them.
-    bool joins = swrGrid.count > 0 && (swrGrid.above || swrPendingCount == 0) && swrGrid.count < SWR_GRID_MAX &&
+    bool joins = swr->pipeCount == 0 && swrGrid.count > 0 && (swrGrid.above || swrPendingCount == 0) && swrGrid.count < SWR_GRID_MAX &&
                  swrGrid.cells + cols * rows <= SWR_GRID_MAX_CELLS;
     if (!joins) {
         // The first grid goes over the tile pictures being held, if any, and
@@ -3044,9 +3252,19 @@ void swrSpriteCostProbe(Renderer* renderer, int calls, int32_t* width, int32_t* 
 
 static void SWRenderer_profDrawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha)
 {
+    const TexturePageItem* tpag = NULL;
+    if (swrCallNotes && swrDrawTimed && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count)
+        tpag = &renderer->dataWin->tpag.items[tpagIndex];
+    bool pipe = tpag != NULL && tpag->sourceWidth == SWR_PIPE_RASTER_W &&
+                tpag->sourceHeight == SWR_PIPE_RASTER_H && !SWR_SKIPPED((SWRenderer*) renderer) &&
+                swrMustRotate(angleDeg);
+    if (pipe) swrLastPipeRasterPath = SWR_RASTER_OTHER;
     SWR_PROFILED(SWR_PROF_SPRITE, SWRenderer_drawSprite(renderer, tpagIndex, x, y, originX, originY, xscale, yscale, angleDeg, color, alpha));
-    if (swrCallNotes && swrDrawTimed && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count) {
-        const TexturePageItem* tpag = &renderer->dataWin->tpag.items[tpagIndex];
+    if (tpag != NULL) {
+        if (pipe) {
+            swrPipeRasterNotes.calls[swrLastPipeRasterPath]++;
+            swrPipeRasterNotes.nanos[swrLastPipeRasterPath] += swrProfLast;
+        }
         SWNoteKey key = { .kind = SWR_NOTE_SPRITE, .alpha = (int16_t) (alpha * 100.0f), .a = tpag->targetWidth, .b = tpag->targetHeight,
                           .c = (int32_t) (xscale * 10.0f),
                           .flags = (uint8_t) ((angleDeg != 0.0f ? SWR_NOTE_TURNED : 0) | ((color & 0xFFFFFF) != 0xFFFFFF ? SWR_NOTE_TINTED : 0)) };
@@ -3112,6 +3330,140 @@ static bool swrAssetNamed(const char* name, const char* const* names, size_t cou
     for (size_t i = 0; i < count; ++i)
         if (strcmp(name, names[i]) == 0) return true;
     return false;
+}
+
+static bool swrFloweyStalkFrames(const DataWin* dw, const Sprite* sprite)
+{
+    if (sprite->textureCount != SWR_FLOWEY_STALK_FRAMES) return false;
+    int32_t previous = -1;
+    for (uint32_t frame = 0; frame < sprite->textureCount; ++frame) {
+        int32_t item = sprite->tpagIndices[frame];
+        if (item <= previous || (uint32_t) item >= dw->tpag.count) return false;
+        const TexturePageItem* tpag = &dw->tpag.items[item];
+        if (tpag->sourceWidth != 360 || tpag->targetWidth != 360 ||
+            tpag->sourceHeight < 150 || tpag->sourceHeight > 190 || tpag->targetHeight != tpag->sourceHeight)
+            return false;
+        previous = item;
+    }
+    return true;
+}
+
+void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
+{
+    static const char* const backdrop[] = {
+        "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey",
+        "spr_floweyx_behind" /* SWR_FLOWEY_BACKDROP_SHADOW */
+    };
+    /* Keep the FLOWEY_* order above; old C++ compilers lack indexed initializers. */
+    static const char* const trim[] = {
+        "spr_floweyx_mouthedge",
+        "spr_floweyx_mouthl",
+        "spr_flipeye_holder",
+        "spr_flipeye_bg",
+        "spr_lefteye_overlay"
+    };
+    SWRenderer* swr = (SWRenderer*) renderer;
+    DataWin* dw = renderer->dataWin;
+    swr->floweyVineItem = -1;
+    swr->floweyPipeItem = -1;
+    swr->floweyPipeSegmentItem = -1;
+    swr->floweyStalkSprite = -1;
+    swr->floweyArmItem = -1;
+    swr->floweyTvCaseItem = -1;
+    swr->floweyTvScreenSprite = -1;
+    swr->floweyOuterEyeShadow = -1;
+    for (unsigned trimSlot = 0; trimSlot < sizeof(trim) / sizeof(trim[0]); ++trimSlot)
+        swr->floweyTrimItems[trimSlot] = -1;
+    swr->floweyBackdropCount = 0;
+    for (unsigned backdropSlot = 0; backdropSlot < sizeof(backdrop) / sizeof(backdrop[0]); ++backdropSlot)
+        swr->floweyBackdropItems[backdropSlot] = -1;
+    if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
+    for (uint32_t spriteIndex = 0; spriteIndex < dw->sprt.count; ++spriteIndex) {
+        const Sprite* sprite = &dw->sprt.sprites[spriteIndex];
+        if (!sprite->name) continue;
+        if (strcmp(sprite->name, "spr_sidestalk") == 0 && swrFloweyStalkFrames(dw, sprite)) {
+            swr->floweyStalkSprite = (int32_t) spriteIndex;
+            swr->floweyStalkFirst = sprite->tpagIndices[0];
+            swr->floweyStalkLast = sprite->tpagIndices[sprite->textureCount - 1];
+        }
+        if (strcmp(sprite->name, "spr_tvinside_old") == 0 && sprite->textureCount == 37)
+            swr->floweyTvScreenSprite = (int32_t) spriteIndex;
+        if (sprite->textureCount != 1) continue;
+        int32_t item = sprite->tpagIndices[0];
+        if (item < 0 || (uint32_t) item >= dw->tpag.count) continue;
+        if (strcmp(sprite->name, "spr_gigavine") == 0) {
+            const TexturePageItem* page = &dw->tpag.items[item];
+            if (sprite->width == 514 && sprite->height == 37 && sprite->originX == 15 && sprite->originY == 14 &&
+                page->sourceWidth == 511 && page->sourceHeight == 33 && page->targetX == 2 && page->targetY == 3 &&
+                page->targetWidth == 511 && page->targetHeight == 33)
+                swr->floweyVineItem = item;
+        } else if (strcmp(sprite->name, "spr_bgpipe") == 0) {
+            swr->floweyPipeItem = item;
+        } else if (strcmp(sprite->name, "spr_pipepart") == 0) {
+            const TexturePageItem* page = &dw->tpag.items[item];
+            if (sprite->originX == 21 && sprite->originY == 19 &&
+                page->sourceWidth == 45 && page->sourceHeight == 31 && page->targetX == 0 && page->targetY == 3 &&
+                page->targetWidth == 45 && page->targetHeight == 31)
+                swr->floweyPipeSegmentItem = item;
+        } else if (strcmp(sprite->name, "spr_floweyarm") == 0) {
+            swr->floweyArmItem = item;
+        } else if (strcmp(sprite->name, "spr_floweyx_tv") == 0) {
+            swr->floweyTvCaseItem = item;
+        } else if (strcmp(sprite->name, "spr_flipeye_holder_bg") == 0) {
+            swr->floweyOuterEyeShadow = item;
+        } else {
+            for (unsigned trimIndex = 0; trimIndex < sizeof(trim) / sizeof(trim[0]); ++trimIndex)
+                if (strcmp(sprite->name, trim[trimIndex]) == 0) swr->floweyTrimItems[trimIndex] = item;
+            for (unsigned backdropIndex = 0; backdropIndex < sizeof(backdrop) / sizeof(backdrop[0]); ++backdropIndex) {
+                if (strcmp(sprite->name, backdrop[backdropIndex]) != 0) continue;
+                swr->floweyBackdropItems[backdropIndex] = item;
+                if (swr->floweyBackdropCount <= backdropIndex) swr->floweyBackdropCount = backdropIndex + 1;
+                break;
+            }
+        }
+    }
+}
+
+void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active)
+{
+    ((SWRenderer*) renderer)->floweySpeedRoom = active;
+}
+
+void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable) return;
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr) || !swr->floweySpeedRoom || !swrSmoothMinify ||
+        swr->drawingToSurface || swr->fb != swr->mainFb || swr->blendMode != bm_normal ||
+        swr->scaleX != 0.5f || swr->scaleY != 0.5f || swr->floweyPipeSegmentItem < 0) return;
+    if (swr->floweyStalkEyePipes == NULL) {
+        int32_t item = swr->floweyPipeSegmentItem;
+        const TexturePageItem* page = &renderer->dataWin->tpag.items[item];
+        SWTexture* pipe = swrTextureForItem(swr, item);
+        if (pipe == NULL) return;
+        SWTexture* art = swrMakeFloweyStalkEyePipes(pipe, page->sourceX - pipe->originX, page->sourceY - pipe->originY);
+        if (art == NULL) return;
+        int32_t backingItem = swr->floweyBackdropItems[SWR_FLOWEY_BACKDROP_SHADOW];
+        if (backingItem >= 0) {
+            SWTexture* backing = swrTextureForItem(swr, backingItem);
+            if (backing == NULL) {
+                swrFreeTexture(art);
+                return;
+            }
+            swrAddFloweyStalkEyeBacking(art, backing, &renderer->dataWin->tpag.items[backingItem]);
+        }
+        swr->floweyStalkEyePipes = art;
+    }
+    // Draw at the native eye-pipe event's depth, over the green stalks and
+    // under the eyes. Like the rear pipes, hold the pose through camera shake.
+    SWTexture* art = swr->floweyStalkEyePipes;
+    swrDrawSprite(renderer, swr->viewX + art->originX * 2, swr->viewY + art->originY * 2,
+                  art->width * 2, art->height * 2, art, 0, 0, art->width, art->height, 0xffffff, 1.0f);
+}
+
+bool SWRenderer_isSkippingScreen(const Renderer* renderer)
+{
+    return renderer != NULL && renderer->vtable == &swrVtable && SWR_SKIPPED((const SWRenderer*)renderer);
 }
 
 void SWRenderer_setContrastAssets(Renderer* renderer, const char* const* sprites, size_t spriteCount,

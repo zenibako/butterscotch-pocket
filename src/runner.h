@@ -694,6 +694,17 @@ typedef struct {
 void Runner_takeCollisionWork(Runner* runner, RunnerCollisionWork* out);
 #endif
 
+typedef struct {
+    GMLReal angle, cosine, sine;
+} CollisionRotation;
+
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+typedef struct {
+    uint32_t key;
+    float cosine, sine;
+} MotionRotation;
+#endif
+
 struct Runner {
     DataWin* dataWin;
     VMContext* vmContext;
@@ -936,6 +947,13 @@ struct Runner {
 
     // GMS legacy (pre 2022.1) collision behavior: AABB overlap treats touching edges as overlap.
     bool collisionCompatibilityMode;
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+    CollisionRotation collisionRotations[64];
+    MotionRotation motionRotations[128];
+#endif
+    // Read-only game hook for a verified no-op collision event on non-solid pairs.
+    bool (*skipCollisionEvent)(Runner* runner, Instance* self);
+    int32_t skipCollisionCode, skipCollisionVar;
 
     // GameMaker surface "stack".
     int32_t surfaceStack[MAX_SURFACES];

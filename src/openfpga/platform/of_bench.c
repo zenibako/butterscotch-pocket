@@ -5,8 +5,10 @@
 #include "gettime.h"
 #include "of_diag.h"
 #include "of_game.h"
+#include "of_bench_scene.h"
 #include "of_perf.h"
 #include "sw_call_notes.h"
+#include "sw_texture_pack.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,7 +21,30 @@ static int g_frame = 0;
 static int g_section = 0;
 static uint64_t g_startNanos = 0;
 static uint64_t g_sectionStart = 0;
+static int g_sectionFirstUpdate;
+static int g_lastLiveUpdate = -1;
+static uint64_t g_liveLastPaceEnd;
+static bool g_liveFramePending, g_liveSkipped, g_liveSubmitted;
+enum { LIVE_DRAWN, LIVE_SKIPPED, LIVE_KINDS };
+typedef struct {
+    unsigned count;
+    uint64_t workNanos, waitNanos;
+} LiveUpdateTimes;
+static struct {
+    unsigned updates, submitted, micros, rate;
+    LiveUpdateTimes times[LIVE_KINDS];
+} g_liveSections[OF_BENCH_MAX_SECTIONS];
+typedef struct {
+    unsigned updates, draws, warmDraws;
+    uint64_t textureNanos, maxWorkNanos, warmWorkNanos;
+    SwrTexturePackReadTotals reads;
+} OpeningTimes;
+static OpeningTimes g_opening[OF_BENCH_MAX_OPENING_WINDOWS];
+static int g_openingWindow, g_lastOpeningUpdate;
+static uint64_t g_lastOpeningTexture;
+static SwrTexturePackReadTotals g_lastOpeningReads;
 static unsigned g_sectionMs[OF_BENCH_MAX_SECTIONS];
+static bool g_sectionSeen[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_flipNanos = 0; /* time inside the display flip this section */
 static unsigned g_sectionFlipMs[OF_BENCH_MAX_SECTIONS];
 static OfPerfTotals g_sectionTotals[OF_BENCH_MAX_SECTIONS];
@@ -28,6 +53,7 @@ static OfPerfTotals g_sectionTotals[OF_BENCH_MAX_SECTIONS];
 static SWCallNote g_sectionNotes[OF_BENCH_MAX_SECTIONS][OF_BENCH_NOTES];
 static int g_sectionNoteCount[OF_BENCH_MAX_SECTIONS];
 static uint32_t g_sectionNotesMissed[OF_BENCH_MAX_SECTIONS];
+static SWPipeRasterNotes g_sectionPipeRaster[OF_BENCH_MAX_SECTIONS];
 static unsigned g_firstFrameMs = 0;
 
 /* Draw calls and mixing are timed on one frame in this many: timing them
@@ -42,34 +68,71 @@ static struct {
     const OfBenchSection *sections;
     int sectionCount;
     bool tour;
+    bool runProbes;
+    bool livePacing;
 } g_def;
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
-                       const OfBenchSection *sections, int sectionCount, bool tour) {
+                       const OfBenchSection *sections, int sectionCount, bool tour, bool livePacing) {
+    for (int i = 0; i < OF_BENCH_MAX_SECTIONS; ++i) g_sectionSeen[i] = false;
     g_def.title = title;
     g_def.sections = sections;
     g_def.sectionCount = sectionCount;
     g_def.tour = tour;
+    g_def.runProbes = !livePacing;
+    g_def.livePacing = livePacing;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
-    ofPerfDetailEvery(OF_BENCH_DETAIL_EVERY);
+    ofPerfDetailEvery(livePacing ? 0 : OF_BENCH_DETAIL_EVERY);
     ofPlatformSetInputScript(script);
     if (jumpCount > 0) ofPlatformSetJumps(jumps, jumpCount);
-    ofPlatformSetUncapped(true);
+    ofPlatformSetUncapped(!livePacing);
     ofSaveFsSetVolatile(true);
 }
 
 void ofBenchStart(void) {
     benchStart(ofGame.benchTitle, ofGame.benchScript, ofGame.benchJumps, ofGame.benchJumpCount,
-               ofGame.benchSections, ofGame.benchSectionCount, false);
+               ofGame.benchSections, ofGame.benchSectionCount, false, false);
 }
 
 bool ofBenchStartTour(void) {
     if (ofGame.tourScript == NULL) return false;
     benchStart(ofGame.tourTitle, ofGame.tourScript, ofGame.tourJumps, ofGame.tourJumpCount,
-               ofGame.tourSections, ofGame.tourSectionCount, true);
+               ofGame.tourSections, ofGame.tourSectionCount, true, false);
     return true;
+}
+
+bool ofBenchStartBulletTour(void) {
+    if (ofGame.bulletScript == NULL) return false;
+    benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
+               ofGame.bulletSections, ofGame.bulletSectionCount, true, false);
+    return true;
+}
+
+bool ofBenchStartChaosSaber(void) {
+    if (ofGame.saberScript == NULL) return false;
+    benchStart(ofGame.saberTitle, ofGame.saberScript, ofGame.saberJumps, ofGame.saberJumpCount,
+               ofGame.saberSections, ofGame.saberSectionCount, true, false);
+    g_def.runProbes = false;
+    return true;
+}
+
+bool ofBenchStartFloweyTour(bool livePacing) {
+    if (ofGame.floweyScript == NULL) return false;
+    benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
+               ofGame.floweySections, ofGame.floweySectionCount, true, livePacing);
+    if (ofGame.floweyOpeningCount > OF_BENCH_MAX_OPENING_WINDOWS)
+        ofDiagHalt("Flowey benchmark has too many opening windows");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) g_opening[i] = (OpeningTimes) {0};
+    g_openingWindow = g_lastOpeningUpdate = 0;
+    g_lastOpeningTexture = ofPerfTextureLoadNanos();
+    swrTexturePackGetReadTotals(&g_lastOpeningReads);
+    return true;
+}
+
+bool ofBenchLivePacing(void) {
+    return g_def.livePacing;
 }
 
 /* SD read throughput, cold and warm.
@@ -195,28 +258,135 @@ static void asyncReport(void) {
 static void asyncReport(void) {}
 #endif
 
-void ofBenchAddFlipTime(uint64_t nanos) {
-    if (g_running) g_flipNanos += nanos;
+void ofBenchAddFlipTime(uint64_t nanos, bool submitted) {
+    if (!g_running) return;
+    if (g_def.livePacing) g_liveSubmitted = submitted;
+    else g_flipNanos += nanos;
 }
 
-void ofBenchFrame(void) {
-    if (!g_running) return;
+static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
+    unsigned calls = notes->calls[path];
+    return calls ? (unsigned) (notes->nanos[path] / ((uint64_t) calls * 1000u)) : 0;
+}
 
-    uint64_t now = nowNanos();
+static void reportWork(void);
+
+static void reportOpening(void) {
+    if (ofGame.floweyOpeningCount == 0) return;
+    ofLogPrint("Flowey opening, separate scripted windows\n");
+    ofLogPrint("scene     upd  draw   tx-ms   max-ms  warm  warm-ms\n");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
+        const OpeningTimes *t = &g_opening[i];
+        char warm[24] = "--";
+        if (t->warmDraws) {
+            uint64_t unit = (uint64_t) t->warmDraws * 100000u;
+            unsigned mean = (unsigned) ((t->warmWorkNanos + unit / 2) / unit);
+            snprintf(warm, sizeof(warm), "%u.%u", mean / 10, mean % 10);
+        }
+        unsigned maxWork = (unsigned) ((t->maxWorkNanos + 50000u) / 100000u);
+        ofLogPrint("%-7s %5u %5u %7u %6u.%u %5u %8s\n", ofGame.floweyOpening[i].tag,
+                   t->updates, t->draws, (unsigned) ((t->textureNanos + 500000u) / 1000000u),
+                   maxWork / 10, maxWork % 10, t->warmDraws, warm);
+    }
+    ofLogPrint("tx-ms = total texture load, max-ms = longest update work\n");
+    ofLogPrint("warm-ms = mean work on draws with no texture loads\n");
+
+    ofLogPrint("Flowey opening texture window reads\n");
+    ofLogPrint("scene   direct    ms  decline    ms  stdio    ms  errs\n");
+    for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
+        const SwrTexturePackReadTotals *r = &g_opening[i].reads;
+        ofLogPrint("%-7s %6u %5u %8u %5u %6u %5u %5u\n", ofGame.floweyOpening[i].tag,
+                   (unsigned) r->directReads, (unsigned) ((r->directNanos + 500000u) / 1000000u),
+                   (unsigned) r->directDeclines, (unsigned) ((r->declinedNanos + 500000u) / 1000000u),
+                   (unsigned) r->stdioReads, (unsigned) ((r->stdioNanos + 500000u) / 1000000u),
+                   (unsigned) r->stdioErrors);
+    }
+    ofLogPrint("decline = direct unavailable or failed, stdio = fseek/fread attempts\n");
+}
+
+static void reportLive(void) {
+    ofLogPrint("Full speed: 30 updates/s\n");
+    ofLogPrint("phase upd/s updates submit skips other   time-us\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        unsigned updates = g_liveSections[i].updates;
+        unsigned skipped = g_liveSections[i].times[LIVE_SKIPPED].count;
+        unsigned submitted = g_liveSections[i].submitted;
+        unsigned rate = g_liveSections[i].rate;
+        ofLogPrint("%-5s %3u.%u %7u %6u %5u %5u %9u\n", g_def.sections[i].tag,
+                   rate / 10, rate % 10, updates, submitted, skipped,
+                   updates - submitted - skipped, g_liveSections[i].micros);
+    }
+    ofLogPrint("submit = frames sent to display\n");
+    ofLogPrint("skips = adaptive; other includes room changes\n");
+    ofLogPrint("ms/update    count   work   wait  total\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        for (int kind = 0; kind < LIVE_KINDS; ++kind) {
+            const LiveUpdateTimes *t = &g_liveSections[i].times[kind];
+            const char *tag = g_def.sections[i].tag;
+            const char *label = kind == LIVE_SKIPPED ? "skip" : "drawn";
+            if (t->count == 0) {
+                ofLogPrint("%-5s %-5s %5u %6s %6s %6s\n", tag, label, t->count, "--", "--", "--");
+                continue;
+            }
+            uint64_t unit = (uint64_t) t->count * 100000u;
+            unsigned work = (unsigned) ((t->workNanos + unit / 2) / unit);
+            unsigned wait = (unsigned) ((t->waitNanos + unit / 2) / unit);
+            unsigned total = (unsigned) ((t->workNanos + t->waitNanos + unit / 2) / unit);
+            ofLogPrint("%-5s %-5s %5u %4u.%u %4u.%u %4u.%u\n", tag, label, t->count,
+                       work / 10, work % 10, wait / 10, wait % 10, total / 10, total % 10);
+        }
+    }
+    ofLogPrint("wait = time in the frame limiter\n");
+    reportOpening();
+}
+
+static void advanceBenchFrame(Runner *runner, uint64_t now) {
+    const OfBenchSection *section = &g_def.sections[g_section];
+    if (!g_sectionSeen[g_section] && ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
     if (g_frame == 0) {
         g_firstFrameMs = (unsigned) ((now - g_startNanos) / 1000000u);
         g_sectionStart = now;
-        ofPerfTakeTotals(NULL); /* loading is not part of the first section */
-        swrCallNotes = true;
-        swrCallNotesTake(NULL, 0, NULL);
+        g_sectionFirstUpdate = runner->frameCount;
+        if (!g_def.livePacing) {
+            ofPerfTakeTotals(NULL); /* loading is not part of the first section */
+            swrCallNotes = true;
+            swrCallNotesTake(NULL, 0, NULL);
+            swrPipeRasterTake(NULL);
+        }
     }
     g_frame++;
-    if (g_frame < g_def.sections[g_section].lastFrame) return;
+    if (g_frame < section->lastFrame) return;
 
-    g_sectionMs[g_section] = (unsigned) ((now - g_sectionStart) / 1000000u);
-    g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
-    ofPerfTakeTotals(&g_sectionTotals[g_section]);
-    g_sectionNoteCount[g_section] = swrCallNotesTake(g_sectionNotes[g_section], OF_BENCH_NOTES, &g_sectionNotesMissed[g_section]);
+    bool seen = (section->roomName == NULL && section->requiredObject == NULL) || g_sectionSeen[g_section];
+    bool endValid = section->endValid == NULL ||
+                    (ofBenchSceneMatches(runner, section) && section->endValid(runner));
+    if (!seen || !endValid) {
+        ofLogPrint("BENCH FAIL %s: %s\n", section->name,
+                   seen ? "required scene not active at end" : "required scene not observed");
+#ifdef OF_PC
+        ofLogDump();
+        exit(EXIT_FAILURE);
+#else
+        ofDiagHalt("benchmark scene check failed");
+#endif
+    }
+    uint64_t elapsed = now - g_sectionStart;
+    if (g_def.livePacing) {
+        // The swap-indexed attack windows stay aligned with the uncapped tour.
+        // Steps on room transitions still count as updates in the wall interval.
+        unsigned updates = (unsigned) (runner->frameCount - g_sectionFirstUpdate);
+        g_liveSections[g_section].updates = updates;
+        g_liveSections[g_section].micros = (unsigned) (elapsed / 1000u);
+        g_liveSections[g_section].rate = elapsed > 0 ?
+            (unsigned) ((updates * 10000000000ull + elapsed / 2u) / elapsed) : 0;
+        g_sectionFirstUpdate = runner->frameCount;
+    } else {
+        g_sectionMs[g_section] = (unsigned) (elapsed / 1000000u);
+        g_sectionFlipMs[g_section] = (unsigned) (g_flipNanos / 1000000u);
+        ofPerfTakeTotals(&g_sectionTotals[g_section]);
+        g_sectionNoteCount[g_section] = swrCallNotesTake(g_sectionNotes[g_section], OF_BENCH_NOTES, &g_sectionNotesMissed[g_section]);
+        swrPipeRasterTake(&g_sectionPipeRaster[g_section]);
+    }
     g_sectionStart = now;
     g_flipNanos = 0;
     if (++g_section < g_def.sectionCount) return;
@@ -224,15 +394,15 @@ void ofBenchFrame(void) {
     g_running = false;
     swrCallNotes = false;
     ofPerfDetailEvery(0);
-    /* A build with optimisation flags of its own (OF_OPT) says so in the title. */
+    /* The title can identify the build or its optimisation flags. */
     const char *note = "";
 #ifdef OF_BUILD_NOTE
     note = OF_BUILD_NOTE;
 #endif
     char drawn[40] = "";
     if (ofPlatformForcedSkip() > 0) snprintf(drawn, sizeof(drawn), ", drawing 1 frame in %d", ofPlatformForcedSkip());
-    ofLogPrint("=== %s benchmark, %s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
-               note[0] != '\0' ? ", " : "", note, drawn);
+    ofLogPrint("=== %s benchmark, %s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
+               g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
 #ifndef OF_PC
     {
         /* Say which OS and bitstream this ran on; tables look alike otherwise. */
@@ -245,6 +415,81 @@ void ofBenchFrame(void) {
     ofLogPrint("load to first frame: %u.%u s\n", g_firstFrameMs / 1000, (g_firstFrameMs % 1000) / 100);
     ofLogPrint("%s\n", ofLogLoadSummary());
     ofLogPrint("%s\n", ofLogLoadPhases());
+    if (g_def.livePacing) reportLive();
+    else reportWork();
+    ofLogPrint("--- end of report ---\n"); /* ofLogDump keeps a report from its title to this line */
+    ofLogDump();
+    ofDiagHalt("benchmark finished");
+}
+
+void ofBenchFrame(Runner *runner, bool skipped) {
+    if (!g_running) return;
+    if (g_def.livePacing) {
+        g_liveFramePending = true;
+        g_liveSkipped = skipped;
+        g_liveSubmitted = false;
+    } else {
+        advanceBenchFrame(runner, nowNanos());
+    }
+}
+
+static void recordOpening(int update, uint64_t work, bool drawn) {
+    if (update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
+    g_lastOpeningUpdate = update;
+    uint64_t totalTexture = ofPerfTextureLoadNanos();
+    uint64_t texture = totalTexture - g_lastOpeningTexture;
+    g_lastOpeningTexture = totalTexture;
+    SwrTexturePackReadTotals previous = g_lastOpeningReads;
+    swrTexturePackGetReadTotals(&g_lastOpeningReads);
+    while (g_openingWindow < ofGame.floweyOpeningCount &&
+           update >= ofGame.floweyOpening[g_openingWindow].endUpdate) ++g_openingWindow;
+    if (g_openingWindow >= ofGame.floweyOpeningCount ||
+        update < ofGame.floweyOpening[g_openingWindow].firstUpdate) return;
+
+    OpeningTimes *t = &g_opening[g_openingWindow];
+    ++t->updates;
+    t->textureNanos += texture;
+    t->reads.directReads += g_lastOpeningReads.directReads - previous.directReads;
+    t->reads.directDeclines += g_lastOpeningReads.directDeclines - previous.directDeclines;
+    t->reads.stdioReads += g_lastOpeningReads.stdioReads - previous.stdioReads;
+    t->reads.stdioErrors += g_lastOpeningReads.stdioErrors - previous.stdioErrors;
+    t->reads.directNanos += g_lastOpeningReads.directNanos - previous.directNanos;
+    t->reads.declinedNanos += g_lastOpeningReads.declinedNanos - previous.declinedNanos;
+    t->reads.stdioNanos += g_lastOpeningReads.stdioNanos - previous.stdioNanos;
+    if (work > t->maxWorkNanos) t->maxWorkNanos = work;
+    if (drawn) {
+        ++t->draws;
+        if (texture == 0) {
+            ++t->warmDraws;
+            t->warmWorkNanos += work;
+        }
+    }
+}
+
+void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uint64_t waitEnd) {
+    if (!g_running || !g_def.livePacing) return;
+    uint64_t updateStart = g_liveLastPaceEnd;
+    // Room changes can run an update without reaching the swap path. Move
+    // the boundary anyway so the following sample excludes that work.
+    g_liveLastPaceEnd = waitEnd;
+    if (updateStart != 0)
+        recordOpening(scriptUpdate, waitStart - updateStart, g_liveFramePending && !g_liveSkipped);
+    if (!g_liveFramePending) return;
+    g_liveFramePending = false;
+    if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
+    if (runner->frameCount <= g_lastLiveUpdate) return;
+    g_lastLiveUpdate = runner->frameCount;
+    if (g_frame != 0) {
+        LiveUpdateTimes *t = &g_liveSections[g_section].times[g_liveSkipped ? LIVE_SKIPPED : LIVE_DRAWN];
+        ++t->count;
+        t->workNanos += waitStart - updateStart;
+        t->waitNanos += waitEnd - waitStart;
+        g_liveSections[g_section].submitted += g_liveSubmitted;
+    }
+    advanceBenchFrame(runner, waitEnd);
+}
+
+static void reportWork(void) {
     ofLogPrint("ms per frame:          work   total\n");
     int firstFrame = 0;
     unsigned totalMs = 0;
@@ -258,9 +503,9 @@ void ofBenchFrame(void) {
     }
     ofLogPrint("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
     ofLogPrint("work = total minus display flip\n");
-    ioReport();
-    asyncReport();
-    {
+    if (g_def.runProbes) {
+        ioReport();
+        asyncReport();
         unsigned clock, draw, drawUntimed, audioFree;
         ofPlatformCallCosts(&clock, &draw, &drawUntimed, &audioFree);
         ofLogPrint("call costs, us: clock %u.%02u, skipped sprite draw %u.%02u (%u.%02u without its timing), audio queue %u.%02u\n",
@@ -320,6 +565,17 @@ void ofBenchFrame(void) {
                    (unsigned) (t->drawCalls[3] / frames), (unsigned) (t->drawCalls[4] / frames));
         firstFrame = g_def.sections[i].lastFrame;
     }
+    for (int i = 0; i < g_def.sectionCount; i++) {
+        const SWPipeRasterNotes *notes = &g_sectionPipeRaster[i];
+        if (!(notes->calls[SWR_RASTER_WARM] || notes->calls[SWR_RASTER_BUILT] ||
+              notes->calls[SWR_RASTER_PIVOT] || notes->calls[SWR_RASTER_OTHER])) continue;
+        ofLogPrint("%s 45x31 raster: warm %u/%uus build %u/%uus\n", g_def.sections[i].tag,
+                   (unsigned) notes->calls[SWR_RASTER_WARM], pipeMicros(notes, SWR_RASTER_WARM),
+                   (unsigned) notes->calls[SWR_RASTER_BUILT], pipeMicros(notes, SWR_RASTER_BUILT));
+        ofLogPrint("  pivot %u/%uus other %u/%uus\n",
+                   (unsigned) notes->calls[SWR_RASTER_PIVOT], pipeMicros(notes, SWR_RASTER_PIVOT),
+                   (unsigned) notes->calls[SWR_RASTER_OTHER], pipeMicros(notes, SWR_RASTER_OTHER));
+    }
     /* For the last few sections, the draw calls that cost the most, grouped
      * by what was asked for: ms per frame, calls per frame (in tenths), what.
      * "of which" lines are parts of other calls and are counted in those too. */
@@ -337,7 +593,7 @@ void ofBenchFrame(void) {
             ofLogPrint(" %3u.%u %3u.%u %s\n", tenths / 10, tenths % 10, callTenths / 10, callTenths % 10, draw->what);
         }
     }
-    {
+    if (g_def.runProbes) {
         /* What a direct read costs by what read came just before it (ofPlatformReadCosts), ms. */
         unsigned tenths[OF_READ_COSTS];
         ofPlatformReadCosts(tenths);
@@ -346,11 +602,8 @@ void ofBenchFrame(void) {
                    MS(OF_READ_TEX_TEX), MS(OF_READ_MUSIC_TEX), MS(OF_READ_TEX_MUSIC), MS(OF_READ_MUSIC_MUSIC), MS(OF_READ_IDLE_TEX),
                    MS(OF_READ_FILE_TEX));
         #undef MS
-    }
-    /* One more measurement, after the report so far is safely in the file: it
-     * draws outside a frame, and a report must not be lost to it. */
-    ofLogDump();
-    {
+        /* Save the report so far before probing outside a frame. */
+        ofLogDump();
         /* A sprite draw cut short at each stage in turn (sw_call_notes.h), microseconds a call:
          * what it has cost by the renderer's door, with its texture found, on entering the
          * drawing code, clipped, set up, with held layers let out, and whole. */
@@ -364,7 +617,4 @@ void ofBenchFrame(void) {
                    US(at[4]), US(at[5]), US(at[6]), US(at[0]), US(outside));
         #undef US
     }
-    ofLogPrint("--- end of report ---\n"); /* ofLogDump keeps a report from its title to this line */
-    ofLogDump();
-    ofDiagHalt("benchmark finished");
 }

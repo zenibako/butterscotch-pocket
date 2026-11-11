@@ -11,6 +11,14 @@ void platformLog(logType type, const char *format, va_list args) {
 }
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x); abort(); } } while (0)
+/* This fixture creates only button derivatives; drawing-owned caches stay empty. */
+void swrFreeRotatedRasters(SWTexture *texture) {
+    CHECK(!texture->rotatedRasters && !texture->stationaryRasters &&
+          !texture->eyeRasters && !texture->vineGrowthRows);
+}
+void swrFreeBoxRows(SWTexture *texture) {
+    CHECK(!texture->boxRows);
+}
 static bool failAllocation;
 static unsigned allocations;
 static struct { void *pointer; size_t bytes; } live[64];
