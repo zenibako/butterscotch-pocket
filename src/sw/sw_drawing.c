@@ -2409,10 +2409,15 @@ static void swrDrawSpriteRotatedInternal(
     if (capture != NULL) {
         int width = maxXc - minXc, height = maxYc - minYc;
         size_t count = (size_t) width * height;
-        if (count > 160 * 1024 || width > UINT16_MAX) return;
-        uintpixel_t* pixels = calloc(count + 2 * height, sizeof(*pixels));
+        if (count > 160 * 1024 || (unsigned) width > UINT16_MAX) return;
+        uintpixel_t* pixels = (uintpixel_t*) calloc(count + 2 * height, sizeof(*pixels));
         if (pixels == NULL) return;
-        *capture = (SWRotatedCapture) { pixels, (uint16_t*) (pixels + count), minXc, minYc, width, height };
+        capture->pixels = pixels;
+        capture->bounds = (uint16_t*) (pixels + count);
+        capture->x = minXc;
+        capture->y = minYc;
+        capture->width = width;
+        capture->height = height;
     }
     
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING

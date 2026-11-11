@@ -854,14 +854,14 @@ static bool rebuildLegacyInstanceDrawables(Runner* runner) {
     enum { depthSlots = 128, maxInstances = 256, maxShifts = 256 };
     int32_t count = (int32_t)arrlen(runner->instances);
     if (count < 8 || count > maxInstances) return false;
-    repeat(arrlen(runner->particleSystemPool), i) {
-        const ParticleSystem* system = &runner->particleSystemPool[i];
+    repeat(arrlen(runner->particleSystemPool), particleIndex) {
+        const ParticleSystem* system = &runner->particleSystemPool[particleIndex];
         if (system->used && system->automaticDraw) return false;
     }
 
     int32_t highest = runner->instances[0]->depth, lowest = highest;
-    for (int32_t i = 1; i < count; ++i) {
-        int32_t depth = runner->instances[i]->depth;
+    for (int32_t depthIndex = 1; depthIndex < count; ++depthIndex) {
+        int32_t depth = runner->instances[depthIndex]->depth;
         if (depth > highest) highest = depth;
         if (depth < lowest) lowest = depth;
     }
@@ -869,7 +869,7 @@ static bool rebuildLegacyInstanceDrawables(Runner* runner) {
     if (range >= depthSlots) return false;
 
     uint16_t cursor[depthSlots] = {0};
-    repeat(count, i) ++cursor[highest - runner->instances[i]->depth];
+    repeat(count, countIndex) ++cursor[highest - runner->instances[countIndex]->depth];
     uint16_t next = 0;
     for (uint32_t group = 0; group <= range; ++group) {
         uint16_t size = cursor[group];
@@ -879,17 +879,21 @@ static bool rebuildLegacyInstanceDrawables(Runner* runner) {
 
     arrsetlen(runner->cachedDrawables, count);
     Drawable* drawables = runner->cachedDrawables;
-    repeat(count, i) {
-        Instance* inst = runner->instances[i];
+    repeat(count, instanceIndex) {
+        Instance* inst = runner->instances[instanceIndex];
         uint16_t slot = cursor[highest - inst->depth]++;
-        drawables[slot] = (Drawable){ .type = DRAWABLE_INSTANCE, .depth = inst->depth, .instance = inst };
+        Drawable* d = &drawables[slot];
+        ZERO_STRUCT(*d);
+        d->type = DRAWABLE_INSTANCE;
+        d->depth = inst->depth;
+        d->instance = inst;
     }
 
     // Spawned IDs usually arrive in order. Persistent instances can arrive
     // out of order, so enforce the original signed ID tie break as well.
     int shifts = 0, first = 0;
-    for (uint32_t group = 0; group <= range; ++group) {
-        int end = cursor[group];
+    for (uint32_t sortGroup = 0; sortGroup <= range; ++sortGroup) {
+        int end = cursor[sortGroup];
         for (int i = first + 1; i < end; ++i) {
             Drawable current = drawables[i];
             int32_t id = (int32_t)current.instance->instanceId;
