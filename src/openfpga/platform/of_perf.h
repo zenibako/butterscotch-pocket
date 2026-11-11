@@ -88,10 +88,12 @@ void ofAudioRoomChange(void);
  * proven silence. NATIVE is time inside game-script stand-ins that time
  * themselves (Undertale's snow patch), on detail frames only; COLLIDE_TESTS
  * and COLLIDE_SKIPPED count their collision tests and those answered
- * without the built-in. */
+ * without the built-in; NATIVE_COLLIDE and NATIVE_DRAW are the parts of
+ * NATIVE spent in the collision built-in and in drawing (detail frames only). */
 typedef enum { OF_LOAD_ROOM, OF_LOAD_TEXTURE, OF_LOAD_SOUND, OF_LOAD_MIX, OF_LOAD_MUSIC,
                OF_LOAD_MIX_VOICES, OF_LOAD_MIX_WRITE, OF_LOAD_MIX_PAIRS, OF_LOAD_MIX_VOICE_PAIRS, OF_LOAD_MIX_SILENT_PAIRS,
-               OF_LOAD_NATIVE, OF_LOAD_COLLIDE_TESTS, OF_LOAD_COLLIDE_SKIPPED, OF_LOAD_KINDS } OfLoadKind;
+               OF_LOAD_NATIVE, OF_LOAD_COLLIDE_TESTS, OF_LOAD_COLLIDE_SKIPPED, OF_LOAD_NATIVE_COLLIDE, OF_LOAD_NATIVE_DRAW,
+               OF_LOAD_KINDS } OfLoadKind;
 typedef enum { OF_PHASE_OTHER, OF_PHASE_STEP, OF_PHASE_AUDIO, OF_PHASE_DRAW, OF_PHASE_OUT, OF_PHASES } OfPhase;
 #define OF_PERF_SLOW_FRAME_MS 150
 void ofPerfAddLoad(OfLoadKind kind, uint64_t nanos);

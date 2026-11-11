@@ -578,14 +578,17 @@ static void reportWork(void) {
     for (int i = 0; i < g_def.sectionCount; i++)
         if (g_sectionTotals[i].loadNanos[OF_LOAD_COLLIDE_TESTS] != 0) natives = true;
     if (natives) {
-        ofLogPrint("natives ms/fr  tests skipped /fr\n");
+        ofLogPrint("natives ms/fr  draw collide tests skip /fr\n");
         firstFrame = 0;
         for (int i = 0; i < g_def.sectionCount; i++) {
             const OfPerfTotals *t = &g_sectionTotals[i];
             uint64_t frames = (uint64_t) (g_def.sections[i].lastFrame - firstFrame);
             uint64_t detail = t->detailFrames > 0 ? t->detailFrames : 1;
             unsigned tenths = (unsigned) (t->loadNanos[OF_LOAD_NATIVE] / (detail * 100000u));
-            ofLogPrint("%-5s   %4u.%u  %5u %5u\n", g_def.sections[i].tag, tenths / 10, tenths % 10,
+            unsigned collide = (unsigned) (t->loadNanos[OF_LOAD_NATIVE_COLLIDE] / (detail * 100000u));
+            unsigned drawn = (unsigned) (t->loadNanos[OF_LOAD_NATIVE_DRAW] / (detail * 100000u));
+            ofLogPrint("%-5s   %4u.%u %4u.%u %4u.%u %5u %4u\n", g_def.sections[i].tag, tenths / 10, tenths % 10,
+                       drawn / 10, drawn % 10, collide / 10, collide % 10,
                        (unsigned) (t->loadNanos[OF_LOAD_COLLIDE_TESTS] / frames),
                        (unsigned) (t->loadNanos[OF_LOAD_COLLIDE_SKIPPED] / frames));
             firstFrame = g_def.sections[i].lastFrame;

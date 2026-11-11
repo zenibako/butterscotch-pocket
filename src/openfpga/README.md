@@ -735,7 +735,9 @@ patch and back (`walk`), and 180 frames standing with it in view (`near`).
 for the room and its `obj_snowfloor` instances. It skips the post-run probes.
 Its report adds a `natives` table: milliseconds per frame inside the snow
 patch's native Draw event (timed on the detail frames only), and its collision
-tests per frame with how many were answered without calling `collision_circle`.
+tests per frame with how many were answered without calling `collision_circle`,
+and the parts of that time spent drawing the dots (`draw`, which includes the held
+tile pictures the first circle lets out) and inside `collision_circle` (`collide`).
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:

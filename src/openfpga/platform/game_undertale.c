@@ -959,6 +959,7 @@ static bool snowfloorDraw(VMContext *ctx) {
     /* The benchmark's "natives" table: this event's time, on the frames it times in detail. */
     uint64_t started = ofPerfDetail ? nowNanos() : 0;
     uint32_t tests = 0, skipped = 0;
+    uint64_t collideNanos = 0; /* in collision_circle, on the same frames */
 #ifdef ENABLE_VM_GML_PROFILER
     bool profiled = ctx->profiler != NULL;
 #else
@@ -975,10 +976,15 @@ static bool snowfloorDraw(VMContext *ctx) {
     RValue ignored = snowCall(ctx, setColor, "draw_set_color", &white, 1);
     RValue_free(&ignored);
 
+    /* The event visits the dots in turn, each drawn and then moved. A dot's
+     * move touches only its own cells and draws nothing, and the draws use
+     * no random numbers, so drawing every dot first and then moving every
+     * dot does the same, in the same order for the random numbers. Two
+     * passes let the benchmark time the drawing on its own. */
+    uint64_t drawStart = started != 0 ? nowNanos() : 0;
     for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
         for (int32_t xx = 0; xx < SNOW_GRID; xx++) {
             RValue *snowX = &rows[SNOW_X][xx][yy], *snowY = &rows[SNOW_Y][xx][yy];
-            RValue *move = &rows[SNOW_MOVE][xx][yy];
             if (snowCompare(rows[SNOW_DRAW][xx][yy].real, (GMLReal) 1, epsilon) == 0) {
                 if (profiled) {
                     RValue args[4] = { *snowX, *snowY, RValue_makeReal((GMLReal) 2.8), RValue_makeInt32(0) };
@@ -1000,6 +1006,14 @@ static bool snowfloorDraw(VMContext *ctx) {
                     }
                 }
             }
+        }
+    }
+    if (drawStart != 0) ofPerfAddLoad(OF_LOAD_NATIVE_DRAW, nowNanos() - drawStart);
+
+    for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
+        for (int32_t xx = 0; xx < SNOW_GRID; xx++) {
+            RValue *snowX = &rows[SNOW_X][xx][yy], *snowY = &rows[SNOW_Y][xx][yy];
+            RValue *move = &rows[SNOW_MOVE][xx][yy];
             /* collision_circle can only answer noone when no player instance
              * overlaps the circle, so it is called only when one might. */
             bool touched = false;
@@ -1008,7 +1022,9 @@ static bool snowfloorDraw(VMContext *ctx) {
                 RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
                                    RValue_makeInt32(0), RValue_makeInt32(1) };
                 args[0].ownsReference = args[1].ownsReference = false;
+                uint64_t calledAt = started != 0 ? nowNanos() : 0;
                 RValue hit = snowCall(ctx, collide, "collision_circle", args, 6);
+                if (calledAt != 0) collideNanos += nowNanos() - calledAt;
                 /* hit != noone; an undefined result is unequal to any number. */
                 touched = !snowNumber(hit) || snowCompare(RValue_toReal(hit), (GMLReal) -4, epsilon) != 0;
                 RValue_free(&hit);
@@ -1075,7 +1091,10 @@ static bool snowfloorDraw(VMContext *ctx) {
 
     ofPerfAddLoad(OF_LOAD_COLLIDE_TESTS, tests);
     ofPerfAddLoad(OF_LOAD_COLLIDE_SKIPPED, skipped);
-    if (started != 0) ofPerfAddLoad(OF_LOAD_NATIVE, nowNanos() - started);
+    if (started != 0) {
+        ofPerfAddLoad(OF_LOAD_NATIVE, nowNanos() - started);
+        ofPerfAddLoad(OF_LOAD_NATIVE_COLLIDE, collideNanos);
+    }
     /* The loop leaves xx = 0 and yy = 5, each last stored from an ADD.i.v. */
     RValue xxValue = RValue_makeReal((GMLReal) 0), yyValue = RValue_makeReal((GMLReal) SNOW_GRID);
     xxValue.gmlStackType = yyValue.gmlStackType = GML_TYPE_VARIABLE;
