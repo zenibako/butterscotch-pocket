@@ -1053,6 +1053,51 @@ static void SWRenderer_drawTriangle(Renderer* renderer,
     }
 }
 
+// draw_circle and draw_ellipse, filled: the triangle fan of Renderer_drawEllipseColor, triangle for triangle, with two
+// differences that leave the pixels as they were. The points around the unit circle are worked out once for each
+// precision (the same cosf and sinf of the same float angles) rather than for every shape. And a shape that lies
+// wholly outside the target draws nothing: swrDrawTriangleInternal draws only rows 0 to height - 1 and columns from
+// portX to maxX - 1 of a triangle whose corners, rounded down or up, lie within the shape's box, so beyond a pixel's
+// margin round that box nothing can land. It still settles what is held, as its first triangle would have
+// (swrOverlayFlush), and once rather than once a triangle, which is the same thing.
+static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
+{
+    static float unitCos[65], unitSin[65];
+    static int32_t unitSegments = 0;
+    int32_t i;
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr)) return;
+    swrOverlayFlush(swr);
+    if (swr->scaleX > 0.0f && swr->scaleY > 0.0f) {
+        float halfW = rx < 0.0f ? -rx : rx, halfH = ry < 0.0f ? -ry : ry;
+        float left = cx - halfW, top = cy - halfH, right = cx + halfW, bottom = cy + halfH;
+        swrTransformPosIfNeeded(swr, &left, &top);
+        swrTransformPosIfNeeded(swr, &right, &bottom);
+        if (bottom < -1.0f || top > (float) swr->height + 1.0f || right < (float) swr->portX - 1.0f || left > (float) swr->maxX + 1.0f)
+            return;
+    }
+    if (segments < 4 || segments > 64) return;
+    if (unitSegments != segments) {
+        float step = 6.2831853f / (float) segments;
+        for (i = 1; segments >= i; i++) {
+            float angle = step * (float) i;
+            unitCos[i] = cosf(angle);
+            unitSin[i] = sinf(angle);
+        }
+        unitSegments = segments;
+    }
+    float alpha = renderer->drawAlpha;
+    float prevX = cx + rx;
+    float prevY = cy;
+    for (i = 1; segments >= i; i++) {
+        float curX = cx + rx * unitCos[i];
+        float curY = cy + ry * unitSin[i];
+        swrDrawTriangle(renderer, cx, cy, prevX, prevY, curX, curY, col1, col2, col2, alpha);
+        prevX = curX;
+        prevY = curY;
+    }
+}
+
 static void SWRenderer_drawLineColor(Renderer* renderer, float x1, float y1, float x2, float y2,
                                      float width, uint32_t color1, uint32_t color2, float alpha)
 {
@@ -3559,6 +3604,7 @@ Renderer* SWRenderer_create(void)
     swrVtable.drawRectangleColor       = SWRenderer_drawRectangleColor;
     swrVtable.drawLine                 = SWRenderer_drawLine;
     swrVtable.drawTriangle             = SWRenderer_drawTriangle;
+    swrVtable.drawFilledEllipse        = SWRenderer_drawFilledEllipse;
     swrVtable.drawLineColor            = SWRenderer_drawLineColor;
     swrVtable.drawText                 = SWRenderer_drawText;
     swrVtable.drawTextColor            = SWRenderer_drawTextColor;

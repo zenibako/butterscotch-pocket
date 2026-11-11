@@ -97,6 +97,7 @@ enum {
 };
 static int32_t backdropVars[BACKDROP_FIELD_COUNT];
 static bool backdropVarsResolved;
+static bool snowVarsResolved;
 
 #ifndef ENABLE_VM_TRACING
 enum { FLOWEY_FLIPEYE_DRAW_LENGTH = 7832, FLOWEY_MOUTH_DRAW_LENGTH = 4992,
@@ -116,6 +117,7 @@ static void forgetNativeVm(void) {
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
     backdropVarsResolved = false;
+    snowVarsResolved = false;
 #ifndef ENABLE_VM_TRACING
     flipeyeSkippedReady = false;
     mouthSkippedReady = false;
@@ -746,6 +748,218 @@ static const OfNativeScript g_nativeScripts[] = {
 };
 #endif
 
+/* obj_snowfloor's Draw event. Room 57 (room_tundra_snowpuzz, the one with
+ * the "Dog Marriage" sign) has 16 of these, a 5x5 grid of snow dots each,
+ * and the event runs about 2,600 instructions an instance to visit all 25:
+ * draw the dot (draw_circle, radius 2.8), test it against the player
+ * (collision_circle, radius 2), and while it is being pushed, move it away
+ * from the player's box with a random wobble. That is some 42,000
+ * instructions a frame whether or not the patch is in view. This is the
+ * same event in C: the same built-in calls in the same order (so the random
+ * numbers and the drawing are the same), the same comparisons with the
+ * runner's epsilon, the same float arithmetic, and the same values and
+ * stack types left in the arrays and in xx and yy. Anything it does not
+ * expect (no player, an array a write would have to copy, a cell that is
+ * not a real) is checked before the first change, and the bytecode runs
+ * instead. */
+enum { SNOW_X, SNOW_Y, SNOW_MOVE, SNOW_DRAW, SNOW_ARRAY_COUNT };
+enum { SNOW_XX = SNOW_ARRAY_COUNT, SNOW_YY, SNOW_MOVING, SNOW_FLAG, SNOW_VAR_COUNT };
+enum { SNOW_PLAYER_OBJECT = 1576, SNOW_ROOM = 57, SNOW_FLAG_INDEX = 64, SNOW_GRID = 5 };
+static int32_t snowVars[SNOW_VAR_COUNT];
+
+typedef struct {
+    RValue *slot;
+    GMLArray *array;
+} SnowArray;
+
+/* The variable's slot and array, if a write to an existing cell would go
+ * straight into it: VM_arraySetWithCoW copies an array that is shared with
+ * a slot other than its owner (WAD 16 rules); that is left to the bytecode. */
+static bool snowArray(Instance *instance, int32_t id, SnowArray *out) {
+    RValue *slot = IntRValueHashMap_findSlot(&instance->selfVars, id);
+    if (slot == NULL || slot->type != RVALUE_ARRAY || slot->array == NULL || slot->array->type != GML_LEGACY_ARRAY) return false;
+    if (slot->array->refCount > 1 && slot->array->owner != (void *) slot) return false;
+    out->slot = slot;
+    out->array = slot->array;
+    return true;
+}
+
+/* The store VM_arraySetWithCoW makes into an existing cell of an array it
+ * need not copy: claim the array for this slot if no slot owns it, then
+ * replace the value. */
+static void snowStore(SnowArray *array, int32_t index, GMLReal number, uint8_t stackType) {
+    if (array->array->owner == NULL) array->array->owner = array->slot;
+    RValue value = RValue_makeReal(number);
+    value.gmlStackType = stackType;
+    RValue_writeIntoSlotStealingOwnershipOrCopying(GMLArray_slot(array->array, index), value);
+}
+
+static bool snowNumber(RValue value) {
+    return value.type == RVALUE_REAL || value.type == RVALUE_INT32 || value.type == RVALUE_BOOL;
+}
+
+/* OP_CMP on two numbers: equal within epsilon, otherwise by the sign of the
+ * difference (a NaN difference counts as greater, as in the VM). */
+static int snowCompare(GMLReal a, GMLReal b, GMLReal epsilon) {
+    GMLReal diff = a - b;
+    return GMLReal_fabs(diff) <= epsilon ? 0 : (diff < 0 ? -1 : 1);
+}
+
+/* A built-in called as OP_CALL calls it, profiler entry included. */
+static RValue snowCall(VMContext *ctx, BuiltinFunc builtin, const char *name, RValue *args, int32_t argCount) {
+#ifdef ENABLE_VM_GML_PROFILER
+    if (ctx->profiler != NULL) Profiler_enter(ctx->profiler, name);
+#else
+    (void) name;
+#endif
+    RValue result = builtin(ctx, args, argCount);
+#ifdef ENABLE_VM_GML_PROFILER
+    if (ctx->profiler != NULL) Profiler_exit(ctx->profiler);
+#endif
+    return result;
+}
+
+/* obj_mainchara.bbox_*, read as OP_PUSH.v reads a built-in on an object. */
+static GMLReal snowPlayerBox(VMContext *ctx, Instance *player, int16_t id, const char *name) {
+    RValue value = VMBuiltins_getVariable(ctx, player, id, name, 0);
+    GMLReal number = RValue_toReal(value);
+    RValue_free(&value);
+    return number;
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static bool snowfloorDraw(VMContext *ctx) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    Runner *runner = ctx->runner;
+    Instance *self = ctx->currentCallFrame->self;
+    Instance *globals = ctx->globalScopeInstance;
+    if (runner == NULL || self == NULL || globals == NULL || self->objectIndex == STRUCT_OBJECT_INDEX ||
+        ctx->dataWin->objt.count <= SNOW_PLAYER_OBJECT ||
+        strcmp(ctx->dataWin->objt.objects[SNOW_PLAYER_OBJECT].name, "obj_mainchara") != 0) return false;
+    if (!snowVarsResolved) {
+        /* The ids the event's own instructions use: xx and yy are also the
+         * names of many scripts' locals, so look them up by scope in VARI
+         * rather than by name alone. */
+        static const char *const names[SNOW_VAR_COUNT] = { "snowx", "snowy", "moveme", "dodraw", "xx", "yy", "moving", "flag" };
+        for (int i = 0; i < SNOW_VAR_COUNT; i++) {
+            snowVars[i] = -1;
+            int32_t scope = i == SNOW_FLAG ? INSTANCE_GLOBAL : INSTANCE_SELF;
+            for (uint32_t v = 0; v < ctx->dataWin->vari.variableCount; v++) {
+                const Variable *variable = &ctx->dataWin->vari.variables[v];
+                if (variable->instanceType == scope && variable->varID >= 0 && variable->name != NULL &&
+                    strcmp(variable->name, names[i]) == 0) {
+                    snowVars[i] = variable->varID;
+                    break;
+                }
+            }
+        }
+        snowVarsResolved = true;
+    }
+    for (int i = 0; i < SNOW_VAR_COUNT; i++)
+        if (snowVars[i] < 0) return false;
+    BuiltinFunc setColor = VM_findBuiltin(ctx, "draw_set_color"), drawCircle = VM_findBuiltin(ctx, "draw_circle");
+    BuiltinFunc collide = VM_findBuiltin(ctx, "collision_circle"), randomOf = VM_findBuiltin(ctx, "random");
+    BuiltinFunc floorOf = VM_findBuiltin(ctx, "floor");
+    if (setColor == NULL || drawCircle == NULL || collide == NULL || randomOf == NULL || floorOf == NULL) return false;
+
+    /* Everything the event reads that could make it act differently from
+     * this, checked before anything changes. The xx and yy slots must exist
+     * already, so that writing them cannot move the arrays' slots. */
+    Instance *player = VM_findInstanceByTarget(ctx, SNOW_PLAYER_OBJECT);
+    if (player == NULL || !snowNumber(Instance_getSelfVar(player, snowVars[SNOW_MOVING])) ||
+        !IntRValueHashMap_contains(&self->selfVars, snowVars[SNOW_XX]) ||
+        !IntRValueHashMap_contains(&self->selfVars, snowVars[SNOW_YY])) return false;
+    SnowArray arrays[SNOW_ARRAY_COUNT], flags;
+    for (int a = 0; a < SNOW_ARRAY_COUNT; a++) {
+        if (!snowArray(self, snowVars[a], &arrays[a])) return false;
+        for (int32_t xx = 0; xx < SNOW_GRID; xx++)
+            for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
+                RValue *cell = GMLArray_slot(arrays[a].array, xx * GML_LEGACY_ARRAY_STRIDE + yy);
+                if (cell == NULL || cell->type != RVALUE_REAL) return false;
+            }
+        for (int b = 0; b < a; b++)
+            if (arrays[b].array == arrays[a].array) return false;
+    }
+    if (!snowArray(globals, snowVars[SNOW_FLAG], &flags)) return false;
+    RValue *flagCell = GMLArray_slot(flags.array, SNOW_FLAG_INDEX);
+    if (flagCell == NULL || !snowNumber(*flagCell)) return false;
+    for (int a = 0; a < SNOW_ARRAY_COUNT; a++)
+        if (arrays[a].array == flags.array) return false;
+
+    GMLReal epsilon = runner->mathEpsilon;
+    bool inRoom = snowCompare((GMLReal) runner->currentRoomIndex, (GMLReal) SNOW_ROOM, epsilon) == 0;
+    RValue white = RValue_makeInt32(16777215);
+    RValue ignored = snowCall(ctx, setColor, "draw_set_color", &white, 1);
+    RValue_free(&ignored);
+
+    for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
+        for (int32_t xx = 0; xx < SNOW_GRID; xx++) {
+            int32_t at = xx * GML_LEGACY_ARRAY_STRIDE + yy;
+            RValue *snowX = GMLArray_slot(arrays[SNOW_X].array, at), *snowY = GMLArray_slot(arrays[SNOW_Y].array, at);
+            RValue *move = GMLArray_slot(arrays[SNOW_MOVE].array, at);
+            if (snowCompare(GMLArray_slot(arrays[SNOW_DRAW].array, at)->real, (GMLReal) 1, epsilon) == 0) {
+                RValue args[4] = { *snowX, *snowY, RValue_makeReal((GMLReal) 2.8), RValue_makeInt32(0) };
+                args[0].ownsReference = args[1].ownsReference = false;
+                RValue drawn = snowCall(ctx, drawCircle, "draw_circle", args, 4);
+                RValue_free(&drawn);
+            }
+            RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
+                               RValue_makeInt32(0), RValue_makeInt32(1) };
+            args[0].ownsReference = args[1].ownsReference = false;
+            RValue hit = snowCall(ctx, collide, "collision_circle", args, 6);
+            /* hit != noone; an undefined result is unequal to any number. */
+            bool touched = !snowNumber(hit) || snowCompare(RValue_toReal(hit), (GMLReal) -4, epsilon) != 0;
+            RValue_free(&hit);
+            if (touched) {
+                RValue four = RValue_makeInt32(4);
+                RValue roll = snowCall(ctx, randomOf, "random", &four, 1);
+                RValue whole = snowCall(ctx, floorOf, "floor", &roll, 1);
+                RValue_free(&roll);
+                snowStore(&arrays[SNOW_MOVE], at, RValue_toReal(whole) + (GMLReal) 2, GML_TYPE_VARIABLE);
+                RValue_free(&whole);
+            }
+            if (snowCompare(move->real, (GMLReal) 1, epsilon) <= 0) continue;
+
+            if (snowCompare(RValue_toReal(Instance_getSelfVar(player, snowVars[SNOW_MOVING])), (GMLReal) 1, epsilon) == 0) {
+                if (inRoom && snowCompare(RValue_toReal(*flagCell), (GMLReal) 0, epsilon) == 0)
+                    snowStore(&flags, SNOW_FLAG_INDEX, (GMLReal) -1, GML_TYPE_DOUBLE);
+                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_LEFT, "bbox_left"), snowX->real, epsilon) > 0)
+                    snowStore(&arrays[SNOW_X], at, snowX->real - move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_RIGHT, "bbox_right"), snowX->real, epsilon) < 0)
+                    snowStore(&arrays[SNOW_X], at, snowX->real + move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_TOP, "bbox_top"), snowY->real, epsilon) > 0)
+                    snowStore(&arrays[SNOW_Y], at, snowY->real - move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_BOTTOM, "bbox_bottom"), snowY->real, epsilon) < 0)
+                    snowStore(&arrays[SNOW_Y], at, snowY->real + move->real, GML_TYPE_VARIABLE);
+                /* snowx += (random(moveme) - moveme / 2) / 2, then the same for snowy. */
+                for (int axis = SNOW_X; axis <= SNOW_Y; axis++) {
+                    RValue *cell = axis == SNOW_X ? snowX : snowY;
+                    GMLReal start = cell->real;
+                    RValue span = *move;
+                    span.ownsReference = false;
+                    RValue wobble = snowCall(ctx, randomOf, "random", &span, 1);
+                    GMLReal half = move->real / (GMLReal) 2;
+                    GMLReal offset = (RValue_toReal(wobble) - half) / (GMLReal) 2;
+                    RValue_free(&wobble);
+                    snowStore(&arrays[axis], at, start + offset, GML_TYPE_VARIABLE);
+                }
+            }
+            snowStore(&arrays[SNOW_MOVE], at, move->real - (GMLReal) 1, GML_TYPE_VARIABLE);
+        }
+    }
+
+    /* The loop leaves xx = 0 and yy = 5, each last stored from an ADD.i.v. */
+    RValue xxValue = RValue_makeReal((GMLReal) 0), yyValue = RValue_makeReal((GMLReal) SNOW_GRID);
+    xxValue.gmlStackType = yyValue.gmlStackType = GML_TYPE_VARIABLE;
+    Instance_setSelfVar(self, snowVars[SNOW_XX], xxValue);
+    Instance_setSelfVar(self, snowVars[SNOW_YY], yyValue);
+    return true;
+}
+
 static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_gigavine_Step_0", 540, 0x4097e114074c9429ull, floweyVineStep },
     { "gml_Object_obj_eyeshot_a_Step_0", 108, 0x18f12b40727b60b2ull, floweyEyeShotStep },
@@ -759,6 +973,7 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_sidestalk_Draw_0", 376, 0xe8f07e7abe5af547ull, floweySideStalk },
     { "gml_Object_obj_bgpipe_Draw_0", 964, 0x12bf9b0542ba714cull, floweyBackdropPipes },
     { "gml_Object_obj_vines_flowey_Draw_0", 704, 0xec70756e7a99f41aull, floweyBackdropVines },
+    { "gml_Object_obj_snowfloor_Draw_0", 2204, 0x659c1fd61851691eull, snowfloorDraw },
 };
 
 /* Save states (of_state_requests.c) are taken anywhere the runner can store

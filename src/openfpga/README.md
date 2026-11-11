@@ -123,6 +123,7 @@ make call-later-fixture WADS="16 17" # checks deferred script/method/builtin cal
 make physics-contact-fixture WADS="16 17" # checks collision callback self/other and inheritance
 make tile-shift-fixture GAME=deltarune # compares the guarded native with supplied real bytecode
 make flowey-pipes-fixture     # checks full-resolution Speed fallback with supplied Undertale bytecode
+make snowfloor-fixture        # checks the snow patch Draw native against supplied Undertale bytecode
 make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
                 # (GAME=deltarune: ./deltarune_pc, ./deltarune_pc_asan)
 make copy       # copy the core to a mounted Pocket SD card
