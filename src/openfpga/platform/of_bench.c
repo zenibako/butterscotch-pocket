@@ -573,6 +573,24 @@ static void reportWork(void) {
                    (unsigned) (t->drawCalls[3] / frames), (unsigned) (t->drawCalls[4] / frames));
         firstFrame = g_def.sections[i].lastFrame;
     }
+    /* Game scripts written out in C that time themselves (the snow patch). */
+    bool natives = false;
+    for (int i = 0; i < g_def.sectionCount; i++)
+        if (g_sectionTotals[i].loadNanos[OF_LOAD_COLLIDE_TESTS] != 0) natives = true;
+    if (natives) {
+        ofLogPrint("natives ms/fr  tests skipped /fr\n");
+        firstFrame = 0;
+        for (int i = 0; i < g_def.sectionCount; i++) {
+            const OfPerfTotals *t = &g_sectionTotals[i];
+            uint64_t frames = (uint64_t) (g_def.sections[i].lastFrame - firstFrame);
+            uint64_t detail = t->detailFrames > 0 ? t->detailFrames : 1;
+            unsigned tenths = (unsigned) (t->loadNanos[OF_LOAD_NATIVE] / (detail * 100000u));
+            ofLogPrint("%-5s   %4u.%u  %5u %5u\n", g_def.sections[i].tag, tenths / 10, tenths % 10,
+                       (unsigned) (t->loadNanos[OF_LOAD_COLLIDE_TESTS] / frames),
+                       (unsigned) (t->loadNanos[OF_LOAD_COLLIDE_SKIPPED] / frames));
+            firstFrame = g_def.sections[i].lastFrame;
+        }
+    }
     for (int i = 0; i < g_def.sectionCount; i++) {
         const SWPipeRasterNotes *notes = &g_sectionPipeRaster[i];
         if (!(notes->calls[SWR_RASTER_WARM] || notes->calls[SWR_RASTER_BUILT] ||

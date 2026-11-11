@@ -9,6 +9,9 @@
 #include <string.h>
 
 #include "binary_utils.h"
+#include "collision.h"
+#include "gettime.h"
+#include "of_perf.h"
 #include "log.h"
 #include "of_state_requests.h"
 #include "op.h"
@@ -766,6 +769,8 @@ enum { SNOW_X, SNOW_Y, SNOW_MOVE, SNOW_DRAW, SNOW_ARRAY_COUNT };
 enum { SNOW_XX = SNOW_ARRAY_COUNT, SNOW_YY, SNOW_MOVING, SNOW_FLAG, SNOW_VAR_COUNT };
 enum { SNOW_PLAYER_OBJECT = 1576, SNOW_ROOM = 57, SNOW_FLAG_INDEX = 64, SNOW_GRID = 5 };
 static int32_t snowVars[SNOW_VAR_COUNT];
+static bool snowPlayerNamed; /* object 1576 is obj_mainchara in this data.win */
+static BuiltinFunc snowSetColor, snowDrawCircle, snowCollide, snowRandom, snowFloor;
 
 typedef struct {
     RValue *slot;
@@ -827,6 +832,73 @@ static GMLReal snowPlayerBox(VMContext *ctx, Instance *player, int16_t id, const
     return number;
 }
 
+/* The instances collision_circle(x, y, 2, obj_mainchara, false, true) can
+ * find from self: the active ones of obj_mainchara or a child, not self. None
+ * of them moves while the event runs, so each one's box is worked out once;
+ * one whose shape needs the rotated test keeps no box and is tested whole. */
+enum { SNOW_MAX_PLAYERS = 4 };
+typedef struct {
+    Instance *instance;
+    InstanceBBox box;
+    bool rotated;
+} SnowPlayer;
+
+static int snowPlayers(Runner *runner, Instance *self, SnowPlayer *out) {
+    if (runner->instancesByObject == NULL) return -1;
+    Instance **bucket = runner->instancesByObject[SNOW_PLAYER_OBJECT];
+    int count = 0;
+    for (ptrdiff_t i = 0; i < arrlen(bucket); i++) {
+        Instance *inst = bucket[i];
+        if (!inst->active || inst == self) continue;
+        if (count == SNOW_MAX_PLAYERS) return -1;
+        out[count].instance = inst;
+        out[count].rotated = Collision_obbNeedsSAT(Collision_getSprite(runner->dataWin, inst), inst);
+        if (!out[count].rotated) out[count].box = Collision_computeBBox(runner, inst);
+        count++;
+    }
+    return count;
+}
+
+/* Whether that collision_circle could find one of them: it answers noone
+ * unless one passes Collision_circleOverlapsInstance for the centre and
+ * radius it works out, so test exactly that (the closest-point test, on the
+ * box worked out above, or the whole function for a rotated shape). */
+static bool snowMayTouch(Runner *runner, const SnowPlayer *players, int count, GMLReal cx, GMLReal cy) {
+    GMLReal radius = (GMLReal) 2;
+    if (count < 0) return true;
+    if (runner->collisionCompatibilityMode) {
+        GMLReal qx1r = GMLReal_bankersRound(cx - radius);
+        GMLReal qy1r = GMLReal_bankersRound(cy - radius);
+        GMLReal qx2r = GMLReal_bankersRound(cx + radius);
+        GMLReal qy2r = GMLReal_bankersRound(cy + radius);
+        /* The built-in's arithmetic: a GMLReal sum, halved as a double. */
+        cx = (GMLReal) ((double) (qx1r + qx2r) * 0.5);
+        cy = (GMLReal) ((double) (qy1r + qy2r) * 0.5);
+        GMLReal rx = (GMLReal) ((double) (qx2r - qx1r) * 0.5);
+        GMLReal ry = (GMLReal) ((double) (qy2r - qy1r) * 0.5);
+        radius = rx < ry ? rx : ry;
+    }
+    for (int i = 0; i < count; i++) {
+        if (players[i].rotated) {
+            if (Collision_circleOverlapsInstance(runner, players[i].instance, cx, cy, radius)) return true;
+            continue;
+        }
+        /* Collision_circleOverlapsInstance's test for a shape without rotation. */
+        InstanceBBox bbox = players[i].box;
+        if (!bbox.valid) continue;
+        GMLReal rSq = radius * radius;
+        GMLReal closestX = cx;
+        if (bbox.left > closestX) closestX = bbox.left;
+        if (closestX > bbox.right) closestX = bbox.right;
+        GMLReal closestY = cy;
+        if (bbox.top > closestY) closestY = bbox.top;
+        if (closestY > bbox.bottom) closestY = bbox.bottom;
+        GMLReal dx = closestX - cx, dy = closestY - cy;
+        if (dx * dx + dy * dy <= rSq) return true;
+    }
+    return false;
+}
+
 #if defined(__GNUC__) && !defined(__clang__)
 __attribute__((optimize("fp-contract=off")))
 #endif
@@ -837,10 +909,15 @@ static bool snowfloorDraw(VMContext *ctx) {
     Runner *runner = ctx->runner;
     Instance *self = ctx->currentCallFrame->self;
     Instance *globals = ctx->globalScopeInstance;
-    if (runner == NULL || self == NULL || globals == NULL || self->objectIndex == STRUCT_OBJECT_INDEX ||
-        ctx->dataWin->objt.count <= SNOW_PLAYER_OBJECT ||
-        strcmp(ctx->dataWin->objt.objects[SNOW_PLAYER_OBJECT].name, "obj_mainchara") != 0) return false;
+    if (runner == NULL || self == NULL || globals == NULL || self->objectIndex == STRUCT_OBJECT_INDEX) return false;
     if (!snowVarsResolved) {
+        snowPlayerNamed = ctx->dataWin->objt.count > SNOW_PLAYER_OBJECT &&
+                          strcmp(ctx->dataWin->objt.objects[SNOW_PLAYER_OBJECT].name, "obj_mainchara") == 0;
+        snowSetColor = VM_findBuiltin(ctx, "draw_set_color");
+        snowDrawCircle = VM_findBuiltin(ctx, "draw_circle");
+        snowCollide = VM_findBuiltin(ctx, "collision_circle");
+        snowRandom = VM_findBuiltin(ctx, "random");
+        snowFloor = VM_findBuiltin(ctx, "floor");
         /* The ids the event's own instructions use: xx and yy are also the
          * names of many scripts' locals, so look them up by scope in VARI
          * rather than by name alone. */
@@ -861,10 +938,8 @@ static bool snowfloorDraw(VMContext *ctx) {
     }
     for (int i = 0; i < SNOW_VAR_COUNT; i++)
         if (snowVars[i] < 0) return false;
-    BuiltinFunc setColor = VM_findBuiltin(ctx, "draw_set_color"), drawCircle = VM_findBuiltin(ctx, "draw_circle");
-    BuiltinFunc collide = VM_findBuiltin(ctx, "collision_circle"), randomOf = VM_findBuiltin(ctx, "random");
-    BuiltinFunc floorOf = VM_findBuiltin(ctx, "floor");
-    if (setColor == NULL || drawCircle == NULL || collide == NULL || randomOf == NULL || floorOf == NULL) return false;
+    BuiltinFunc setColor = snowSetColor, drawCircle = snowDrawCircle, collide = snowCollide, randomOf = snowRandom, floorOf = snowFloor;
+    if (!snowPlayerNamed || setColor == NULL || drawCircle == NULL || collide == NULL || randomOf == NULL || floorOf == NULL) return false;
 
     /* Everything the event reads that could make it act differently from
      * this, checked before anything changes. The xx and yy slots must exist
@@ -890,6 +965,16 @@ static bool snowfloorDraw(VMContext *ctx) {
     for (int a = 0; a < SNOW_ARRAY_COUNT; a++)
         if (arrays[a].array == flags.array) return false;
 
+    /* The benchmark's "natives" table: this event's time, on the frames it times in detail. */
+    uint64_t started = ofPerfDetail ? nowNanos() : 0;
+    uint32_t tests = 0, skipped = 0;
+#ifdef ENABLE_VM_GML_PROFILER
+    bool profiled = ctx->profiler != NULL;
+#else
+    bool profiled = false;
+#endif
+    SnowPlayer players[SNOW_MAX_PLAYERS];
+    int playerCount = snowPlayers(runner, self, players);
     GMLReal epsilon = runner->mathEpsilon;
     bool inRoom = snowCompare((GMLReal) runner->currentRoomIndex, (GMLReal) SNOW_ROOM, epsilon) == 0;
     RValue white = RValue_makeInt32(16777215);
@@ -902,18 +987,36 @@ static bool snowfloorDraw(VMContext *ctx) {
             RValue *snowX = GMLArray_slot(arrays[SNOW_X].array, at), *snowY = GMLArray_slot(arrays[SNOW_Y].array, at);
             RValue *move = GMLArray_slot(arrays[SNOW_MOVE].array, at);
             if (snowCompare(GMLArray_slot(arrays[SNOW_DRAW].array, at)->real, (GMLReal) 1, epsilon) == 0) {
-                RValue args[4] = { *snowX, *snowY, RValue_makeReal((GMLReal) 2.8), RValue_makeInt32(0) };
-                args[0].ownsReference = args[1].ownsReference = false;
-                RValue drawn = snowCall(ctx, drawCircle, "draw_circle", args, 4);
-                RValue_free(&drawn);
+                if (profiled) {
+                    RValue args[4] = { *snowX, *snowY, RValue_makeReal((GMLReal) 2.8), RValue_makeInt32(0) };
+                    args[0].ownsReference = args[1].ownsReference = false;
+                    RValue drawn = snowCall(ctx, drawCircle, "draw_circle", args, 4);
+                    RValue_free(&drawn);
+                } else if (runner->renderer != NULL) {
+                    /* What builtin_draw_circle does with these arguments. */
+                    float x = (float) snowX->real, y = (float) snowY->real, radius = (float) (GMLReal) 2.8;
+                    if (runner->applyOffsetForPrimitives) {
+                        x += 1.0f;
+                        y += 1.0f;
+                    }
+                    Renderer_drawCircle(runner->renderer, x, y, radius, false);
+                }
             }
-            RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
-                               RValue_makeInt32(0), RValue_makeInt32(1) };
-            args[0].ownsReference = args[1].ownsReference = false;
-            RValue hit = snowCall(ctx, collide, "collision_circle", args, 6);
-            /* hit != noone; an undefined result is unequal to any number. */
-            bool touched = !snowNumber(hit) || snowCompare(RValue_toReal(hit), (GMLReal) -4, epsilon) != 0;
-            RValue_free(&hit);
+            /* collision_circle can only answer noone when no player instance
+             * overlaps the circle, so it is called only when one might. */
+            bool touched = false;
+            tests++;
+            if (snowMayTouch(runner, players, playerCount, snowX->real, snowY->real)) {
+                RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
+                                   RValue_makeInt32(0), RValue_makeInt32(1) };
+                args[0].ownsReference = args[1].ownsReference = false;
+                RValue hit = snowCall(ctx, collide, "collision_circle", args, 6);
+                /* hit != noone; an undefined result is unequal to any number. */
+                touched = !snowNumber(hit) || snowCompare(RValue_toReal(hit), (GMLReal) -4, epsilon) != 0;
+                RValue_free(&hit);
+            } else {
+                skipped++;
+            }
             if (touched) {
                 RValue four = RValue_makeInt32(4);
                 RValue roll = snowCall(ctx, randomOf, "random", &four, 1);
@@ -952,6 +1055,9 @@ static bool snowfloorDraw(VMContext *ctx) {
         }
     }
 
+    ofPerfAddLoad(OF_LOAD_COLLIDE_TESTS, tests);
+    ofPerfAddLoad(OF_LOAD_COLLIDE_SKIPPED, skipped);
+    if (started != 0) ofPerfAddLoad(OF_LOAD_NATIVE, nowNanos() - started);
     /* The loop leaves xx = 0 and yy = 5, each last stored from an ADD.i.v. */
     RValue xxValue = RValue_makeReal((GMLReal) 0), yyValue = RValue_makeReal((GMLReal) SNOW_GRID);
     xxValue.gmlStackType = yyValue.gmlStackType = GML_TYPE_VARIABLE;

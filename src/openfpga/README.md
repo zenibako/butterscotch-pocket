@@ -733,6 +733,9 @@ frames standing with the patch out of view (`stand`), a walk down through the
 patch and back (`walk`), and 180 frames standing with it in view (`near`).
 `--bench-snow-smooth` is the same route in Speed mode. Each window checks
 for the room and its `obj_snowfloor` instances. It skips the post-run probes.
+Its report adds a `natives` table: milliseconds per frame inside the snow
+patch's native Draw event (timed on the detail frames only), and its collision
+tests per frame with how many were answered without calling `collision_circle`.
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:
