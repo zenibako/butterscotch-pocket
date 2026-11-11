@@ -792,11 +792,11 @@ static bool snowArray(Instance *instance, int32_t id, SnowArray *out) {
 /* The store VM_arraySetWithCoW makes into an existing cell of an array it
  * need not copy: claim the array for this slot if no slot owns it, then
  * replace the value. */
-static void snowStore(SnowArray *array, int32_t index, GMLReal number, uint8_t stackType) {
+static void snowStore(SnowArray *array, RValue *cell, GMLReal number, uint8_t stackType) {
     if (array->array->owner == NULL) array->array->owner = array->slot;
     RValue value = RValue_makeReal(number);
     value.gmlStackType = stackType;
-    RValue_writeIntoSlotStealingOwnershipOrCopying(GMLArray_slot(array->array, index), value);
+    RValue_writeIntoSlotStealingOwnershipOrCopying(cell, value);
 }
 
 static bool snowNumber(RValue value) {
@@ -833,17 +833,20 @@ static GMLReal snowPlayerBox(VMContext *ctx, Instance *player, int16_t id, const
 }
 
 /* The instances collision_circle(x, y, 2, obj_mainchara, false, true) can
- * find from self: the active ones of obj_mainchara or a child, not self. None
- * of them moves while the event runs, so each one's box is worked out once;
- * one whose shape needs the rotated test keeps no box and is tested whole. */
+ * find from self: the active ones of obj_mainchara or a child, not self.
+ * None of them moves while the event runs, so each one's box is worked out
+ * once, widened by 4: the built-in finds an instance only if its box comes
+ * within the circle's radius of the centre, and with compatibility mode's
+ * rounding the centre moves by at most half a pixel each way and the
+ * radius grows to at most 2.5, so a centre outside the widened box (a pixel
+ * to spare for rounding) cannot hit. A shape that needs the rotated test, or
+ * too many instances, leaves every dot to the built-in. */
 enum { SNOW_MAX_PLAYERS = 4 };
 typedef struct {
-    Instance *instance;
-    InstanceBBox box;
-    bool rotated;
-} SnowPlayer;
+    GMLReal left, top, right, bottom;
+} SnowReach;
 
-static int snowPlayers(Runner *runner, Instance *self, SnowPlayer *out) {
+static int snowPlayers(Runner *runner, Instance *self, SnowReach *out) {
     if (runner->instancesByObject == NULL) return -1;
     Instance **bucket = runner->instancesByObject[SNOW_PLAYER_OBJECT];
     int count = 0;
@@ -851,56 +854,36 @@ static int snowPlayers(Runner *runner, Instance *self, SnowPlayer *out) {
         Instance *inst = bucket[i];
         if (!inst->active || inst == self) continue;
         if (count == SNOW_MAX_PLAYERS) return -1;
-        out[count].instance = inst;
-        out[count].rotated = Collision_obbNeedsSAT(Collision_getSprite(runner->dataWin, inst), inst);
-        if (!out[count].rotated) out[count].box = Collision_computeBBox(runner, inst);
+        if (Collision_obbNeedsSAT(Collision_getSprite(runner->dataWin, inst), inst)) return -1;
+        InstanceBBox box = Collision_computeBBox(runner, inst);
+        if (!box.valid) continue; /* Collision_circleOverlapsInstance: never */
+        if (!isfinite(box.left) || !isfinite(box.top) || !isfinite(box.right) || !isfinite(box.bottom)) return -1;
+        out[count].left = box.left - (GMLReal) 4;
+        out[count].top = box.top - (GMLReal) 4;
+        out[count].right = box.right + (GMLReal) 4;
+        out[count].bottom = box.bottom + (GMLReal) 4;
         count++;
     }
     return count;
 }
 
-/* Whether that collision_circle could find one of them: it answers noone
- * unless one passes Collision_circleOverlapsInstance for the centre and
- * radius it works out. That test is repeated here (the closest-point test,
- * on the box worked out above, or the whole function for a rotated shape)
- * with half a pixel to spare, so that a compiler fusing the arithmetic one
- * way here and another in the built-in cannot skip a call that would hit:
- * near the edge, the built-in decides. */
-static bool snowMayTouch(Runner *runner, const SnowPlayer *players, int count, GMLReal cx, GMLReal cy) {
-    GMLReal radius = (GMLReal) 2;
-    if (count < 0) return true;
-    if (runner->collisionCompatibilityMode) {
-        GMLReal qx1r = GMLReal_bankersRound(cx - radius);
-        GMLReal qy1r = GMLReal_bankersRound(cy - radius);
-        GMLReal qx2r = GMLReal_bankersRound(cx + radius);
-        GMLReal qy2r = GMLReal_bankersRound(cy + radius);
-        /* The built-in's arithmetic: a GMLReal sum, halved as a double. */
-        cx = (GMLReal) ((double) (qx1r + qx2r) * 0.5);
-        cy = (GMLReal) ((double) (qy1r + qy2r) * 0.5);
-        GMLReal rx = (GMLReal) ((double) (qx2r - qx1r) * 0.5);
-        GMLReal ry = (GMLReal) ((double) (qy2r - qy1r) * 0.5);
-        radius = rx < ry ? rx : ry;
-    }
-    for (int i = 0; i < count; i++) {
-        if (players[i].rotated) {
-            if (Collision_circleOverlapsInstance(runner, players[i].instance, cx, cy, radius + (GMLReal) 0.5)) return true;
-            continue;
-        }
-        /* Collision_circleOverlapsInstance's test for a shape without rotation. */
-        InstanceBBox bbox = players[i].box;
-        if (!bbox.valid) continue;
-        GMLReal reach = radius + (GMLReal) 0.5;
-        GMLReal rSq = reach * reach;
-        GMLReal closestX = cx;
-        if (bbox.left > closestX) closestX = bbox.left;
-        if (closestX > bbox.right) closestX = bbox.right;
-        GMLReal closestY = cy;
-        if (bbox.top > closestY) closestY = bbox.top;
-        if (closestY > bbox.bottom) closestY = bbox.bottom;
-        GMLReal dx = closestX - cx, dy = closestY - cy;
-        if (dx * dx + dy * dy <= rSq) return true;
-    }
+static bool snowMayTouch(const SnowReach *players, int count, GMLReal cx, GMLReal cy) {
+    if (count < 0 || !isfinite(cx) || !isfinite(cy)) return true;
+    for (int i = 0; i < count; i++)
+        if (cx >= players[i].left && cx <= players[i].right && cy >= players[i].top && cy <= players[i].bottom) return true;
     return false;
+}
+
+/* builtin_random(n), as it works it out: the next number of the runner's
+ * generator over BS_RAND_MAX, times n. */
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+static GMLReal snowRoll(Runner *runner, GMLReal n) {
+#ifdef __clang__
+#pragma clang fp contract(off)
+#endif
+    return ((GMLReal) Random_nextUInt32(&runner->random) / (GMLReal) BS_RAND_MAX) * n;
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -953,13 +936,17 @@ static bool snowfloorDraw(VMContext *ctx) {
         !IntRValueHashMap_contains(&self->selfVars, snowVars[SNOW_XX]) ||
         !IntRValueHashMap_contains(&self->selfVars, snowVars[SNOW_YY])) return false;
     SnowArray arrays[SNOW_ARRAY_COUNT], flags;
+    RValue *rows[SNOW_ARRAY_COUNT][SNOW_GRID]; /* snowx[xx, 0..4] and so on: row xx of each array */
     for (int a = 0; a < SNOW_ARRAY_COUNT; a++) {
         if (!snowArray(self, snowVars[a], &arrays[a])) return false;
-        for (int32_t xx = 0; xx < SNOW_GRID; xx++)
+        for (int32_t xx = 0; xx < SNOW_GRID; xx++) {
             for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
                 RValue *cell = GMLArray_slot(arrays[a].array, xx * GML_LEGACY_ARRAY_STRIDE + yy);
                 if (cell == NULL || cell->type != RVALUE_REAL) return false;
             }
+            /* The cells exist, and no write in the event adds one, so a row stays where it is. */
+            rows[a][xx] = GMLArray_slot(arrays[a].array, xx * GML_LEGACY_ARRAY_STRIDE);
+        }
         for (int b = 0; b < a; b++)
             if (arrays[b].array == arrays[a].array) return false;
     }
@@ -977,8 +964,11 @@ static bool snowfloorDraw(VMContext *ctx) {
 #else
     bool profiled = false;
 #endif
-    SnowPlayer players[SNOW_MAX_PLAYERS];
+    SnowReach players[SNOW_MAX_PLAYERS];
     int playerCount = snowPlayers(runner, self, players);
+    GMLReal box[4]; /* obj_mainchara.bbox_left, right, top, bottom: read once, when a dot first needs them */
+    bool boxRead = false;
+    bool drewOne = false; /* a circle has been drawn this event, settling what was held */
     GMLReal epsilon = runner->mathEpsilon;
     bool inRoom = snowCompare((GMLReal) runner->currentRoomIndex, (GMLReal) SNOW_ROOM, epsilon) == 0;
     RValue white = RValue_makeInt32(16777215);
@@ -987,10 +977,9 @@ static bool snowfloorDraw(VMContext *ctx) {
 
     for (int32_t yy = 0; yy < SNOW_GRID; yy++) {
         for (int32_t xx = 0; xx < SNOW_GRID; xx++) {
-            int32_t at = xx * GML_LEGACY_ARRAY_STRIDE + yy;
-            RValue *snowX = GMLArray_slot(arrays[SNOW_X].array, at), *snowY = GMLArray_slot(arrays[SNOW_Y].array, at);
-            RValue *move = GMLArray_slot(arrays[SNOW_MOVE].array, at);
-            if (snowCompare(GMLArray_slot(arrays[SNOW_DRAW].array, at)->real, (GMLReal) 1, epsilon) == 0) {
+            RValue *snowX = &rows[SNOW_X][xx][yy], *snowY = &rows[SNOW_Y][xx][yy];
+            RValue *move = &rows[SNOW_MOVE][xx][yy];
+            if (snowCompare(rows[SNOW_DRAW][xx][yy].real, (GMLReal) 1, epsilon) == 0) {
                 if (profiled) {
                     RValue args[4] = { *snowX, *snowY, RValue_makeReal((GMLReal) 2.8), RValue_makeInt32(0) };
                     args[0].ownsReference = args[1].ownsReference = false;
@@ -1003,14 +992,19 @@ static bool snowfloorDraw(VMContext *ctx) {
                         x += 1.0f;
                         y += 1.0f;
                     }
-                    Renderer_drawCircle(runner->renderer, x, y, radius, false);
+                    /* Off the target it draws nothing; its only effect, settling held layers, the
+                     * event's first circle has had, and nothing since has held anything new. */
+                    if (!drewOne || !SWRenderer_filledEllipseOutside(runner->renderer, x, y, radius, radius)) {
+                        Renderer_drawCircle(runner->renderer, x, y, radius, false);
+                        drewOne = true;
+                    }
                 }
             }
             /* collision_circle can only answer noone when no player instance
              * overlaps the circle, so it is called only when one might. */
             bool touched = false;
             tests++;
-            if (snowMayTouch(runner, players, playerCount, snowX->real, snowY->real)) {
+            if (snowMayTouch(players, playerCount, snowX->real, snowY->real)) {
                 RValue args[6] = { *snowX, *snowY, RValue_makeInt32(2), RValue_makeInt32(SNOW_PLAYER_OBJECT),
                                    RValue_makeInt32(0), RValue_makeInt32(1) };
                 args[0].ownsReference = args[1].ownsReference = false;
@@ -1022,40 +1016,60 @@ static bool snowfloorDraw(VMContext *ctx) {
                 skipped++;
             }
             if (touched) {
-                RValue four = RValue_makeInt32(4);
-                RValue roll = snowCall(ctx, randomOf, "random", &four, 1);
-                RValue whole = snowCall(ctx, floorOf, "floor", &roll, 1);
-                RValue_free(&roll);
-                snowStore(&arrays[SNOW_MOVE], at, RValue_toReal(whole) + (GMLReal) 2, GML_TYPE_VARIABLE);
-                RValue_free(&whole);
+                GMLReal whole;
+                if (profiled) {
+                    RValue four = RValue_makeInt32(4);
+                    RValue roll = snowCall(ctx, randomOf, "random", &four, 1);
+                    RValue floored = snowCall(ctx, floorOf, "floor", &roll, 1);
+                    whole = RValue_toReal(floored);
+                    RValue_free(&roll);
+                    RValue_free(&floored);
+                } else {
+                    whole = GMLReal_floor(snowRoll(runner, (GMLReal) 4));
+                }
+                snowStore(&arrays[SNOW_MOVE], move, whole + (GMLReal) 2, GML_TYPE_VARIABLE);
             }
             if (snowCompare(move->real, (GMLReal) 1, epsilon) <= 0) continue;
 
             if (snowCompare(RValue_toReal(Instance_getSelfVar(player, snowVars[SNOW_MOVING])), (GMLReal) 1, epsilon) == 0) {
                 if (inRoom && snowCompare(RValue_toReal(*flagCell), (GMLReal) 0, epsilon) == 0)
-                    snowStore(&flags, SNOW_FLAG_INDEX, (GMLReal) -1, GML_TYPE_DOUBLE);
-                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_LEFT, "bbox_left"), snowX->real, epsilon) > 0)
-                    snowStore(&arrays[SNOW_X], at, snowX->real - move->real, GML_TYPE_VARIABLE);
-                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_RIGHT, "bbox_right"), snowX->real, epsilon) < 0)
-                    snowStore(&arrays[SNOW_X], at, snowX->real + move->real, GML_TYPE_VARIABLE);
-                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_TOP, "bbox_top"), snowY->real, epsilon) > 0)
-                    snowStore(&arrays[SNOW_Y], at, snowY->real - move->real, GML_TYPE_VARIABLE);
-                if (snowCompare(snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_BOTTOM, "bbox_bottom"), snowY->real, epsilon) < 0)
-                    snowStore(&arrays[SNOW_Y], at, snowY->real + move->real, GML_TYPE_VARIABLE);
+                    snowStore(&flags, flagCell, (GMLReal) -1, GML_TYPE_DOUBLE);
+                if (!boxRead) {
+                    /* Reading bbox_* only works the box out; the player does not move in this event. */
+                    box[0] = snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_LEFT, "bbox_left");
+                    box[1] = snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_RIGHT, "bbox_right");
+                    box[2] = snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_TOP, "bbox_top");
+                    box[3] = snowPlayerBox(ctx, player, BUILTIN_VAR_BBOX_BOTTOM, "bbox_bottom");
+                    boxRead = true;
+                }
+                if (snowCompare(box[0], snowX->real, epsilon) > 0)
+                    snowStore(&arrays[SNOW_X], snowX, snowX->real - move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(box[1], snowX->real, epsilon) < 0)
+                    snowStore(&arrays[SNOW_X], snowX, snowX->real + move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(box[2], snowY->real, epsilon) > 0)
+                    snowStore(&arrays[SNOW_Y], snowY, snowY->real - move->real, GML_TYPE_VARIABLE);
+                if (snowCompare(box[3], snowY->real, epsilon) < 0)
+                    snowStore(&arrays[SNOW_Y], snowY, snowY->real + move->real, GML_TYPE_VARIABLE);
                 /* snowx += (random(moveme) - moveme / 2) / 2, then the same for snowy. */
                 for (int axis = SNOW_X; axis <= SNOW_Y; axis++) {
                     RValue *cell = axis == SNOW_X ? snowX : snowY;
                     GMLReal start = cell->real;
-                    RValue span = *move;
-                    span.ownsReference = false;
-                    RValue wobble = snowCall(ctx, randomOf, "random", &span, 1);
+                    GMLReal rolled;
+                    if (profiled) {
+                        RValue span = *move;
+                        span.ownsReference = false;
+                        RValue wobble = snowCall(ctx, randomOf, "random", &span, 1);
+                        rolled = RValue_toReal(wobble);
+                        RValue_free(&wobble);
+                    } else {
+                        rolled = snowRoll(runner, move->real);
+                    }
                     GMLReal half = move->real / (GMLReal) 2;
-                    GMLReal offset = (RValue_toReal(wobble) - half) / (GMLReal) 2;
-                    RValue_free(&wobble);
-                    snowStore(&arrays[axis], at, start + offset, GML_TYPE_VARIABLE);
+                    GMLReal offset = (rolled - half) / (GMLReal) 2;
+                    snowStore(&arrays[axis], cell, start + offset, GML_TYPE_VARIABLE);
                 }
             }
-            snowStore(&arrays[SNOW_MOVE], at, move->real - (GMLReal) 1, GML_TYPE_VARIABLE);
+            snowStore(&arrays[SNOW_MOVE], move, move->real - (GMLReal) 1, GML_TYPE_VARIABLE);
         }
     }
 

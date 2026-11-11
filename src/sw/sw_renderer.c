@@ -1070,6 +1070,26 @@ static void SWRenderer_drawTriangle(Renderer* renderer,
 // so rows of small dots showed stripes. A shape shaded from centre to rim, or with no width or height, is still drawn
 // as that triangle fan. A shape wholly outside the target draws nothing (nothing either way can land beyond a
 // pixel's margin round its box), but still settles what is held (swrOverlayFlush), as a first triangle would have.
+// Whether a filled ellipse centred on (cx, cy) with these radii lies wholly outside the target, a pixel's margin
+// to spare: then neither the polygon nor the fan can put a pixel down (see SWRenderer_drawFilledEllipse).
+static bool swrFilledEllipseOutside(SWRenderer* swr, float cx, float cy, float rx, float ry)
+{
+    if (!(swr->scaleX > 0.0f && swr->scaleY > 0.0f)) return false;
+    float halfW = rx < 0.0f ? -rx : rx, halfH = ry < 0.0f ? -ry : ry;
+    float left = cx - halfW, top = cy - halfH, right = cx + halfW, bottom = cy + halfH;
+    swrTransformPosIfNeeded(swr, &left, &top);
+    swrTransformPosIfNeeded(swr, &right, &bottom);
+    return bottom < -1.0f || top > (float) swr->height + 1.0f || right < (float) swr->portX - 1.0f || left > (float) swr->maxX + 1.0f;
+}
+
+static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments);
+
+bool SWRenderer_filledEllipseOutside(Renderer* renderer, float cx, float cy, float rx, float ry)
+{
+    if (renderer == NULL || renderer->vtable->drawFilledEllipse != SWRenderer_drawFilledEllipse) return false;
+    return swrFilledEllipseOutside((SWRenderer*) renderer, cx, cy, rx, ry);
+}
+
 static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
 {
     static float unitCos[65], unitSin[65];
@@ -1079,14 +1099,7 @@ static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy,
     SWRenderer* swr = (SWRenderer*) renderer;
     if (SWR_SKIPPED(swr)) return;
     swrOverlayFlush(swr);
-    if (swr->scaleX > 0.0f && swr->scaleY > 0.0f) {
-        float halfW = rx < 0.0f ? -rx : rx, halfH = ry < 0.0f ? -ry : ry;
-        float left = cx - halfW, top = cy - halfH, right = cx + halfW, bottom = cy + halfH;
-        swrTransformPosIfNeeded(swr, &left, &top);
-        swrTransformPosIfNeeded(swr, &right, &bottom);
-        if (bottom < -1.0f || top > (float) swr->height + 1.0f || right < (float) swr->portX - 1.0f || left > (float) swr->maxX + 1.0f)
-            return;
-    }
+    if (swrFilledEllipseOutside(swr, cx, cy, rx, ry)) return;
     if (segments < 4 || segments > 64) return;
     if (unitSegments != segments) {
         float step = 6.2831853f / (float) segments;
