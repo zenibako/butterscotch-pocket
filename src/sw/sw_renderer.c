@@ -147,6 +147,16 @@ int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed) { (void) out; (
 #define SWR_NOTED(what, statement) do { statement; } while (0)
 #endif
 
+// The same, for a stretch of code that a macro argument cannot hold: start
+// it with SWR_NOTE_START(name) and end it with SWR_NOTE_END(name, "what").
+#ifdef SW_DRAW_PROFILE
+#define SWR_NOTE_START(var) uint64_t var = swrCallNotes && swrDrawTimed ? nowNanos() : 0
+#define SWR_NOTE_END(var, what) do { if (var != 0) swrNote(nowNanos() - var, what); } while (0)
+#else
+#define SWR_NOTE_START(var) do { } while (0)
+#define SWR_NOTE_END(var, what) do { } while (0)
+#endif
+
 // Partial clears (see SWDirtyBuffer). Bumped by swrFramebufferTouched: a
 // buffer last known under an older generation is not known any more.
 static uint32_t swrDirtyGeneration;
@@ -2855,13 +2865,16 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
         swrPendingCount = count;
     }
     
-    SWTileRun* flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL;
+    SWTileRun* flat;
+    SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL);
+    SWR_NOTE_START(copyNote);
     if (flat != NULL) {
         SWTileRun* const one[1] = { flat };
         swrRunsDrawOnto(one, 1, target, swr->fbPitch, left, top, width, height, under, false);
     } else {
         swrRunsDrawOnto(swrPendingRuns, swrPendingCount, target, swr->fbPitch, left, top, width, height, under, false);
     }
+    SWR_NOTE_END(copyNote, "  of which: tile pictures copied");
     
     // Grids held over the pictures come last.
     if (swrGrid.count > 0) {
@@ -2941,6 +2954,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     int anchorX = swrFloor((float) tiles[0]->x + offsets[0]);
     int anchorY = swrFloor((float) tiles[0]->y + offsets[1]);
     int left = INT32_MAX, top = INT32_MAX, right = INT32_MIN, bottom = INT32_MIN;
+    SWR_NOTE_START(keyNote);
     for (int32_t t = 0; t < count; t++)
     {
         const RoomTile* tile = tiles[t];
@@ -2967,6 +2981,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         memcpy(words, relative, sizeof(relative));
         for (int w = 0; w < 9; w++) key = (key ^ words[w]) * BS_FNV64_PRIME;
     }
+    SWR_NOTE_END(keyNote, "  of which: tile run key");
     
     // The picture starts on a block boundary, so that the pictures of a room share one grid of blocks.
     left = swrFloorToStep(left, SWR_TILE_RUN_BLOCK << shift);
@@ -3021,6 +3036,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         
         // Point the renderer at the picture, with a view that maps the run's
         // bounding box onto it, and draw the tiles the ordinary way.
+        SWR_NOTE_START(buildNote);
         SWRenderer saved = *swr;
         swr->fb = run->pixels;
         swr->fbPitch = (uint16_t) width;
@@ -3039,6 +3055,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         swr->maxX = saved.maxX; swr->maxY = saved.maxY;
         
         swrRunClassify(run);
+        SWR_NOTE_END(buildNote, "  of which: tile picture built");
     }
     run->lastUsedFrame = swr->frameCounter;
     
