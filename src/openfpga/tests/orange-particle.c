@@ -41,8 +41,10 @@ static Outcome run(DataWin *dw, int code, int obj, int test, bool native) {
     }
 
     if (native) {
-        require(ofGame.nativeCount == 1);
-        const OfNativeCode *spec = ofGame.natives;
+        const OfNativeCode *spec = NULL;
+        for (size_t i = 0; i < ofGame.nativeCount; i++)
+            if (!strcmp(ofGame.natives[i].name, event)) spec = &ofGame.natives[i];
+        require(spec != NULL);
         require(!VM_setNativeCode(vm, event, spec->length, spec->hash ^ 1, spec->native));
         ofNativeInstall(&r);
         require(vm->nativeCode != NULL && vm->nativeCode[code] != NULL);
