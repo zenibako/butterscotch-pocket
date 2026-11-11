@@ -105,6 +105,82 @@ class CardTest(unittest.TestCase):
         self.assertEqual(json.loads(again.stdout)["changed"], 0)
         self.assertFalse(list(self.card.glob(".pocket-card-*")))
 
+    def test_standard_install_local_and_remote_preserves_games_and_saves(self):
+        core = "Cores/zenibako.Butterscotch"
+        common = "Assets/butterscotch/common"
+        instances = "Assets/butterscotch/zenibako.Butterscotch"
+        files = {
+            f"{core}/core.json": json.dumps({"core": {"metadata": {"version": "standard-test-rc"}}}).encode(),
+            f"{core}/loader.bin": b"standard loader",
+            f"{core}/os25.rbf_r": b"standard FPGA",
+            f"{common}/undertale.elf": b"new Undertale ELF",
+            f"{common}/deltarune.elf": b"new Deltarune ELF",
+            f"{common}/os.bin": b"new standard runtime",
+            f"{common}/undertale_os.ini": b"[os]\nELF=undertale.elf\nVARIANT=os25\n",
+            f"{common}/deltarune_os.ini": b"[os]\nELF=deltarune.elf\nVARIANT=os25\n",
+            f"{instances}/Undertale.json": json.dumps({"instance": {"data_slots": [
+                {"id": 1, "filename": "os.bin"},
+                {"id": 2, "filename": "undertale_os.ini"},
+                {"id": 3, "filename": "undertale.elf"},
+                {"id": 4, "filename": "data.win"},
+            ]}}).encode(),
+            f"{instances}/Deltarune.json": json.dumps({"instance": {"data_slots": [
+                {"id": 1, "filename": "os.bin"},
+                {"id": 2, "filename": "deltarune_os.ini"},
+                {"id": 3, "filename": "deltarune.elf"},
+                {"id": 4, "filename": "deltarune.win"},
+            ]}}).encode(),
+        }
+        preserved = {
+            f"{common}/data.win": b"game data",
+            f"{common}/deltarune.win": b"Deltarune game data",
+            f"{SAVES}/undertale_0.sav": b"player progress",
+            f"{SAVES}/undertale_1.sav": b"Undertale report",
+            f"{SAVES}/deltarune_0.sav": b"Deltarune progress",
+            f"{SAVES}/deltarune_1.sav": b"Deltarune report",
+        }
+        for name, data in preserved.items():
+            (self.card / name).write_bytes(data)
+
+        for remote in (False, True):
+            with self.subTest(remote=remote):
+                for name in files:
+                    target = self.card / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(b"previous standard version")
+                with ZipFile(self.zip, "w") as archive:
+                    for name, data in files.items():
+                        archive.writestr(name, data)
+                args = ("--zip", str(self.zip), "--sha256", hashlib.sha256(self.zip.read_bytes()).hexdigest())
+                run = self.card_tool("install", *args, remote=remote)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                result = json.loads(run.stdout)
+                self.assertEqual(result["versions"], {"zenibako.Butterscotch": "standard-test-rc"})
+                self.assertEqual(result["verified"], len(files))
+                self.assertEqual(result["changed"], len(files))
+                again = self.card_tool("install", *args, remote=remote)
+                self.assertEqual(again.returncode, 0, again.stderr)
+                self.assertEqual(json.loads(again.stdout)["changed"], 0)
+                for name, data in (files | preserved).items():
+                    self.assertEqual((self.card / name).read_bytes(), data, name)
+                self.assertEqual(self.save.read_bytes(), self.raw)
+                self.assertFalse(list(self.card.glob(".pocket-card-*")))
+
+                for missing in ("undertale.elf", "deltarune.elf", "os.bin"):
+                    with self.subTest(missing=missing):
+                        incomplete = dict(files)
+                        incomplete[f"{core}/loader.bin"] = b"rejected loader update"
+                        del incomplete[f"{common}/{missing}"]
+                        with ZipFile(self.zip, "w") as archive:
+                            for name, data in incomplete.items():
+                                archive.writestr(name, data)
+                        rejected = self.card_tool("install", "--zip", str(self.zip), remote=remote)
+                        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                        self.assertIn("lacks the complete zenibako.Butterscotch runtime or program", rejected.stderr)
+                        for name, data in (files | preserved).items():
+                            self.assertEqual((self.card / name).read_bytes(), data, name)
+                        self.assertFalse(list(self.card.glob(".pocket-card-*")))
+
     def test_unmount_follows_install_and_preserves_verified_files_on_failure(self):
         unmount = self.root / ("diskutil" if sys.platform == "darwin" else "umount")
         unmount.write_text(
