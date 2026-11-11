@@ -445,7 +445,7 @@ static inline GMLReal backdropSin(GMLReal angle) {
 static bool floweySceneryPose(const Instance* self) {
     return self != NULL && isfinite(self->x) && isfinite(self->y) &&
            isfinite(self->imageXscale) && isfinite(self->imageIndex) &&
-           self->imageIndex > INT32_MIN && self->imageIndex < INT32_MAX;
+           self->imageIndex > INT32_MIN && self->imageIndex < (GMLReal) INT32_MAX;
 }
 
 static void floweyScenerySprite(Renderer* renderer, const Instance* self, int sprite,
