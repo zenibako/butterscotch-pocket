@@ -1,0 +1,85 @@
+{
+  "before_commit": "1156d08cd7d5f714e5fc057915f424917395cdfd",
+  "after_commit": "132b7f48fba2a68aa03f0a839de90b5d1dfc16b8",
+  "renderer": "desktop SDL build",
+  "resolution": [
+    320,
+    240
+  ],
+  "seed": 7,
+  "arguments": [
+    "--bench-flowey-smooth",
+    "--draw-every",
+    "2"
+  ],
+  "environment": {
+    "BS_UNCAPPED": "1",
+    "BS_NOFLIP": "1"
+  },
+  "enlargement": "nearest-neighbor 2x",
+  "layout": "left rc.104, right PR",
+  "frames": {
+    "intro-fade.png": 905,
+    "intro-fade-later.png": 909
+  },
+  "captures": [
+    {
+      "role": "rc104",
+      "frame": 905,
+      "source_size": "320 240",
+      "rgb24_sha256": "ed6e37f26a4fd78df63b85a7c21f9781db3b11c401e5908f5f28301f02ab568a"
+    },
+    {
+      "role": "pr",
+      "frame": 905,
+      "source_size": "320 240",
+      "rgb24_sha256": "89b3b869a61b7e572850d1c362e55b0a2be6c06c07600af51f26f49f6417ba8b"
+    },
+    {
+      "role": "rc104",
+      "frame": 909,
+      "source_size": "320 240",
+      "rgb24_sha256": "badf4b5ca07cb133c1956e511272799fb76093012a84949b6013068f899485cf"
+    },
+    {
+      "role": "pr",
+      "frame": 909,
+      "source_size": "320 240",
+      "rgb24_sha256": "badf4b5ca07cb133c1956e511272799fb76093012a84949b6013068f899485cf"
+    }
+  ],
+  "pocket_report": {
+    "build": "0.7.10-rc.104-1156d08c",
+    "save_sha256": "0b775c17b9b82b331eaf7e7ad128075c0edb151379815e0fefb058f7fcfdcf01",
+    "vine_updates_per_second": 26.1,
+    "eye_updates_per_second": 27.8,
+    "rc94_vine_updates_per_second": 16.7,
+    "rc94_eye_updates_per_second": 19.9
+  },
+  "fade_patch_tested_on_pocket": false,
+  "harness": {
+    "clock_hz": 100000000,
+    "frames": [
+      1435,
+      1436,
+      1437
+    ],
+    "drawn_frame": 1436,
+    "before_ms": [
+      9.00677,
+      101.14132,
+      8.91117
+    ],
+    "after_ms": [
+      8.97061,
+      88.61899,
+      8.87227
+    ],
+    "draw_saving_ms": 12.522329999999997,
+    "mode": "timing with fixed alternating drawn/skipped updates, substituted HAL",
+    "repeat_capture_equal": true,
+    "rtl_oracles_passed": true,
+    "negative_controls_rejected": true,
+    "pcm_equal": true
+  }
+}
