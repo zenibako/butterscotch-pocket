@@ -129,7 +129,8 @@ make copy       # copy the core to a mounted Pocket SD card
 
 Pass `OF_BUILD_NOTE=<label>` to `make` to identify an experimental build in
 benchmark report titles. The label defaults to the extra compiler flags in
-`OF_OPT`.
+`OF_OPT`. For an explicit label, use only ASCII letters, digits, dots,
+underscores and hyphens; quotes and backslashes are not supported.
 
 The collision fixture is `./<game>_pc_collision_work_fixture`. Build with one
 explicit `WADS=16` or `WADS=17`; add `PC_EXTRA_CFLAGS=-DOF_COLLISION_WORK_PROFILE`

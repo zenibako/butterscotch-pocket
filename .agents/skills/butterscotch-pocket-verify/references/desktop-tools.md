@@ -44,7 +44,7 @@ device):
 | `BS_DISASM=name` | print that code entry's bytecode at start (`*` for all, about a million lines) |
 | `BS_DUMP_EVERY=n`, `BS_DUMP_DIR=d` | also write every nth frame to `d/f<frame>.ppm` on the way to `BS_DUMP_FRAME` |
 | `BS_NOFLIP=1` | never present to the window; without it a run is capped at the display's 60 fps even with `BS_UNCAPPED` |
-| `BS_FRAME_LOG=frames.log` | per-frame rows with frame index, room, width, then step, draw, out and audio in microseconds |
+| `BS_FRAME_LOG=frames.log` | rows for presented frames with frame index, room, width, then step, draw, out and audio in microseconds, per-kind draw-call counts, and `swrDirtyLastTiles`; skipped updates produce no row |
 | `BS_RECORD=f.json` | write every key press and release, by frame, when the run ends (Butterscotch's `--record-inputs`) |
 | `BS_PLAYBACK=f.json` | replay a recording (`--playback-inputs`). With `BS_RECORD` as well it replays, then records what follows, so a recording can be extended |
 | `BS_PROFILE=n` | log the heaviest game scripts every n frames; the report the menu's "Show script times in log" gives on the device (see the perf skill) |
