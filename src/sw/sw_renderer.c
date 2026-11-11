@@ -3372,22 +3372,22 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     swr->floweyTvCaseItem = -1;
     swr->floweyTvScreenSprite = -1;
     swr->floweyOuterEyeShadow = -1;
-    for (unsigned i = 0; i < sizeof(trim) / sizeof(trim[0]); ++i)
-        swr->floweyTrimItems[i] = -1;
+    for (unsigned trimSlot = 0; trimSlot < sizeof(trim) / sizeof(trim[0]); ++trimSlot)
+        swr->floweyTrimItems[trimSlot] = -1;
     swr->floweyBackdropCount = 0;
-    for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i)
-        swr->floweyBackdropItems[i] = -1;
+    for (unsigned backdropSlot = 0; backdropSlot < sizeof(backdrop) / sizeof(backdrop[0]); ++backdropSlot)
+        swr->floweyBackdropItems[backdropSlot] = -1;
     if (dw->gen8.wadVersion != 16 || dw->gen8.gameID != 864738521u) return;
-    for (uint32_t i = 0; i < dw->sprt.count; ++i) {
-        const Sprite* sprite = &dw->sprt.sprites[i];
+    for (uint32_t spriteIndex = 0; spriteIndex < dw->sprt.count; ++spriteIndex) {
+        const Sprite* sprite = &dw->sprt.sprites[spriteIndex];
         if (!sprite->name) continue;
         if (strcmp(sprite->name, "spr_sidestalk") == 0 && swrFloweyStalkFrames(dw, sprite)) {
-            swr->floweyStalkSprite = (int32_t) i;
+            swr->floweyStalkSprite = (int32_t) spriteIndex;
             swr->floweyStalkFirst = sprite->tpagIndices[0];
             swr->floweyStalkLast = sprite->tpagIndices[sprite->textureCount - 1];
         }
         if (strcmp(sprite->name, "spr_tvinside_old") == 0 && sprite->textureCount == 37)
-            swr->floweyTvScreenSprite = (int32_t) i;
+            swr->floweyTvScreenSprite = (int32_t) spriteIndex;
         if (sprite->textureCount != 1) continue;
         int32_t item = sprite->tpagIndices[0];
         if (item < 0 || (uint32_t) item >= dw->tpag.count) continue;
@@ -3412,12 +3412,12 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
         } else if (strcmp(sprite->name, "spr_flipeye_holder_bg") == 0) {
             swr->floweyOuterEyeShadow = item;
         } else {
-            for (unsigned i = 0; i < sizeof(trim) / sizeof(trim[0]); ++i)
-                if (strcmp(sprite->name, trim[i]) == 0) swr->floweyTrimItems[i] = item;
-            for (unsigned i = 0; i < sizeof(backdrop) / sizeof(backdrop[0]); ++i) {
-                if (strcmp(sprite->name, backdrop[i]) != 0) continue;
-                swr->floweyBackdropItems[i] = item;
-                if (swr->floweyBackdropCount <= i) swr->floweyBackdropCount = i + 1;
+            for (unsigned trimIndex = 0; trimIndex < sizeof(trim) / sizeof(trim[0]); ++trimIndex)
+                if (strcmp(sprite->name, trim[trimIndex]) == 0) swr->floweyTrimItems[trimIndex] = item;
+            for (unsigned backdropIndex = 0; backdropIndex < sizeof(backdrop) / sizeof(backdrop[0]); ++backdropIndex) {
+                if (strcmp(sprite->name, backdrop[backdropIndex]) != 0) continue;
+                swr->floweyBackdropItems[backdropIndex] = item;
+                if (swr->floweyBackdropCount <= backdropIndex) swr->floweyBackdropCount = backdropIndex + 1;
                 break;
             }
         }
