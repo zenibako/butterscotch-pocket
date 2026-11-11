@@ -3352,14 +3352,15 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
 {
     static const char* const backdrop[] = {
         "spr_vines_flowey_3", "spr_vines_flowey_2", "spr_vines_flowey",
-        [SWR_FLOWEY_BACKDROP_SHADOW] = "spr_floweyx_behind"
+        "spr_floweyx_behind" /* SWR_FLOWEY_BACKDROP_SHADOW */
     };
+    /* Keep the FLOWEY_* order above; old C++ compilers lack indexed initializers. */
     static const char* const trim[] = {
-        [FLOWEY_MOUTH_EDGE] = "spr_floweyx_mouthedge",
-        [FLOWEY_MOUTH_FLAP] = "spr_floweyx_mouthl",
-        [FLOWEY_EYE_HOLDER] = "spr_flipeye_holder",
-        [FLOWEY_EYE_BG] = "spr_flipeye_bg",
-        [FLOWEY_EYE_OVERLAY] = "spr_lefteye_overlay"
+        "spr_floweyx_mouthedge",
+        "spr_floweyx_mouthl",
+        "spr_flipeye_holder",
+        "spr_flipeye_bg",
+        "spr_lefteye_overlay"
     };
     SWRenderer* swr = (SWRenderer*) renderer;
     DataWin* dw = renderer->dataWin;
