@@ -3440,14 +3440,18 @@ void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer)
         const TexturePageItem* page = &renderer->dataWin->tpag.items[item];
         SWTexture* pipe = swrTextureForItem(swr, item);
         if (pipe == NULL) return;
-        swr->floweyStalkEyePipes = swrMakeFloweyStalkEyePipes(pipe, page->sourceX - pipe->originX, page->sourceY - pipe->originY);
-        if (swr->floweyStalkEyePipes == NULL) return;
+        SWTexture* art = swrMakeFloweyStalkEyePipes(pipe, page->sourceX - pipe->originX, page->sourceY - pipe->originY);
+        if (art == NULL) return;
         int32_t backingItem = swr->floweyBackdropItems[SWR_FLOWEY_BACKDROP_SHADOW];
         if (backingItem >= 0) {
             SWTexture* backing = swrTextureForItem(swr, backingItem);
-            if (backing != NULL)
-                swrAddFloweyStalkEyeBacking(swr->floweyStalkEyePipes, backing, &renderer->dataWin->tpag.items[backingItem]);
+            if (backing == NULL) {
+                swrFreeTexture(art);
+                return;
+            }
+            swrAddFloweyStalkEyeBacking(art, backing, &renderer->dataWin->tpag.items[backingItem]);
         }
+        swr->floweyStalkEyePipes = art;
     }
     // Draw at the native eye-pipe event's depth, over the green stalks and
     // under the eyes. Like the rear pipes, hold the pose through camera shake.
