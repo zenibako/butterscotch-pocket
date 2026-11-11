@@ -1090,16 +1090,13 @@ bool SWRenderer_filledEllipseOutside(Renderer* renderer, float cx, float cy, flo
     return swrFilledEllipseOutside((SWRenderer*) renderer, cx, cy, rx, ry);
 }
 
-static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
+// The shape itself, once what is held has been settled and the shape is known to reach the target.
+static void swrFilledEllipseShape(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
 {
     static float unitCos[65], unitSin[65];
     static int32_t unitSegments = 0;
     float xs[65], ys[65];
     int32_t i;
-    SWRenderer* swr = (SWRenderer*) renderer;
-    if (SWR_SKIPPED(swr)) return;
-    swrOverlayFlush(swr);
-    if (swrFilledEllipseOutside(swr, cx, cy, rx, ry)) return;
     if (segments < 4 || segments > 64) return;
     if (unitSegments != segments) {
         float step = 6.2831853f / (float) segments;
@@ -1122,6 +1119,28 @@ static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy,
     }
     for (i = 1; segments >= i; i++)
         swrDrawTriangle(renderer, cx, cy, xs[i - 1], ys[i - 1], xs[i], ys[i], col1, col2, col2, renderer->drawAlpha);
+}
+
+static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr)) return;
+    swrOverlayFlush(swr);
+    if (swrFilledEllipseOutside(swr, cx, cy, rx, ry)) return;
+    swrFilledEllipseShape(renderer, cx, cy, rx, ry, col1, col2, segments);
+}
+
+bool SWRenderer_drawFilledCircleSettled(Renderer* renderer, float cx, float cy, float radius)
+{
+    if (renderer == NULL || renderer->vtable->drawFilledEllipse != SWRenderer_drawFilledEllipse) return false;
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr)) return true;
+    if (swrFilledEllipseOutside(swr, cx, cy, radius, radius)) return true;
+    // What Renderer_drawCircle hands the hook: the draw colour twice, the normalized precision, at least 4.
+    int32_t segments = Renderer_normalizeCirclePrecision(renderer->circlePrecision);
+    if (4 > segments) segments = 4;
+    swrFilledEllipseShape(renderer, cx, cy, radius, radius, renderer->drawColor, renderer->drawColor, segments);
+    return true;
 }
 
 static void SWRenderer_drawLineColor(Renderer* renderer, float x1, float y1, float x2, float y2,
