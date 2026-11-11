@@ -108,6 +108,7 @@ make button-prompts-fixture  # builds the asset-free prompt, font and icon regre
 make deltarune-button-prompts-fixture  # builds generated-label and fallback checks
 make string-reads-fixture    # builds the asset-free string read/ownership regression
 make collision-work-fixture  # builds asset-free collision order/mutation checks
+make drawable-order-fixture  # checks legacy drawable ordering and guarded fallback without game data
 make collision-precise-fixture GAME=undertale WADS=16 # checks precise pairs against scalar sampling
 make collision-precise-fixture GAME=deltarune WADS=17 # checks the Chapter 1 configuration
 make font-sampling-fixture   # checks doubled fonts and unchanged fallback filters
@@ -170,6 +171,10 @@ a fresh `PC_OBJ_DIR` for each game or changed build flags.
 The layer lookup fixture is `./<game>_pc_layer_lookup_fixture`. It checks ordered
 ID lookup, missing IDs, structural mutations and bounded repeated-hit work using
 the actual runner and layer builtins. Use a separate object directory per game.
+
+The drawable-order fixture is `./<game>_pc_drawable_order_fixture`. Run it
+without arguments to compare legacy draw ordering with independent ranks and
+check insertion sorting, bounded fallback, and unsupported-room guards.
 
 The VM call fixture is `./<game>_pc_vm_call_args_fixture`. It exercises actual
 CALL bytecode and WAD17 CALLV bytecode, stack/heap argument boundaries, value

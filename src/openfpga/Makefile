@@ -408,6 +408,11 @@ collision-precise-fixture:
 collision-work-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/collision-work.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/runner.o $(filter %/src/runner.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_collision_work_fixture
 
+# Asset-free legacy grouping versus independent drawable ranks, including guards.
+.PHONY: drawable-order-fixture
+drawable-order-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/drawable-order.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/runner.o $(filter %/src/runner.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_drawable_order_fixture
+
 # Asset-free spatial membership/recovery and bounded-update-work checks.
 .PHONY: spatial-grid-fixture
 spatial-grid-fixture: $(PC_OBJS)
