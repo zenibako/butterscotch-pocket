@@ -408,9 +408,10 @@ SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr)
     uint32_t pageId = (uint32_t) swr->textureCount;
     if (!swrTexturePackHasFloweyBackdrop(pageId)) return NULL;
 
-    const TexturePageItem item = {
-        .sourceWidth = SWR_FLOWEY_BACKDROP_WIDTH, .sourceHeight = SWR_FLOWEY_BACKDROP_HEIGHT
-    };
+    TexturePageItem item;
+    ZERO_STRUCT(item);
+    item.sourceWidth = SWR_FLOWEY_BACKDROP_WIDTH;
+    item.sourceHeight = SWR_FLOWEY_BACKDROP_HEIGHT;
     uint64_t start = nowNanos();
     SwrTexturePackStats stats;
     swrTexturePackTakeStats(&stats);
@@ -439,7 +440,11 @@ SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, i
         finishTextureLoad(start);
         return NULL;
     }
-    *texture = (SWTexture) { .buffer = pixels, .width = (uint16_t) width, .height = (uint16_t) height, .solid = 2 };
+    ZERO_STRUCT(*texture);
+    texture->buffer = pixels;
+    texture->width = (uint16_t) width;
+    texture->height = (uint16_t) height;
+    texture->solid = 2;
     unsigned ms = finishTextureLoad(start);
     logInfo("SWR: Loaded baked Flowey stalk pose %u in %u ms\n", pose, ms);
     return texture;
