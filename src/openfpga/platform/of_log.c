@@ -159,6 +159,36 @@ bool ofLogDump(void) {
     return fclose(file) == 0 && ok;
 }
 
+const char *ofLogHeader(void) {
+    return OF_LOG_HEADER;
+}
+
+const char *ofLogQrText(size_t *len, bool *keepEnd) {
+    static const char endLine[] = "--- end of report ---";
+    const char *history = g_history, *stop = g_history + g_historyLen;
+    /* The last report: its title line, up to and with its end line. */
+    const char *found = NULL, *foundEnd = NULL;
+    for (const char *at = history; at + 4 <= stop; at++) {
+        if (memcmp(at, "=== ", 4) != 0 || (at != history && at[-1] != '\n')) continue;
+        const char *end = at;
+        while (end + sizeof(endLine) - 1 <= stop && memcmp(end, endLine, sizeof(endLine) - 1) != 0) end++;
+        if (end + sizeof(endLine) - 1 > stop) break; /* not finished: no later one is either */
+        end += sizeof(endLine) - 1;
+        if (end < stop && *end == '\n') end++;
+        found = at;
+        foundEnd = end;
+        at = end - 1;
+    }
+    if (found != NULL) {
+        *len = (size_t) (foundEnd - found);
+        *keepEnd = false;
+        return found;
+    }
+    *len = g_historyLen;
+    *keepEnd = true;
+    return history;
+}
+
 static void keepText(const char *text) {
     keepHistory(text);
     for (; *text != '\0'; text++) {
