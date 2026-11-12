@@ -809,12 +809,15 @@ bool ofPlatformShowLogAndHalt(void) {
      * of it gets the text off the Pocket without the SD card, and
      * tools/pq1-decode.py reads it back. After a fatal error the log comes
      * first, since the error can be read there; the QR code then holds the
-     * log's end. A switches between the two. */
+     * log's end. Any button switches between the two. */
     static OfQr qr;
     size_t qrLen = 0;
     bool keepEnd = false;
     const char *qrText = ofLogQrText(&qrLen, &keepEnd);
     bool showQr = !keepEnd, qrMade = false;
+    /* The code keeps below the corner label, clear of its quiet zone. */
+    int labelScale = ofFontScale(g_nextW);
+    int qrTop = ofFontLineHeight(labelScale) + 4 * labelScale;
 #ifdef OF_PC
     if (getenv("BS_DUMP_QR") != NULL) showQr = true;
     if (getenv("BS_DUMP_LOG") != NULL) showQr = false;
@@ -822,17 +825,18 @@ bool ofPlatformShowLogAndHalt(void) {
     for (;;) {
         if (showQr && !qrMade) {
             qrMade = true;
-            if (!ofQrMake(&qr, ofLogHeader(), qrText, qrLen, keepEnd, g_nextW, g_nextH))
+            if (!ofQrMake(&qr, ofLogHeader(), qrText, qrLen, keepEnd, g_nextW, g_nextH - qrTop))
                 ofLogPrint("QR code: could not be made\n");
         }
         g_nextFb = (uint16_t *) (void *) of_video_surface();
         swrFramebufferTouched();
         if (showQr && qr.size > 0) {
-            ofQrDraw(&qr, g_nextFb, g_nextW, g_nextH, g_nextW, 0x0000, 0x7FFF);
-            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "A: log");
+            for (int i = 0; i < qrTop * g_nextW; i++) g_nextFb[i] = 0x7FFF;
+            ofQrDraw(&qr, g_nextFb + qrTop * g_nextW, g_nextW, g_nextH - qrTop, g_nextW, 0x0000, 0x7FFF);
+            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "Any button: log");
         } else {
             ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
-            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "A: QR code");
+            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "Any button: QR code");
         }
 #ifdef OF_PC
         if (getenv("BS_DUMP_PATH") != NULL) writeFrameDump();
@@ -840,7 +844,8 @@ bool ofPlatformShowLogAndHalt(void) {
 #endif
         of_video_flip();
         of_input_poll();
-        if (of_btn_pressed(OF_BTN_A)) showQr = !showQr;
+        /* Any button: the Pocket's face buttons carry no letters. */
+        if (of_btn_pressed(0xFFFF)) showQr = !showQr;
         usleep(100000);
     }
 }

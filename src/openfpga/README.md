@@ -692,7 +692,7 @@ first NUL byte. Preserve the original file and use the shared collector's
 stale tail.
 
 **The log as a QR code.** A finished benchmark halts on a QR code of its
-report, and A switches between the code and the log. After a fatal error the
+report, and any button switches between the code and the log. After a fatal error the
 log comes first and the code holds the log's end. A phone photo of the code
 gets the text off the Pocket without the SD card:
 `tools/pq1-decode.py photo.jpg` prints it (it needs `pip install zxing-cpp
@@ -827,7 +827,7 @@ video-mode behavior or hardware audio behavior.
 The boot log stays on screen while loading, and every Butterscotch log line
 is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
-rebooting; A switches to a QR code of the log's end (see "The log as a QR code").
+rebooting; any button switches to a QR code of the log's end (see "The log as a QR code").
 
 A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`)
 logs three lines, kept short enough to fit the log overlay:
