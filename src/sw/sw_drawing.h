@@ -92,5 +92,9 @@ void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, 
 /* The same, for corners already in buffer coordinates, none NaN, with the indices of the first topmost and the first
  * bottommost corner (what swrFillConvexPolygon finds). */
 void swrFillTransformedConvex(Renderer* renderer, const float* px, const float* py, int count, int first, int last, uint32_t color, float alpha);
+/* Speed only (swrFavorSpeed): a small filled circle in room coordinates stamped from a kept pattern instead of filled
+ * as a polygon. False, having drawn nothing, when it does not apply. */
+bool swrFillSmallDot(Renderer* renderer, float cx, float cy, float rx, float ry, int segments,
+                     const float* unitCos, const float* unitSin, uint32_t color, float alpha);
 
 #endif//_SW_DRAWING_H

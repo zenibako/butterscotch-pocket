@@ -1107,6 +1107,8 @@ static void swrFilledEllipseShape(Renderer* renderer, float cx, float cy, float 
         }
         unitSegments = segments;
     }
+    if (col1 == col2 && rx != 0.0f && ry != 0.0f &&
+        swrFillSmallDot(renderer, cx, cy, rx, ry, segments, unitCos, unitSin, col1, renderer->drawAlpha)) return;
     if (col1 == col2 && rx != 0.0f && ry != 0.0f) {
         // swrFillConvexPolygon's first pass done here in one go, on each corner as it is worked out: the same
         // corners (the same expressions, so the same rounding), moved into the buffer by the same statements.

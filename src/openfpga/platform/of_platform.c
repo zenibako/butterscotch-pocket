@@ -257,13 +257,15 @@ void ofPlatformSetHiresAllowed(bool allowed) {
 static int32_t visibleWidth(Runner *runner);
 
 /* L's two settings. Accuracy draws everything as the game asks. Speed gives
- * up four things for time:
+ * up five things for time:
  *   - 640x480 rooms are drawn at 320x240 with 2x2 averaging;
  *   - mirrored blend layers too faint to move a 16-bit channel by more than
  *     one step are left out (swrMirrorFaintAlpha);
  *   - a stack of mirrored layers is worked out for every second pixel each
  *     way, and sprite draws at 8/256 opacity or less are left out
  *     (swrFavorSpeed);
+ *   - small filled circles (4 pixels across or less) are stamped from kept
+ *     patterns, which can move an edge pixel (swrFillSmallDot, swrFavorSpeed);
  *   - frames are skipped when the game is running behind (below).
  *
  * Frame skipping. Without it a scene that cannot be drawn in a frame's time

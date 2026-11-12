@@ -550,6 +550,11 @@ readability at half resolution. Both games use the shared sampler in
 assets and active battle context. Accuracy and non-battle screens keep their
 ordinary sampling.
 
+Speed mode stamps small filled circles (a radius of 4 pixels or less on the
+screen, such as the snow dots in room 57) from patterns kept for each
+sixteenth-of-a-pixel position, instead of filling each one as a polygon. An
+edge pixel of a dot can differ from Accuracy.
+
 In the Photoshop Flowey fight, Speed mode uses a static backdrop for the
 decorative pipes and layered background vines. The long attacking vines use
 the original artwork, with a sharp disappearance when they stop dealing damage.
