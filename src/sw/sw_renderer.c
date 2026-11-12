@@ -1107,15 +1107,30 @@ static void swrFilledEllipseShape(Renderer* renderer, float cx, float cy, float 
         }
         unitSegments = segments;
     }
+    if (col1 == col2 && rx != 0.0f && ry != 0.0f) {
+        // swrFillConvexPolygon's first pass done here in one go, on each corner as it is worked out: the same
+        // corners (the same expressions, so the same rounding), moved into the buffer by the same statements.
+        SWRenderer* swr = (SWRenderer*) renderer;
+        float px[65], py[65];
+        int first = 0, last = 0;
+        for (i = 0; segments >= i; i++) {
+            float x = i == 0 ? cx + rx : cx + rx * unitCos[i];
+            float y = i == 0 ? cy : cy + ry * unitSin[i];
+            swrTransformPosIfNeeded(swr, &x, &y);
+            if (!(x == x) || !(y == y)) return; // NaN
+            px[i] = x;
+            py[i] = y;
+            if (py[first] > y) first = i;
+            if (y > py[last]) last = i;
+        }
+        swrFillTransformedConvex(renderer, px, py, segments + 1, first, last, col1, renderer->drawAlpha);
+        return;
+    }
     xs[0] = cx + rx;
     ys[0] = cy;
     for (i = 1; segments >= i; i++) {
         xs[i] = cx + rx * unitCos[i];
         ys[i] = cy + ry * unitSin[i];
-    }
-    if (col1 == col2 && rx != 0.0f && ry != 0.0f) {
-        swrFillConvexPolygon(renderer, xs, ys, segments + 1, col1, renderer->drawAlpha);
-        return;
     }
     for (i = 1; segments >= i; i++)
         swrDrawTriangle(renderer, cx, cy, xs[i - 1], ys[i - 1], xs[i], ys[i], col1, col2, col2, renderer->drawAlpha);

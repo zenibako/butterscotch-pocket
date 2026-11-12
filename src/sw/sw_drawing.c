@@ -4810,24 +4810,29 @@ void swrDrawSpriteRotated(
 void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, int count, uint32_t color, float alpha)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
-    float px[65], py[65], slope[65];
-    float top, bottom;
-    int i, y, yStart, yEnd, blendmode, intAlpha, first, last;
-    bool chains = true;
-    uintpixel_t pixel;
+    float px[65], py[65];
+    int i, first = 0, last = 0;
     if (count < 3 || count > 65) return;
     for (i = 0; count > i; i++) {
         px[i] = xs[i];
         py[i] = ys[i];
         swrTransformPosIfNeeded(swr, &px[i], &py[i]);
         if (!(px[i] == px[i]) || !(py[i] == py[i])) return; // NaN
-    }
-    first = 0;
-    last = 0;
-    for (i = 0; count > i; i++) {
         if (py[first] > py[i]) first = i;
         if (py[i] > py[last]) last = i;
     }
+    swrFillTransformedConvex(renderer, px, py, count, first, last, color, alpha);
+}
+
+void swrFillTransformedConvex(Renderer* renderer, const float* px, const float* py, int count, int first, int last, uint32_t color, float alpha)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    float slope[65];
+    float top, bottom;
+    int i, y, yStart, yEnd, blendmode, intAlpha;
+    bool chains = true;
+    uintpixel_t pixel;
+    if (count < 3 || count > 65) return;
     top = py[first];
     bottom = py[last];
     // Rows whose centres y + 0.5 lie in [top, bottom), clipped as the triangle rasterizer clips rows.

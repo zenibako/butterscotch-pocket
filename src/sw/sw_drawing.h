@@ -89,5 +89,8 @@ void swrDrawSpriteRotated(Renderer* renderer, float dx, float dy, float dw, floa
 void swrDrawTriangle(Renderer* renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha);
 /* A convex polygon in room coordinates, filled in one colour by pixel centres (top-left rule). */
 void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, int count, uint32_t color, float alpha);
+/* The same, for corners already in buffer coordinates, none NaN, with the indices of the first topmost and the first
+ * bottommost corner (what swrFillConvexPolygon finds). */
+void swrFillTransformedConvex(Renderer* renderer, const float* px, const float* py, int count, int first, int last, uint32_t color, float alpha);
 
 #endif//_SW_DRAWING_H
