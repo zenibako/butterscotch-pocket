@@ -22,6 +22,24 @@ Ask once only for required information that cannot be established there:
   checkout through the local router above (including `POCKET_HARNESS_ROOT`).
   Simulated runs require its separate canonical `os25-harness` skill.
 
+## Reading a report from the halt-screen QR
+
+A finished benchmark halts on a QR code of its report; any button switches
+between the QR and the log text (a fatal error opens on the log, and its QR
+holds the log's end). A phone photo of the QR is valid evidence for that run's
+report, with no card trip. Decode it from the checkout root:
+
+```sh
+python3 src/openfpga/tools/pq1-decode.py photo.jpg
+```
+
+It prints the report text. The code holds `PQ1:` + base45 of a zlib stream,
+so a decode that succeeds passed zlib's checksum and is byte-exact. A report
+too large for one code ends with a "(cut for the QR code ...)" line; treat
+what it says was left out as unseen. Ask for the save file instead when
+earlier runs, the history check below or the full log matter. Screenshots of
+the log screen still don't count.
+
 ## Reading the log off the card
 
 Prefer the log file to screenshots: it is the whole log, not the last 21
