@@ -1321,8 +1321,12 @@ void Runner_draw(Runner* runner) {
                 }
                 int32_t layerTileCount = (int32_t) arrlen(layerTiles);
                 if (layerTileCount > 0) {
+                    // Copies are made afresh each frame and share addresses between layers, so only a run that
+                    // points straight into the room's tiles carries the promise drawTileRun's reuse relies on.
+                    runner->renderer->tileRunGeneration = arrlen(layerCopies) == 0 ? RoomTile_generation : 0;
                     bool taken = runner->renderer->vtable->drawTileRun != nullptr &&
                                  runner->renderer->vtable->drawTileRun(runner->renderer, layerTiles, layerOffsets, layerTileCount);
+                    runner->renderer->tileRunGeneration = 0;
                     if (!taken) {
                         repeat(layerTileCount, j)
                             Renderer_drawTile(runner->renderer, layerTiles[j], layerOffsets[j * 2], layerOffsets[j * 2 + 1]);
