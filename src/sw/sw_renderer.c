@@ -2988,6 +2988,8 @@ bool swrTileRunsFree(void)
     return freed;
 }
 
+// Only swrDrawTileRunCached's 16-bit path asks for a run's shape.
+#if PIXEL_SIZE == 16
 // What a run's tiles say about its picture: the key, the bounding box and the
 // first tile's origin, or that the run cannot be drawn from a picture.
 typedef struct {
@@ -3031,7 +3033,10 @@ static void swrTileRunShapeOf(const int32_t mode[2], RoomTile* const* tiles, con
         memcpy(words, relative, sizeof(relative));
         for (int w = 0; w < 9; w++) key = (key ^ words[w]) * BS_FNV64_PRIME;
     }
-    *out = (SWTileRunShape) { true, key, anchorX, anchorY, left, top, right, bottom };
+    out->usable = true;
+    out->key = key;
+    out->anchorX = anchorX; out->anchorY = anchorY;
+    out->left = left; out->top = top; out->right = right; out->bottom = bottom;
 }
 
 // The shapes of recent runs, for the runs the runner vouches for
@@ -3102,6 +3107,7 @@ static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile
     spare->lastUsed = swrTileShapeClock;
     spare->shape = *out;
 }
+#endif
 
 // Draws the run from its cached picture, building it first if need be. Returns false if the run cannot be drawn that way.
 static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const float* offsets, int32_t count)
