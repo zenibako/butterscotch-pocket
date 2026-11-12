@@ -1102,7 +1102,10 @@ void Runner_draw(Runner* runner) {
                     arrput(tileRunOffsets, runOffsetX);
                     arrput(tileRunOffsets, runOffsetY);
                 }
-                if (runner->renderer->vtable->drawTileRun(runner->renderer, tileRunTiles, tileRunOffsets, (int32_t) arrlen(tileRunTiles))) {
+                runner->renderer->tileRunGeneration = RoomTile_generation;
+                bool runDrawn = runner->renderer->vtable->drawTileRun(runner->renderer, tileRunTiles, tileRunOffsets, (int32_t) arrlen(tileRunTiles));
+                runner->renderer->tileRunGeneration = 0;
+                if (runDrawn) {
                     i = runEnd;
                     lastProcessedDrawKey = drawableKey(&runner->cachedDrawables[runEnd - 1]);
                     continue;
@@ -1762,6 +1765,7 @@ static void copyRoomViewToRuntimeView(RoomView* roomView, RuntimeView* runtimeVi
 }
 
 static void initRoom(Runner* runner, int32_t roomIndex) {
+    RoomTile_changed();
     DataWin* dataWin = runner->dataWin;
     require(roomIndex >= 0 && dataWin->room.count > (uint32_t) roomIndex);
 

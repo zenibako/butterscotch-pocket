@@ -2218,6 +2218,7 @@ static void applyPlain(Runner *r, const RunnerPlain *p) {
 }
 
 void Runner_snapshotApply(Runner *r, RunnerSnapshot *s) {
+    RoomTile_changed(); // room tile arrays and layer tiles are swapped in below
     if (!r || !s || s->applied) return;
     s->oldGlobal = r->vmContext->globalScopeInstance;
     s->oldInstances = r->instances; s->oldMaps = r->dsMapPool;
