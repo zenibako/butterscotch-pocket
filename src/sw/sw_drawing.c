@@ -3011,6 +3011,90 @@ bool swrFillCoversWhole(SWRenderer* swr, float x1, float y1, float x2, float y2)
     return x1i <= 0 && y1i <= 0 && x1i + xd >= swr->mainWidth && y1i + yd + 1 >= swr->mainHeight;
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+// A translucent one-colour fill of the main buffer, read through its dirty-tile
+// map (see SWDirtyBuffer): a tile nothing has marked since the buffer was last
+// cleared still holds the clear's colour, so the fill turns every pixel of it
+// into one colour, worked out once. That colour is written without reading the
+// tile, and nothing is done there at all when it is the colour already there
+// (a fade to black over a mostly black battle screen). Only the marked tiles
+// are read and blended, as swrDrawHLineInt does every pixel; both give each
+// pixel the same value. The rows are clipped as swrDrawHLineInt clips them.
+// Returns false, having drawn nothing, when the map cannot be relied on.
+static bool swrFillKnownTiles(SWRenderer* swr, int x1i, int y1i, int xd, int yd, uintpixel_t color, int alpha)
+{
+    SWDirtyBuffer* d = swr->dirty;
+    if (d == NULL || swr->dirtyMark != d || !d->known || swr->clearHeld || swr->baseMode != 0 ||
+        swr->fb != swr->mainFb || d->fb != swr->mainFb || swr->fbPitch != d->width ||
+        d->width != swr->mainWidth || d->height != swr->mainHeight ||
+        swr->maxX > d->width || swr->maxY > d->height || swr->portX < 0 || swr->portY < 0 ||
+        swr->blendMode != bm_normal || !swrIsPartialAlpha(alpha))
+        return false;
+    // Nothing to gain when every tile the fill reaches is marked: the plain rows then.
+    {
+        int top = swrMax(y1i, swr->portY), bottom = swrMin(y1i + yd, swr->maxY - 1);
+        int left = swrMax(x1i, swr->portX), right = swrMin(x1i + xd, swr->maxX);
+        if (top > bottom || left >= right) return false;
+        uint32_t span = swrDirtyMask(left, right);
+        bool anyKnown = false;
+        for (int r = top >> SWR_DIRTY_TILE_H_SHIFT; r <= bottom >> SWR_DIRTY_TILE_H_SHIFT && !anyKnown; r++)
+            anyKnown = ((d->rows[r] | d->baseRows[r]) & span) != span;
+        if (!anyKnown) return false;
+    }
+    uint32_t srcRedBlue = swrSpreadRedBlue(color) * (uint32_t) alpha;
+    uint32_t srcGreen = swrGreen(color) * (uint32_t) alpha;
+    uint32_t dstalpha = (uint32_t) (256 - alpha);
+    uintpixel_t known = d->color;
+    uintpixel_t onKnown = swrBlendPremultiplied(known, srcRedBlue, srcGreen, dstalpha);
+    bool changes = onKnown != known;
+    static int check = -1;
+    if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
+    for (int y = y1i; y <= y1i + yd; y++) {
+        if (y < swr->portY || y >= swr->maxY) continue;
+        int dx = x1i, dw = xd;
+        if (dx < swr->portX) { dw += dx - swr->portX; dx = swr->portX; }
+        if (dx + dw >= swr->maxX) dw = swr->maxX - dx;
+        if (dw <= 0) continue;
+        int end = dx + dw;
+        uintpixel_t* line = &swr->fb[y * swr->fbPitch];
+        uint32_t marked = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT] | d->baseRows[y >> SWR_DIRTY_TILE_H_SHIFT];
+        uint32_t span = swrDirtyMask(dx, end);
+        if ((marked & span) == span) {
+            swrDrawHLineInt((Renderer*) swr, dx, y, dw, color, color, alpha);
+            continue;
+        }
+        // Runs of whole tiles that are all marked or all known.
+        for (int x = dx; x < end; ) {
+            int tile = x >> SWR_DIRTY_TILE_W_SHIFT;
+            bool isMarked = (marked >> tile) & 1u;
+            int runEnd = (tile + 1) << SWR_DIRTY_TILE_W_SHIFT;
+            while (runEnd < end && (bool) ((marked >> (runEnd >> SWR_DIRTY_TILE_W_SHIFT)) & 1u) == isMarked)
+                runEnd += 1 << SWR_DIRTY_TILE_W_SHIFT;
+            if (runEnd > end) runEnd = end;
+            if (isMarked) {
+                // The row's own blend, as before (its clip and marks change nothing here).
+                swrDrawHLineInt((Renderer*) swr, x, y, runEnd - x, color, color, alpha);
+            } else {
+                if (check) {
+                    for (int i = x; i < runEnd; i++) {
+                        if (line[i] != known) {
+                            logError("swr: unmarked write at %d,%d under a fill: %04x, cleared to %04x\n", i, y,
+                                     (unsigned) line[i], (unsigned) known);
+                            abort();
+                        }
+                    }
+                }
+                if (changes) swrFillPixels(line + x, (size_t) (runEnd - x), onKnown);
+            }
+            x = runEnd;
+        }
+        // Tiles that still hold the clear's colour stay unmarked.
+        if (changes) swrDirtyRow(swr, y, dx, end);
+    }
+    return true;
+}
+#endif
+
 void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t pxcolor, float alpha)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -3078,6 +3162,9 @@ void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2
         return;
     }
     
+#ifdef SW_HAS_PREMUL_BLEND
+    if (!opaque && swrFillKnownTiles(swr, x1i, y1i, xd, yd, pxcolor, alphaInt)) return;
+#endif
     for (int y = 0; y <= yd; y++) {
         swrDrawHLineInt(renderer, x1i, y1i + y, xd, pxcolor, pxcolor, alphaInt);
     }
