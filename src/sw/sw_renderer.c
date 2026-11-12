@@ -18,6 +18,8 @@ void platformSetNextFramebuffer(uintpixel_t* framebuffer, int width, int height,
 
 static void swrFlushPendingClear(SWRenderer* swr);
 static int swrPendingCount = 0; // tile pictures being held (see the tile run cache)
+static SWRenderer* swrPendingOwner = NULL;
+static unsigned swrTileRunReaders; // grid replay can request texture-memory eviction
 
 // ===[ Call notes ]===
 // See sw_call_notes.h.
@@ -1424,6 +1426,15 @@ int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key)
     if (off || key == NULL || !swr->clearHeld || !swr->mainFb || swr->fb != swr->mainFb || swr->tiledHeldCount > 0 ||
         swrPendingCount > 0 || swrGridHeld() || swr->mirrorLayers != 0 || swr->mirrorStage != 0 || swr->overlayCount != 0 ||
         d == NULL || d->fb != swr->mainFb || d->width != swr->mainWidth || d->height != swr->mainHeight) {
+        // Settle in swrOverlayFlush's order, which the draw is about to call:
+        // held tile pictures first, so that a clear under them is written
+        // only in their gaps rather than in full and then copied over.
+        static int fold = -1;
+        if (fold < 0) fold = getenv("BS_NO_CLEAR_FOLD") == NULL;
+        if (fold && swr->clearHeld && swrPendingCount > 0 && swrTileRunReaders == 0) {
+            swrTileRunsFlush(swr);
+            swrGridFlush(swr);
+        }
         swrClearSettle(swr);
         return 0;
     }
@@ -2651,8 +2662,6 @@ static SWTileRun swrTileRuns[SWR_TILE_RUN_ENTRIES];
 // nothing under it can show.
 static SWTileRun* swrPendingRuns[SWR_TILE_RUN_ENTRIES]; // swrPendingCount, at the top of the file, counts them
 MAYBE_UNUSED static SWTileRun swrPendingPlacements[SWR_TILE_RUN_ENTRIES]; // immutable placement per queued draw
-static SWRenderer* swrPendingOwner = NULL;
-static unsigned swrTileRunReaders; // grid replay can request texture-memory eviction
 
 // The same pictures held together frame after frame are flattened into one,
 // so that the screen is gone over once and not once per layer. An entry with
