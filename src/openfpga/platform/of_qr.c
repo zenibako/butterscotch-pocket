@@ -91,8 +91,10 @@ bool ofQrMake(OfQr *qr, const char *header, const char *text, size_t len, bool k
     qr->total = len;
     bool noMemory = false;
 
-    /* Bigger modules first: they survive a blurred or slanted photo better. */
-    static const int layouts[][2] = { { 3, 4 }, { 3, 2 }, { 2, 4 }, { 2, 2 } };
+    /* Bigger modules first: they survive a blurred or slanted photo better.
+     * Always the standard four-module quiet zone: past the frame's edge is
+     * the Pocket's dark bezel. */
+    static const int layouts[][2] = { { 3, 4 }, { 2, 4 } };
     int count = (int) (sizeof(layouts) / sizeof(layouts[0]));
     if (len <= OF_QR_MAX_TEXT) {
         for (int i = 0; i < count; i++) {

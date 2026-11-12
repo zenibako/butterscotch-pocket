@@ -30,7 +30,8 @@ typedef struct {
 } OfQr;
 
 /* Makes the largest code that fits a width x height screen at 2 or more
- * pixels per module (3 when the whole text fits that way). If the whole text
+ * pixels per module (3 when the whole text fits that way), always with a
+ * four-module quiet zone. If the whole text
  * does not fit, the code holds as much as does from its start, or with
  * keepEnd from its end, and says so in a last line. header, if not NULL, is
  * put in front of the text and always kept. Returns false if nothing fits or
