@@ -15917,6 +15917,7 @@ static RValue builtin_tile_layer_hide(MAYBE_UNUSED VMContext* ctx, RValue* args,
     int32_t depth = RValue_toInt32(args[0]);
     TileLayerState* layer = getOrCreateTileLayer(runner, depth);
     layer->visible = false;
+    RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -15925,6 +15926,7 @@ static RValue builtin_tile_layer_show(MAYBE_UNUSED VMContext* ctx, RValue* args,
     int32_t depth = RValue_toInt32(args[0]);
     TileLayerState* layer = getOrCreateTileLayer(runner, depth);
     layer->visible = true;
+    RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -15936,6 +15938,7 @@ static RValue builtin_tile_layer_shift(MAYBE_UNUSED VMContext* ctx, RValue* args
     TileLayerState* layer = getOrCreateTileLayer(runner, depth);
     layer->offsetX += dx;
     layer->offsetY += dy;
+    RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -15969,7 +15972,9 @@ static RValue builtin_tile_add(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_
     tile->scaleY = 1.0f;
     tile->color = 0xFFFFFFFFu;
     tile->alpha = 1.0f;
+    RoomTile_changed();
     room->tileCount = newCount;
+    RoomTile_changed();
 
     runner->drawableListStructureDirty = true;
     return RValue_makeReal((GMLReal) newId);
@@ -16019,6 +16024,7 @@ static RValue builtin_tile_layer_depth(VMContext* ctx, RValue* args, MAYBE_UNUSE
         RoomTile* tile = &room->tiles[i];
         if (tile->tileDepth != depth) continue;
         tile->tileDepth = newdepth;
+        RoomTile_changed();
         runner->drawableListSortDirty = true;
     }
     return RValue_makeUndefined();
@@ -16039,6 +16045,7 @@ static RValue builtin_tile_layer_delete(VMContext* ctx, RValue* args, MAYBE_UNUS
     }
     room->tileCount = write;
     if (removedAny) runner->drawableListStructureDirty = true;
+    if (removedAny) RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -16067,6 +16074,7 @@ static RValue builtin_tile_layer_delete_at(VMContext* ctx, RValue* args, MAYBE_U
     }
     room->tileCount = write;
     if (removedAny) runner->drawableListStructureDirty = true;
+    if (removedAny) RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -16081,6 +16089,7 @@ static RValue builtin_tile_delete(VMContext* ctx, RValue* args, MAYBE_UNUSED int
         uint32_t tailLen = room->tileCount - i - 1;
         if (tailLen > 0) memmove(&room->tiles[i], &room->tiles[i + 1], tailLen * sizeof(RoomTile));
         room->tileCount--;
+        RoomTile_changed();
         runner->drawableListStructureDirty = true;
         return RValue_makeUndefined();
     }
@@ -16098,6 +16107,7 @@ static RValue builtin_tile_set_alpha(VMContext* ctx, RValue* args, MAYBE_UNUSED 
     repeat(room->tileCount, i) {
         if (room->tiles[i].instanceID != id) continue;
         room->tiles[i].alpha = alpha;
+        RoomTile_changed();
         return RValue_makeUndefined();
     }
     logWarn("VM: tile_set_alpha: tile does not exist (%u)\n", id);
@@ -16895,6 +16905,7 @@ static RValue builtin_layer_tile_create(VMContext* ctx, RValue* args, MAYBE_UNUS
     tile->scaleY = 1.0f;
     tile->color = 0xFFFFFF;
     tile->alpha = 1.0f;
+    RoomTile_changed();
 
     RuntimeLayerElement el = {0};
     el.id = Runner_getNextLayerId(runner);
@@ -16920,6 +16931,7 @@ static RValue builtin_layer_tile_destroy(VMContext* ctx, RValue* args, MAYBE_UNU
         free(el->tileElement);
         el->tileElement = nullptr;
         el->tileElementOwned = false;
+        RoomTile_changed();
     }
     size_t count = arrlenu(owningLayer->elements);
     repeat(count, i) {
@@ -16937,6 +16949,7 @@ static RValue builtin_layer_tile_alpha(VMContext* ctx, RValue* args, MAYBE_UNUSE
     RuntimeLayerElement* el = Runner_findLayerElementById(runner, RValue_toInt32(args[0]), nullptr);
     if (el == nullptr || el->type != RuntimeLayerElementType_Tile || el->tileElement == nullptr) return RValue_makeUndefined();
     el->alpha = (float) RValue_toReal(args[1]);
+    RoomTile_changed();
     return RValue_makeUndefined();
 }
 
@@ -16949,15 +16962,19 @@ static RoomTile* findTileElement(Runner* runner, RValue idArg) {
 
 static RValue builtin_layer_tile_x(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
     RoomTile* tile = findTileElement(ctx->runner, args[0]);
-    if (tile != nullptr)
+    if (tile != nullptr) {
         tile->x = RValue_toInt32(args[1]);
+        RoomTile_changed();
+    }
     return RValue_makeUndefined();
 }
 
 static RValue builtin_layer_tile_y(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
     RoomTile* tile = findTileElement(ctx->runner, args[0]);
-    if (tile != nullptr)
+    if (tile != nullptr) {
         tile->y = RValue_toInt32(args[1]);
+        RoomTile_changed();
+    }
     return RValue_makeUndefined();
 }
 
@@ -17062,6 +17079,7 @@ static RValue builtin_layer_element_move(VMContext* ctx, RValue* args, MAYBE_UNU
 
     Runner_invalidateLayerElementLookup(runner);
     arrput(rl->elements, *el);
+    RoomTile_changed();
 
     size_t count = arrlenu(oldRl->elements);
     repeat(count, i) {
@@ -17081,6 +17099,7 @@ static RValue builtin_layer_tile_visible(VMContext* ctx, RValue* args, MAYBE_UNU
     RuntimeLayerElement* el = Runner_findLayerElementById(runner, id, nullptr);
     if (el == nullptr || el->type != RuntimeLayerElementType_Tile) return RValue_makeUndefined();
     el->visible = visible;
+    RoomTile_changed();
     return RValue_makeUndefined();
 }
 

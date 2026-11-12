@@ -1904,7 +1904,10 @@ static float tileAlphaFromColor(uint32_t color) {
     return alphaByte == 0 ? 1.0f : (float) alphaByte / 255.0f;
 }
 
+uint32_t RoomTile_generation = 1;
+
 static void readRoomTiles(BinaryReader* reader, DataWin* dw, Room* room) {
+    RoomTile_changed();
     uint32_t tileCount;
     uint32_t* tilePtrs = readPointerTable(reader, &tileCount);
     room->tileCount = tileCount;
@@ -1994,6 +1997,7 @@ static void readRoomLayers(BinaryReader* reader, DataWin* dw, Room* room) {
                 BinaryReader_seek(reader, legacyTilesPtr);
                 uint32_t *innerTilePtrs = readPointerTable(reader, &assets->legacyTileCount);
                 if (assets->legacyTileCount > 0) {
+                    RoomTile_changed();
                     assets->legacyTiles = (RoomTile *)safeMalloc(assets->legacyTileCount * sizeof(RoomTile));
                     repeat(assets->legacyTileCount, k) {
                         BinaryReader_seek(reader, innerTilePtrs[k]);
@@ -3714,6 +3718,7 @@ void DataWin_free(DataWin* dw) {
 
 void DataWin_freeRoomPayload(Room* room) {
     requireNotNull(room);
+    RoomTile_changed();
     free(room->backgrounds);
     room->backgrounds = nullptr;
     free(room->views);

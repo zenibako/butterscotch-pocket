@@ -611,6 +611,16 @@ typedef struct {
     float alpha;
 } RoomTile;
 
+// Bumped by everything that writes a room's tiles (the RoomTile structs or the
+// storage they live in): room loads and frees, the tile_* and layer_tile_*
+// functions, save state restores. A renderer told the generation for a run of
+// tiles (Renderer.tileRunGeneration) may reuse what it worked out from those
+// same tiles while it is unchanged. Never zero.
+extern uint32_t RoomTile_generation;
+static inline void RoomTile_changed(void) {
+    if (++RoomTile_generation == 0) RoomTile_generation = 1;
+}
+
 typedef enum 
 {
     RoomLayerType_Path = 0,

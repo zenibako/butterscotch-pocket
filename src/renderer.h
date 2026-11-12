@@ -280,6 +280,11 @@ struct Renderer {
     struct D3DState* d3d;
     float drawDepth;
     bool legacyTextureCoordinates;
+    // Set by the runner around a drawTileRun call whose tiles all live in the room's
+    // own tile array: RoomTile_generation at the time, so a renderer may reuse what
+    // it worked out from the same tiles and offsets while it is unchanged. Zero
+    // when there is no such promise (tiles copied for the call, or another caller).
+    uint32_t tileRunGeneration;
 };
 
 // ===[ Shared Helpers (platform-agnostic) ]===

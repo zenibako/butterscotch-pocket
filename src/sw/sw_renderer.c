@@ -2988,6 +2988,121 @@ bool swrTileRunsFree(void)
     return freed;
 }
 
+// What a run's tiles say about its picture: the key, the bounding box and the
+// first tile's origin, or that the run cannot be drawn from a picture.
+typedef struct {
+    bool usable;
+    uint64_t key;
+    int anchorX, anchorY, left, top, right, bottom;
+} SWTileRunShape;
+
+static void swrTileRunShapeOf(const int32_t mode[2], RoomTile* const* tiles, const float* offsets, int32_t count, SWTileRunShape* out)
+{
+    int shift = mode[0];
+    memset(out, 0, sizeof(*out));
+    uint64_t key = BS_FNV64_OFFSET;
+    key = swrTileRunHash(key, mode, 2 * sizeof(int32_t));
+    int anchorX = swrFloor((float) tiles[0]->x + offsets[0]);
+    int anchorY = swrFloor((float) tiles[0]->y + offsets[1]);
+    int left = INT32_MAX, top = INT32_MAX, right = INT32_MIN, bottom = INT32_MIN;
+    for (int32_t t = 0; t < count; t++)
+    {
+        const RoomTile* tile = tiles[t];
+        if (tile->scaleX != 1.0f || tile->scaleY != 1.0f || tile->alpha < 1.0f) return;
+        
+        float exactLeft = (float) tile->x + offsets[t * 2], exactTop = (float) tile->y + offsets[t * 2 + 1];
+        int tileLeft = swrFloor(exactLeft);
+        int tileTop = swrFloor(exactTop);
+        // At half size a tile lands where it would on the screen only from an
+        // even position: from an odd one it moves a pixel as the view scrolls.
+        if (shift != 0 && ((float) tileLeft != exactLeft || (float) tileTop != exactTop || ((tileLeft | tileTop) & 1) != 0)) return;
+        if (tileLeft < left) left = tileLeft;
+        if (tileTop < top) top = tileTop;
+        if (tileLeft + (int) tile->width > right) right = tileLeft + (int) tile->width;
+        if (tileTop + (int) tile->height > bottom) bottom = tileTop + (int) tile->height;
+        
+        // Everything that decides what the tile looks like, a word at a time:
+        // this runs for every tile of the layer on every frame.
+        uint32_t words[9] = {
+            0, 0, (uint32_t) tile->useSpriteDefinition, (uint32_t) tile->backgroundDefinition,
+            (uint32_t) tile->sourceX, (uint32_t) tile->sourceY, (uint32_t) tile->color, tile->width, tile->height,
+        };
+        float relative[2] = { exactLeft - (float) anchorX, exactTop - (float) anchorY };
+        memcpy(words, relative, sizeof(relative));
+        for (int w = 0; w < 9; w++) key = (key ^ words[w]) * BS_FNV64_PRIME;
+    }
+    *out = (SWTileRunShape) { true, key, anchorX, anchorY, left, top, right, bottom };
+}
+
+// The shapes of recent runs, for the runs the runner vouches for
+// (Renderer.tileRunGeneration): while no room tile has been written, the same
+// tiles with the same offsets have the same shape, and comparing the pointers
+// and offsets costs much less than going over every tile.
+#define SWR_TILE_SHAPE_MEMOS 8
+typedef struct {
+    uint32_t generation;    // 0: unused
+    int32_t mode[2];
+    int32_t count, capacity;
+    RoomTile** tiles;
+    float* offsets;
+    uint32_t lastUsed;
+    SWTileRunShape shape;
+} SWTileShapeMemo;
+
+static SWTileShapeMemo swrTileShapeMemos[SWR_TILE_SHAPE_MEMOS];
+static uint32_t swrTileShapeClock;
+
+static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile** tiles, const float* offsets, int32_t count, SWTileRunShape* out)
+{
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_TILE_MEMO") != NULL;
+    if (off || generation == 0) { swrTileRunShapeOf(mode, tiles, offsets, count, out); return; }
+    ++swrTileShapeClock;
+    size_t pointerBytes = (size_t) count * sizeof(RoomTile*), offsetBytes = (size_t) count * 2 * sizeof(float);
+    SWTileShapeMemo* spare = &swrTileShapeMemos[0];
+    for (int m = 0; m < SWR_TILE_SHAPE_MEMOS; m++) {
+        SWTileShapeMemo* memo = &swrTileShapeMemos[m];
+        if (memo->generation == generation && memo->count == count && memo->mode[0] == mode[0] && memo->mode[1] == mode[1] &&
+            memo->tiles[0] == tiles[0] && memcmp(memo->tiles, tiles, pointerBytes) == 0 &&
+            memcmp(memo->offsets, offsets, offsetBytes) == 0) {
+            memo->lastUsed = swrTileShapeClock;
+            *out = memo->shape;
+            static int check = -1;
+            if (check < 0) check = getenv("BS_CHECK_TILE_MEMO") != NULL;
+            if (check) {
+                // Every reuse checked against the tiles themselves.
+                static uint32_t hits;
+                SWTileRunShape fresh;
+                swrTileRunShapeOf(mode, tiles, offsets, count, &fresh);
+                require(fresh.usable == out->usable && fresh.key == out->key && fresh.anchorX == out->anchorX &&
+                        fresh.anchorY == out->anchorY && fresh.left == out->left && fresh.top == out->top &&
+                        fresh.right == out->right && fresh.bottom == out->bottom);
+                if (++hits % 300 == 1) logInfo("swr: tile run shape reused %u times, each checked\n", hits);
+            }
+            return;
+        }
+        if (memo->generation != generation) { if (spare->generation == generation || memo->lastUsed < spare->lastUsed) spare = memo; }
+        else if (spare->generation == generation && memo->lastUsed < spare->lastUsed) spare = memo;
+    }
+    swrTileRunShapeOf(mode, tiles, offsets, count, out);
+    if (spare->capacity < count) {
+        RoomTile** grownTiles = (RoomTile**) realloc(spare->tiles, pointerBytes);
+        if (grownTiles == NULL) { spare->generation = 0; return; }
+        spare->tiles = grownTiles;
+        float* grownOffsets = (float*) realloc(spare->offsets, offsetBytes);
+        if (grownOffsets == NULL) { spare->generation = 0; spare->capacity = 0; return; }
+        spare->offsets = grownOffsets;
+        spare->capacity = count;
+    }
+    memcpy(spare->tiles, tiles, pointerBytes);
+    memcpy(spare->offsets, offsets, offsetBytes);
+    spare->generation = generation;
+    spare->mode[0] = mode[0]; spare->mode[1] = mode[1];
+    spare->count = count;
+    spare->lastUsed = swrTileShapeClock;
+    spare->shape = *out;
+}
+
 // Draws the run from its cached picture, building it first if need be. Returns false if the run cannot be drawn that way.
 static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const float* offsets, int32_t count)
 {
@@ -3006,40 +3121,15 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     else if (swr->scaleX == 0.5f && swr->scaleY == 0.5f) shift = 1;
     else return false;
     
-    uint64_t key = BS_FNV64_OFFSET;
     int32_t mode[2] = { shift, swrFavorSpeed ? 1 : 0 };
-    key = swrTileRunHash(key, mode, sizeof(mode));
-    int anchorX = swrFloor((float) tiles[0]->x + offsets[0]);
-    int anchorY = swrFloor((float) tiles[0]->y + offsets[1]);
-    int left = INT32_MAX, top = INT32_MAX, right = INT32_MIN, bottom = INT32_MIN;
+    SWTileRunShape shape;
     SWR_NOTE_START(keyNote);
-    for (int32_t t = 0; t < count; t++)
-    {
-        const RoomTile* tile = tiles[t];
-        if (tile->scaleX != 1.0f || tile->scaleY != 1.0f || tile->alpha < 1.0f) return false;
-        
-        float exactLeft = (float) tile->x + offsets[t * 2], exactTop = (float) tile->y + offsets[t * 2 + 1];
-        int tileLeft = swrFloor(exactLeft);
-        int tileTop = swrFloor(exactTop);
-        // At half size a tile lands where it would on the screen only from an
-        // even position: from an odd one it moves a pixel as the view scrolls.
-        if (shift != 0 && ((float) tileLeft != exactLeft || (float) tileTop != exactTop || ((tileLeft | tileTop) & 1) != 0)) return false;
-        if (tileLeft < left) left = tileLeft;
-        if (tileTop < top) top = tileTop;
-        if (tileLeft + (int) tile->width > right) right = tileLeft + (int) tile->width;
-        if (tileTop + (int) tile->height > bottom) bottom = tileTop + (int) tile->height;
-        
-        // Everything that decides what the tile looks like, a word at a time:
-        // this runs for every tile of the layer on every frame.
-        uint32_t words[9] = {
-            0, 0, (uint32_t) tile->useSpriteDefinition, (uint32_t) tile->backgroundDefinition,
-            (uint32_t) tile->sourceX, (uint32_t) tile->sourceY, (uint32_t) tile->color, tile->width, tile->height,
-        };
-        float relative[2] = { exactLeft - (float) anchorX, exactTop - (float) anchorY };
-        memcpy(words, relative, sizeof(relative));
-        for (int w = 0; w < 9; w++) key = (key ^ words[w]) * BS_FNV64_PRIME;
-    }
+    swrTileRunShape(renderer->tileRunGeneration, mode, tiles, offsets, count, &shape);
     SWR_NOTE_END(keyNote, "  of which: tile run key");
+    if (!shape.usable) return false;
+    uint64_t key = shape.key;
+    int anchorX = shape.anchorX, anchorY = shape.anchorY;
+    int left = shape.left, top = shape.top, right = shape.right, bottom = shape.bottom;
     
     // The picture starts on a block boundary, so that the pictures of a room share one grid of blocks.
     left = swrFloorToStep(left, SWR_TILE_RUN_BLOCK << shift);
