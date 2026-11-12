@@ -3,6 +3,9 @@
  * then the Draw event a few times, in the interpreter and as the native, from
  * the same start, and compares every array cell (value, type and stack type),
  * xx and yy, global.flag[64], the random state and the opcodes run. The
+ * native runs twice: with the script profiler on, which counts its opcodes
+ * and makes it call the random/floor built-ins, and with it off, as in play,
+ * where it works random numbers out itself (snowRoll). The
  * renderer is absent, so draw_circle draws nothing here; frame comparisons
  * cover the drawing. Pass data.win to the fixture. */
 #include "of_game.h"
@@ -59,7 +62,7 @@ static void record(Outcome *out, int at, RValue value) {
     out->stackTypes[at] = value.gmlStackType;
 }
 
-static Outcome run(DataWin *dw, int scenario, bool native) {
+static Outcome run(DataWin *dw, int scenario, bool native, bool profiled) {
     int drawCode = find(dw, drawEvent, true), createCode = find(dw, createEvent, true);
     int snowObject = find(dw, "obj_snowfloor", false), playerObject = find(dw, "obj_mainchara", false);
     VMContext *vm = VM_create(dw);
@@ -121,7 +124,7 @@ static Outcome run(DataWin *dw, int scenario, bool native) {
         ofNativeInstall(&r);
         require(vm->nativeCode != NULL && vm->nativeCode[drawCode] != NULL);
     }
-    Profiler_setEnabled(&vm->profiler, true);
+    if (profiled) Profiler_setEnabled(&vm->profiler, true);
     Random before = r.random;
     for (int n = 0; n < DRAWS; n++) {
         RValue result = VM_executeCode(vm, drawCode, self, NULL, snowObject, EVENT_DRAW, 0, NULL, 0);
@@ -130,7 +133,7 @@ static Outcome run(DataWin *dw, int scenario, bool native) {
 
     Outcome out;
     memset(&out, 0, sizeof(out));
-    out.ops = shget(vm->profiler->entries, (char *) drawEvent).ops;
+    out.ops = profiled ? shget(vm->profiler->entries, (char *) drawEvent).ops : 0;
     out.before = before;
     out.random = r.random;
     for (int a = 0; a < ARRAYS; a++) {
@@ -170,11 +173,15 @@ int main(int argc, char **argv) {
     for (int i = 0; i < SCENARIO_COUNT; i++) {
         DataWin *dw = DataWin_parse(argv[1], opts);
         require(dw != NULL);
-        Outcome a = run(dw, i, false);
+        Outcome a = run(dw, i, false, true);
         DataWin_free(dw);
         dw = DataWin_parse(argv[1], opts);
         require(dw != NULL);
-        Outcome b = run(dw, i, true);
+        Outcome b = run(dw, i, true, true);
+        DataWin_free(dw);
+        dw = DataWin_parse(argv[1], opts);
+        require(dw != NULL);
+        Outcome c = run(dw, i, true, false);
         DataWin_free(dw);
         if (i == NO_PLAYER || i == SHARED_ARRAY) require(a.ops == b.ops && b.ops > 0);
         else require(a.ops > 0 && b.ops == 0);
@@ -187,8 +194,13 @@ int main(int argc, char **argv) {
         require(!memcmp(a.types, b.types, sizeof(a.types)));
         require(!memcmp(a.stackTypes, b.stackTypes, sizeof(a.stackTypes)));
         require(!memcmp(&a.random, &b.random, sizeof(a.random)));
+        /* The unprofiled native, as in play. */
+        require(!memcmp(a.values, c.values, sizeof(a.values)));
+        require(!memcmp(a.types, c.types, sizeof(a.types)));
+        require(!memcmp(a.stackTypes, c.stackTypes, sizeof(a.stackTypes)));
+        require(!memcmp(&a.random, &c.random, sizeof(a.random)));
         printf("snowfloor scenario %d: ops %llu interpreted, %llu native\n", i, (unsigned long long) a.ops, (unsigned long long) b.ops);
     }
-    puts("PASS: snow dots, types, flag, random state, fallback and opcode counts");
+    puts("PASS: snow dots, types, flag, random state, fallback and opcode counts, profiled and unprofiled");
     return 0;
 }
