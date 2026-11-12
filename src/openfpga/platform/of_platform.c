@@ -805,27 +805,31 @@ bool ofPlatformShowLogAndHalt(void) {
     g_nextW = width;
     g_nextH = height;
 
-    /* A toggles a QR code of the report (or of the log's end, after a fatal
-     * error): a phone photo of it gets the text off the Pocket without the
-     * SD card. tools/pq1-decode.py reads it back. */
+    /* A finished benchmark opens on a QR code of its report: a phone photo
+     * of it gets the text off the Pocket without the SD card, and
+     * tools/pq1-decode.py reads it back. After a fatal error the log comes
+     * first, since the error can be read there; the QR code then holds the
+     * log's end. A switches between the two. */
     static OfQr qr;
-    bool showQr = false, qrMade = false;
+    size_t qrLen = 0;
+    bool keepEnd = false;
+    const char *qrText = ofLogQrText(&qrLen, &keepEnd);
+    bool showQr = !keepEnd, qrMade = false;
 #ifdef OF_PC
-    showQr = getenv("BS_DUMP_QR") != NULL;
+    if (getenv("BS_DUMP_QR") != NULL) showQr = true;
+    if (getenv("BS_DUMP_LOG") != NULL) showQr = false;
 #endif
     for (;;) {
         if (showQr && !qrMade) {
             qrMade = true;
-            size_t len = 0;
-            bool keepEnd = false;
-            const char *text = ofLogQrText(&len, &keepEnd);
-            if (!ofQrMake(&qr, ofLogHeader(), text, len, keepEnd, g_nextW, g_nextH))
+            if (!ofQrMake(&qr, ofLogHeader(), qrText, qrLen, keepEnd, g_nextW, g_nextH))
                 ofLogPrint("QR code: could not be made\n");
         }
         g_nextFb = (uint16_t *) (void *) of_video_surface();
         swrFramebufferTouched();
         if (showQr && qr.size > 0) {
             ofQrDraw(&qr, g_nextFb, g_nextW, g_nextH, g_nextW, 0x0000, 0x7FFF);
+            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "A: log");
         } else {
             ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
             ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "A: QR code");
