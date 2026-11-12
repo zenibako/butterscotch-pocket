@@ -2,6 +2,7 @@
 #define OF_OF_PERF_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Frame-time and log overlays. Call ofPerfFrame once per presented frame, before the
@@ -49,6 +50,11 @@ const char *ofLogLastError(void);
 const char *ofLogLoadSummary(void);
 /* The loader's "phases: alloc ..., read ..., parse ..., free ..." totals. */
 const char *ofLogLoadPhases(void);
+/* What the report screen's QR code holds: this run's last whole benchmark
+ * report, or if there is none the log so far (*keepEnd true: its end matters). */
+const char *ofLogQrText(size_t *len, bool *keepEnd);
+/* The line every run's log starts with in the log file. */
+const char *ofLogHeader(void);
 
 /* The fallback log font, before the game's font is ready: a 6x12 cell. */
 #define OF_LOG_CELL_W 6

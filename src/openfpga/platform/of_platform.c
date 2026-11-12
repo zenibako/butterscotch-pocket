@@ -25,6 +25,7 @@
 #include "of_font.h"
 #include "of_loading.h"
 #include "of_menu.h"
+#include "of_qr.h"
 #include "of_strings.h"
 #include "of_native.h"
 #include "of_state_requests.h"
@@ -804,16 +805,38 @@ bool ofPlatformShowLogAndHalt(void) {
     g_nextW = width;
     g_nextH = height;
 
+    /* A toggles a QR code of the report (or of the log's end, after a fatal
+     * error): a phone photo of it gets the text off the Pocket without the
+     * SD card. tools/pq1-decode.py reads it back. */
+    static OfQr qr;
+    bool showQr = false, qrMade = false;
+#ifdef OF_PC
+    showQr = getenv("BS_DUMP_QR") != NULL;
+#endif
     for (;;) {
+        if (showQr && !qrMade) {
+            qrMade = true;
+            size_t len = 0;
+            bool keepEnd = false;
+            const char *text = ofLogQrText(&len, &keepEnd);
+            if (!ofQrMake(&qr, ofLogHeader(), text, len, keepEnd, g_nextW, g_nextH))
+                ofLogPrint("QR code: could not be made\n");
+        }
         g_nextFb = (uint16_t *) (void *) of_video_surface();
         swrFramebufferTouched();
-        ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
+        if (showQr && qr.size > 0) {
+            ofQrDraw(&qr, g_nextFb, g_nextW, g_nextH, g_nextW, 0x0000, 0x7FFF);
+        } else {
+            ofPerfDrawLogScreen(g_nextFb, g_nextW, g_nextH);
+            ofPerfDrawMode(g_nextFb, g_nextW, g_nextH, "A: QR code");
+        }
 #ifdef OF_PC
         if (getenv("BS_DUMP_PATH") != NULL) writeFrameDump();
         exit(0);
 #endif
         of_video_flip();
         of_input_poll();
+        if (of_btn_pressed(OF_BTN_A)) showQr = !showQr;
         usleep(100000);
     }
 }

@@ -86,7 +86,7 @@ BS_VENDOR_SRCS = $(wildcard $(BS_VENDOR)/bzip2/*.c) \
                  $(BS_VENDOR)/sha1/sha1.c $(BS_VENDOR)/md5/md5.c \
                  $(BS_VENDOR)/base64/base64.c \
                  $(BS_VENDOR)/miniz/miniz.c $(BS_VENDOR)/miniz/miniz_tdef.c $(BS_VENDOR)/miniz/miniz_tinfl.c \
-                 $(BS_VENDOR)/zstd/zstd.c
+                 $(BS_VENDOR)/zstd/zstd.c $(BS_VENDOR)/qrcodegen/qrcodegen.c
 # Box2D physics is left out (ENABLE_PHYSICS off): Undertale does not use it.
 BS_PHYSICS_SRCS = $(BS_SRC)/physics/physics.c $(BS_SRC)/physics/disabled/physics_disabled.c
 
@@ -94,7 +94,7 @@ SRCS = main.c platform/game_$(GAME).c platform/of_platform.c platform/of_diag.c 
        platform/of_perf.c platform/of_audio_system.c platform/of_pack_read.c platform/of_bench.c platform/of_bench_scene.c \
        platform/of_strings.c platform/of_buttons.c platform/of_gamepad.c platform/of_save_fs.c platform/of_native.c platform/of_focus.c platform/of_focus_stats.c \
        platform/of_font.c platform/debug_font.c platform/of_loading.c platform/of_menu.c platform/of_state_requests.c \
-       platform/of_snapshot_envelope.c \
+       platform/of_snapshot_envelope.c platform/of_qr.c \
        $(BS_CORE_SRCS) $(BS_SW_SRCS) $(BS_IMAGE_SRCS) \
        $(BS_VIDEO_SRCS) $(BS_STB_SRCS) $(BS_VENDOR_SRCS) $(BS_PHYSICS_SRCS)
 SRCS_CXX =
@@ -102,7 +102,7 @@ SRCS_CXX =
 BS_INCLUDES = -Iplatform -I$(BS_SRC) -I$(BS_SRC)/sw -I$(BS_SRC)/image -I$(BS_SRC)/video \
               -I$(BS_VENDOR)/stb/ds -I$(BS_VENDOR)/stb/image -I$(BS_VENDOR)/stb/vorbis \
               -I$(BS_VENDOR)/bzip2 -I$(BS_VENDOR)/sha1 -I$(BS_VENDOR)/md5 \
-              -I$(BS_VENDOR)/base64 -I$(BS_VENDOR)/miniz -I$(BS_VENDOR)/zstd
+              -I$(BS_VENDOR)/base64 -I$(BS_VENDOR)/miniz -I$(BS_VENDOR)/zstd -I$(BS_VENDOR)/qrcodegen
 
 # Undertale v1.08 is WAD 16; building only that version shrinks the
 # interpreter hot path. The CPU's FPU is single-precision, so GML reals are
