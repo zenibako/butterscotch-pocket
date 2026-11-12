@@ -40,6 +40,13 @@ void SWRenderer_setContrastEnabled(Renderer* renderer, bool enabled);
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer);
 void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active);
 void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer);
+/* Whether a filled draw_circle/draw_ellipse with this centre and these radii would put nothing on the target: it
+ * lies wholly outside, beyond a pixel's margin. False for any renderer but this one. Such a call still settles held
+ * layers, so a caller may leave one out only when a draw since the last thing held has done that already. */
+bool SWRenderer_filledEllipseOutside(Renderer* renderer, float cx, float cy, float rx, float ry);
+/* Renderer_drawCircle(renderer, cx, cy, radius, false) less the settling of held layers, for a caller that knows a
+ * draw since the last thing held has settled them already. False, having drawn nothing, for any renderer but this. */
+bool SWRenderer_drawFilledCircleSettled(Renderer* renderer, float cx, float cy, float radius);
 // The renderer clears a platform display buffer only where it drew since that
 // buffer's last clear. A platform that writes into one of those buffers itself
 // (an overlay, a menu, a copy) calls this, so the next clear is a whole one.

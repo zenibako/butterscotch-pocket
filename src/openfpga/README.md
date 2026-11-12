@@ -123,6 +123,9 @@ make call-later-fixture WADS="16 17" # checks deferred script/method/builtin cal
 make physics-contact-fixture WADS="16 17" # checks collision callback self/other and inheritance
 make tile-shift-fixture GAME=deltarune # compares the guarded native with supplied real bytecode
 make flowey-pipes-fixture     # checks full-resolution Speed fallback with supplied Undertale bytecode
+make snowfloor-fixture        # builds ./undertale_pc_snowfloor_fixture: the snow patch Draw native against
+                              # Undertale's bytecode, profiled and unprofiled. Run it from here with
+                              # ./undertale_pc_snowfloor_fixture games/undertale/data.win
 make asan       # desktop binary with ASan + UBSan: ./undertale_pc_asan
                 # (GAME=deltarune: ./deltarune_pc, ./deltarune_pc_asan)
 make copy       # copy the core to a mounted Pocket SD card
@@ -549,6 +552,11 @@ readability at half resolution. Both games use the shared sampler in
 assets and active battle context. Accuracy and non-battle screens keep their
 ordinary sampling.
 
+Speed mode stamps small filled circles (a radius of 4 pixels or less on the
+screen, such as the snow dots in room 57) from patterns kept for each
+sixteenth-of-a-pixel position, instead of filling each one as a polygon. An
+edge pixel of a dot can differ from Accuracy.
+
 In the Photoshop Flowey fight, Speed mode uses a static backdrop for the
 decorative pipes and layered background vines. The long attacking vines use
 the original artwork, with a sharp disappearance when they stop dealing damage.
@@ -724,6 +732,19 @@ mode limiter and adaptive draw skipping. The report shows gameplay updates
 per wall-clock second, display submissions, and skipped draws for each
 section. The `drawn` and `skip` rows give average work, limiter wait, and
 total milliseconds per update. Full speed is 30 updates per second.
+
+`--bench-snow` measures room 57 (`room_tundra_snowpuzz`, the room with the
+"Dog Marriage" sign), whose snow patch draws and tests 400 dots a frame. It
+jumps there from the intro, turns random encounters off, and reports 300
+frames standing with the patch out of view (`stand`), a walk down through the
+patch and back (`walk`), and 180 frames standing with it in view (`near`).
+`--bench-snow-smooth` is the same route in Speed mode. Each window checks
+for the room and its `obj_snowfloor` instances. It skips the post-run probes.
+Its report adds a `natives` table: milliseconds per frame inside the snow
+patch's native Draw event (timed on the detail frames only), and its collision
+tests per frame with how many were answered without calling `collision_circle`,
+and the parts of that time spent drawing the dots (`draw`, which includes the held
+tile pictures the first circle lets out) and inside `collision_circle` (`collide`).
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:

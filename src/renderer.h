@@ -157,6 +157,9 @@ typedef struct {
     void (*drawRectangleColor)(Renderer* renderer, float x1, float y1, float x2, float y2, uint32_t color1, uint32_t color2, uint32_t color3, uint32_t color4, float alpha, bool outline);
     void (*drawLine)(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uint32_t color, float alpha);
     void (*drawTriangle)(Renderer *renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha, bool outline);
+    // Optional: draw_circle/draw_ellipse filled, exactly as Renderer_drawEllipseColor's triangle fan would draw it with
+    // "segments" segments (already normalized). nullptr = the fan of drawTriangle calls.
+    void (*drawFilledEllipse)(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments);
     void (*drawLineColor)(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uint32_t color1, uint32_t color2, float alpha);
     void (*drawText)(Renderer* renderer, const char* text, float x, float y, float xscale, float yscale, float angleDeg, float lineSeparation);
     void (*drawTextColor)(Renderer* renderer, const char* text, float x, float y, float xscale, float yscale, float angleDeg, int32_t c1, int32_t c2, int32_t c3, int32_t c4, float alpha, float lineSeparation);
@@ -822,6 +825,11 @@ static inline int32_t Renderer_normalizeCirclePrecision(int32_t precision) {
 static inline void Renderer_drawEllipseColor(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, bool outline) {
     int32_t segments = Renderer_normalizeCirclePrecision(renderer->circlePrecision);
     if (4 > segments) segments = 4;
+
+    if (!outline && renderer->vtable->drawFilledEllipse != nullptr) {
+        renderer->vtable->drawFilledEllipse(renderer, cx, cy, rx, ry, col1, col2, segments);
+        return;
+    }
 
     float step = 6.2831853f / (float) segments;
     float prevX = cx + rx;

@@ -4802,6 +4802,193 @@ void swrDrawSpriteRotated(
     );
 }
 
+// Fills a convex polygon of up to 65 corners, given in room coordinates, by the pixel-centre rule: a pixel is
+// drawn when its centre is inside, an edge counting as inside on the top and left (half-open in both directions),
+// so the pixels of shapes that share an edge are drawn once. One pass of horizontal spans, each pixel blended once.
+// Used for filled circles and ellipses, which the triangle fan rasterizer drew with gaps: its triangles leave out the
+// row through a centre that lies exactly on a pixel row, and seams where neighbouring triangles round apart.
+void swrFillConvexPolygon(Renderer* renderer, const float* xs, const float* ys, int count, uint32_t color, float alpha)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    float px[65], py[65];
+    int i, first = 0, last = 0;
+    if (count < 3 || count > 65) return;
+    for (i = 0; count > i; i++) {
+        px[i] = xs[i];
+        py[i] = ys[i];
+        swrTransformPosIfNeeded(swr, &px[i], &py[i]);
+        if (!(px[i] == px[i]) || !(py[i] == py[i])) return; // NaN
+        if (py[first] > py[i]) first = i;
+        if (py[i] > py[last]) last = i;
+    }
+    swrFillTransformedConvex(renderer, px, py, count, first, last, color, alpha);
+}
+
+// ===[ Stamped dots (speed only) ]===
+// With swrFavorSpeed set, a small filled circle (at most SWR_DOT_MAX_RADIUS pixels on the screen) is not worked out as
+// a polygon each time. The pixels a circle covers depend only on its radius and where its centre falls within a
+// pixel; that offset is rounded to an eighth of a pixel each way, and the rows the exact fill would draw for a circle
+// centred in the middle of that eighth are worked out once and kept. A dot is then stamped from them. It differs from
+// the exact fill only for a centre close enough to an eighth's edge to move an edge pixel. Room 57's snow patch draws
+// 400 dots of radius 2.8 a frame.
+#define SWR_DOT_MAX_RADIUS 4.0f
+#define SWR_DOT_STEPS 16
+#define SWR_DOT_ROWS 12
+typedef struct { int8_t dy, x0, x1; } SWDotSpan;
+typedef struct { bool ready; uint8_t count; SWDotSpan spans[SWR_DOT_ROWS]; } SWDotPattern;
+static SWDotPattern swrDots[SWR_DOT_STEPS][SWR_DOT_STEPS];
+static float swrDotRadius = -1.0f;
+static int swrDotSegments = -1;
+
+// The rows swrFillTransformedConvex would fill for this circle, with no clipping, relative to (16, 16).
+static void swrDotBuild(SWDotPattern* pattern, float cx, float cy, float r, int segments, const float* unitCos, const float* unitSin)
+{
+    float px[65], py[65];
+    int i, y, first = 0, last = 0, count = segments + 1;
+    pattern->count = 0;
+    pattern->ready = true;
+    for (i = 0; count > i; i++) {
+        px[i] = i == 0 ? cx + r : cx + r * unitCos[i];
+        py[i] = i == 0 ? cy : cy + r * unitSin[i];
+        if (py[first] > py[i]) first = i;
+        if (py[i] > py[last]) last = i;
+    }
+    // Every edge is tested on every row: the crossings the fill's walk down the sides finds.
+    for (y = swrCeiling(py[first] - 0.5f); swrCeiling(py[last] - 0.5f) > y; y++) {
+        float centre = (float) y + 0.5f, left = 0.0f, right = 0.0f;
+        bool crossed = false;
+        for (i = 0; count > i; i++) {
+            int next = i + 1 == count ? 0 : i + 1;
+            float a = py[i], b = py[next], at;
+            if (!((a <= centre && centre < b) || (b <= centre && centre < a))) continue;
+            at = px[i] + (centre - a) * ((px[next] - px[i]) / (py[next] - py[i]));
+            if (!crossed) { left = right = at; crossed = true; }
+            else if (left > at) left = at;
+            else if (at > right) right = at;
+        }
+        if (!crossed) continue;
+        int x0 = swrCeiling(left - 0.5f), x1 = swrCeiling(right - 0.5f);
+        if (x0 >= x1 || pattern->count == SWR_DOT_ROWS) continue;
+        pattern->spans[pattern->count].dy = (int8_t) (y - 16);
+        pattern->spans[pattern->count].x0 = (int8_t) (x0 - 16);
+        pattern->spans[pattern->count].x1 = (int8_t) (x1 - 16);
+        pattern->count++;
+    }
+}
+
+bool swrFillSmallDot(Renderer* renderer, float cx, float cy, float rx, float ry, int segments,
+                     const float* unitCos, const float* unitSin, uint32_t color, float alpha)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (!swrFavorSpeed || rx != ry || !(swr->scaleX > 0.0f) || swr->scaleX != swr->scaleY) return false;
+    float r = (rx < 0.0f ? -rx : rx) * swr->scaleX;
+    if (!(r > 0.0f && r <= SWR_DOT_MAX_RADIUS)) return false;
+    swrTransformPosIfNeeded(swr, &cx, &cy);
+    if (!(cx > -16384.0f && cx < 16384.0f && cy > -16384.0f && cy < 16384.0f)) return false;
+    if (r != swrDotRadius || segments != swrDotSegments) {
+        memset(swrDots, 0, sizeof(swrDots));
+        swrDotRadius = r;
+        swrDotSegments = segments;
+    }
+    int ix = swrFloor(cx), iy = swrFloor(cy);
+    int qx = (int) ((cx - (float) ix) * SWR_DOT_STEPS), qy = (int) ((cy - (float) iy) * SWR_DOT_STEPS);
+    if (qx < 0) qx = 0;
+    if (qx > SWR_DOT_STEPS - 1) qx = SWR_DOT_STEPS - 1;
+    if (qy < 0) qy = 0;
+    if (qy > SWR_DOT_STEPS - 1) qy = SWR_DOT_STEPS - 1;
+    SWDotPattern* pattern = &swrDots[qy][qx];
+    if (!pattern->ready)
+        swrDotBuild(pattern, 16.0f + ((float) qx + 0.5f) / SWR_DOT_STEPS, 16.0f + ((float) qy + 0.5f) / SWR_DOT_STEPS,
+                    r, segments, unitCos, unitSin);
+    int blendmode = swr->blendMode, intAlpha = swrIntAlpha(alpha);
+    uintpixel_t pixel = swrConvertPixel(color);
+    for (int s = 0; pattern->count > s; s++) {
+        int y = iy + pattern->spans[s].dy;
+        int x0 = ix + pattern->spans[s].x0, x1 = ix + pattern->spans[s].x1;
+        if (y < 0 || y >= swr->height) continue;
+        if (x0 < swr->portX) x0 = swr->portX;
+        if (x1 > swr->maxX) x1 = swr->maxX;
+        if (x0 >= x1) continue;
+        uintpixel_t* line = &swr->fb[y * swr->width];
+        swrDirtyRow(swr, y, x0, x1);
+        for (int x = x0; x1 > x; x++) alphaBlend(&line[x], pixel, blendmode, intAlpha);
+    }
+    return true;
+}
+
+void swrFillTransformedConvex(Renderer* renderer, const float* px, const float* py, int count, int first, int last, uint32_t color, float alpha)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    float slope[65];
+    float top, bottom;
+    int i, y, yStart, yEnd, blendmode, intAlpha;
+    bool chains = true;
+    uintpixel_t pixel;
+    if (count < 3 || count > 65) return;
+    top = py[first];
+    bottom = py[last];
+    // Rows whose centres y + 0.5 lie in [top, bottom), clipped as the triangle rasterizer clips rows.
+    if (top - 0.5f > (float) swr->height || 0.0f > bottom - 0.5f) return;
+    yStart = top - 0.5f > 0.0f ? swrCeiling(top - 0.5f) : 0;
+    yEnd = (float) swr->height > bottom - 0.5f ? swrCeiling(bottom - 0.5f) : swr->height;
+    // Each row's crossings are one edge on each side. When y never falls along either side going down from the top
+    // corner (always, unless rounding has bent the outline), those two edges are found by walking down the sides,
+    // rather than by testing every edge on every row: the same edges, so the same pixels.
+    for (i = first; last != i; i = i + 1 == count ? 0 : i + 1)
+        if (py[i] > py[i + 1 == count ? 0 : i + 1]) chains = false;
+    for (i = first; last != i; i = i == 0 ? count - 1 : i - 1)
+        if (py[i] > py[i == 0 ? count - 1 : i - 1]) chains = false;
+    // An edge's slope is worked out once, when a row first needs it (divisions are dear on the device).
+    for (i = 0; count > i; i++) {
+        int next = i + 1 == count ? 0 : i + 1;
+        if (!chains) slope[i] = py[next] != py[i] ? (px[next] - px[i]) / (py[next] - py[i]) : 0.0f;
+    }
+    blendmode = swr->blendMode;
+    intAlpha = swrIntAlpha(alpha);
+    pixel = swrConvertPixel(color);
+    int down = first, up = first; // edges down..down+1 and up-1..up (indices wrap)
+    int downSlope = -1, upSlope = -1; // the edges whose slopes are in slope[]
+    for (y = yStart; yEnd > y; y++) {
+        float centre = (float) y + 0.5f;
+        float left = 0.0f, right = 0.0f;
+        bool crossed = false;
+        int x, x0, x1;
+        if (chains) {
+            int next = down + 1 == count ? 0 : down + 1, prev = up == 0 ? count - 1 : up - 1;
+            float a, b;
+            while (down != last && centre >= py[next]) { down = next; next = down + 1 == count ? 0 : down + 1; }
+            while (up != last && centre >= py[prev]) { up = prev; prev = up == 0 ? count - 1 : up - 1; }
+            if (down == last || up == last) continue;
+            if (downSlope != down) { slope[down] = (px[next] - px[down]) / (py[next] - py[down]); downSlope = down; }
+            if (upSlope != prev) { slope[prev] = (px[up] - px[prev]) / (py[up] - py[prev]); upSlope = prev; }
+            a = px[down] + (centre - py[down]) * slope[down];
+            b = px[prev] + (centre - py[prev]) * slope[prev];
+            left = a > b ? b : a;
+            right = a > b ? a : b;
+            crossed = true;
+        } else {
+            for (i = 0; count > i; i++) {
+                int next = i + 1 == count ? 0 : i + 1;
+                float a = py[i], b = py[next], at;
+                if (!((a <= centre && centre < b) || (b <= centre && centre < a))) continue;
+                at = px[i] + (centre - a) * slope[i];
+                if (!crossed) { left = right = at; crossed = true; }
+                else if (left > at) left = at;
+                else if (at > right) right = at;
+            }
+        }
+        if (!crossed) continue;
+        // Columns whose centres x + 0.5 lie in [left, right).
+        if (left - 0.5f >= (float) swr->maxX || (float) swr->portX > right - 0.5f) continue;
+        x0 = left - 0.5f > (float) swr->portX ? swrCeiling(left - 0.5f) : swr->portX;
+        x1 = (float) swr->maxX > right - 0.5f ? swrCeiling(right - 0.5f) : swr->maxX;
+        if (x0 >= x1) continue;
+        uintpixel_t* line = &swr->fb[y * swr->width];
+        swrDirtyRow(swr, y, x0, x1);
+        for (x = x0; x1 > x; x++) alphaBlend(&line[x], pixel, blendmode, intAlpha);
+    }
+}
+
 void swrDrawTriangle(Renderer* renderer, float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color1, uint32_t color2, uint32_t color3, float alpha)
 {
     SWRenderer* swr = (SWRenderer*) renderer;

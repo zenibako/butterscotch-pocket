@@ -147,6 +147,16 @@ int swrCallNotesTake(SWCallNote* out, int max, uint32_t* missed) { (void) out; (
 #define SWR_NOTED(what, statement) do { statement; } while (0)
 #endif
 
+// The same, for a stretch of code that a macro argument cannot hold: start
+// it with SWR_NOTE_START(name) and end it with SWR_NOTE_END(name, "what").
+#ifdef SW_DRAW_PROFILE
+#define SWR_NOTE_START(var) uint64_t var = swrCallNotes && swrDrawTimed ? nowNanos() : 0
+#define SWR_NOTE_END(var, what) do { if (var != 0) swrNote(nowNanos() - var, what); } while (0)
+#else
+#define SWR_NOTE_START(var) do { } while (0)
+#define SWR_NOTE_END(var, what) do { } while (0)
+#endif
+
 // Partial clears (see SWDirtyBuffer). Bumped by swrFramebufferTouched: a
 // buffer last known under an older generation is not known any more.
 static uint32_t swrDirtyGeneration;
@@ -1051,6 +1061,103 @@ static void SWRenderer_drawTriangle(Renderer* renderer,
     {
         swrDrawTriangle(renderer, x1, y1, x2, y2, x3, y3, color1, color2, color3, alpha);
     }
+}
+
+// draw_circle and draw_ellipse, filled. The corners are those of Renderer_drawEllipseColor's polygon, worked out
+// from a cos/sin table kept for each precision (the same cosf and sinf of the same float angles) rather than for
+// every shape. A shape in one colour is filled as one convex polygon by pixel centres (swrFillConvexPolygon), which
+// leaves no gaps; the triangle fan the other renderers use left out the row through a centre on an exact pixel row,
+// so rows of small dots showed stripes. A shape shaded from centre to rim, or with no width or height, is still drawn
+// as that triangle fan. A shape wholly outside the target draws nothing (nothing either way can land beyond a
+// pixel's margin round its box), but still settles what is held (swrOverlayFlush), as a first triangle would have.
+// Whether a filled ellipse centred on (cx, cy) with these radii lies wholly outside the target, a pixel's margin
+// to spare: then neither the polygon nor the fan can put a pixel down (see SWRenderer_drawFilledEllipse).
+static bool swrFilledEllipseOutside(SWRenderer* swr, float cx, float cy, float rx, float ry)
+{
+    if (!(swr->scaleX > 0.0f && swr->scaleY > 0.0f)) return false;
+    float halfW = rx < 0.0f ? -rx : rx, halfH = ry < 0.0f ? -ry : ry;
+    float left = cx - halfW, top = cy - halfH, right = cx + halfW, bottom = cy + halfH;
+    swrTransformPosIfNeeded(swr, &left, &top);
+    swrTransformPosIfNeeded(swr, &right, &bottom);
+    return bottom < -1.0f || top > (float) swr->height + 1.0f || right < (float) swr->portX - 1.0f || left > (float) swr->maxX + 1.0f;
+}
+
+static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments);
+
+bool SWRenderer_filledEllipseOutside(Renderer* renderer, float cx, float cy, float rx, float ry)
+{
+    if (renderer == NULL || renderer->vtable->drawFilledEllipse != SWRenderer_drawFilledEllipse) return false;
+    return swrFilledEllipseOutside((SWRenderer*) renderer, cx, cy, rx, ry);
+}
+
+// The shape itself, once what is held has been settled and the shape is known to reach the target.
+static void swrFilledEllipseShape(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
+{
+    static float unitCos[65], unitSin[65];
+    static int32_t unitSegments = 0;
+    float xs[65], ys[65];
+    int32_t i;
+    if (segments < 4 || segments > 64) return;
+    if (unitSegments != segments) {
+        float step = 6.2831853f / (float) segments;
+        for (i = 1; segments >= i; i++) {
+            float angle = step * (float) i;
+            unitCos[i] = cosf(angle);
+            unitSin[i] = sinf(angle);
+        }
+        unitSegments = segments;
+    }
+    if (col1 == col2 && rx != 0.0f && ry != 0.0f &&
+        swrFillSmallDot(renderer, cx, cy, rx, ry, segments, unitCos, unitSin, col1, renderer->drawAlpha)) return;
+    if (col1 == col2 && rx != 0.0f && ry != 0.0f) {
+        // swrFillConvexPolygon's first pass done here in one go, on each corner as it is worked out: the same
+        // corners (the same expressions, so the same rounding), moved into the buffer by the same statements.
+        SWRenderer* swr = (SWRenderer*) renderer;
+        float px[65], py[65];
+        int first = 0, last = 0;
+        for (i = 0; segments >= i; i++) {
+            float x = i == 0 ? cx + rx : cx + rx * unitCos[i];
+            float y = i == 0 ? cy : cy + ry * unitSin[i];
+            swrTransformPosIfNeeded(swr, &x, &y);
+            if (!(x == x) || !(y == y)) return; // NaN
+            px[i] = x;
+            py[i] = y;
+            if (py[first] > y) first = i;
+            if (y > py[last]) last = i;
+        }
+        swrFillTransformedConvex(renderer, px, py, segments + 1, first, last, col1, renderer->drawAlpha);
+        return;
+    }
+    xs[0] = cx + rx;
+    ys[0] = cy;
+    for (i = 1; segments >= i; i++) {
+        xs[i] = cx + rx * unitCos[i];
+        ys[i] = cy + ry * unitSin[i];
+    }
+    for (i = 1; segments >= i; i++)
+        swrDrawTriangle(renderer, cx, cy, xs[i - 1], ys[i - 1], xs[i], ys[i], col1, col2, col2, renderer->drawAlpha);
+}
+
+static void SWRenderer_drawFilledEllipse(Renderer* renderer, float cx, float cy, float rx, float ry, uint32_t col1, uint32_t col2, int32_t segments)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr)) return;
+    swrOverlayFlush(swr);
+    if (swrFilledEllipseOutside(swr, cx, cy, rx, ry)) return;
+    swrFilledEllipseShape(renderer, cx, cy, rx, ry, col1, col2, segments);
+}
+
+bool SWRenderer_drawFilledCircleSettled(Renderer* renderer, float cx, float cy, float radius)
+{
+    if (renderer == NULL || renderer->vtable->drawFilledEllipse != SWRenderer_drawFilledEllipse) return false;
+    SWRenderer* swr = (SWRenderer*) renderer;
+    if (SWR_SKIPPED(swr)) return true;
+    if (swrFilledEllipseOutside(swr, cx, cy, radius, radius)) return true;
+    // What Renderer_drawCircle hands the hook: the draw colour twice, the normalized precision, at least 4.
+    int32_t segments = Renderer_normalizeCirclePrecision(renderer->circlePrecision);
+    if (4 > segments) segments = 4;
+    swrFilledEllipseShape(renderer, cx, cy, radius, radius, renderer->drawColor, renderer->drawColor, segments);
+    return true;
 }
 
 static void SWRenderer_drawLineColor(Renderer* renderer, float x1, float y1, float x2, float y2,
@@ -2807,13 +2914,16 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
         swrPendingCount = count;
     }
     
-    SWTileRun* flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL;
+    SWTileRun* flat;
+    SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL);
+    SWR_NOTE_START(copyNote);
     if (flat != NULL) {
         SWTileRun* const one[1] = { flat };
         swrRunsDrawOnto(one, 1, target, swr->fbPitch, left, top, width, height, under, false);
     } else {
         swrRunsDrawOnto(swrPendingRuns, swrPendingCount, target, swr->fbPitch, left, top, width, height, under, false);
     }
+    SWR_NOTE_END(copyNote, "  of which: tile pictures copied");
     
     // Grids held over the pictures come last.
     if (swrGrid.count > 0) {
@@ -2893,6 +3003,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     int anchorX = swrFloor((float) tiles[0]->x + offsets[0]);
     int anchorY = swrFloor((float) tiles[0]->y + offsets[1]);
     int left = INT32_MAX, top = INT32_MAX, right = INT32_MIN, bottom = INT32_MIN;
+    SWR_NOTE_START(keyNote);
     for (int32_t t = 0; t < count; t++)
     {
         const RoomTile* tile = tiles[t];
@@ -2919,6 +3030,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         memcpy(words, relative, sizeof(relative));
         for (int w = 0; w < 9; w++) key = (key ^ words[w]) * BS_FNV64_PRIME;
     }
+    SWR_NOTE_END(keyNote, "  of which: tile run key");
     
     // The picture starts on a block boundary, so that the pictures of a room share one grid of blocks.
     left = swrFloorToStep(left, SWR_TILE_RUN_BLOCK << shift);
@@ -2973,6 +3085,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         
         // Point the renderer at the picture, with a view that maps the run's
         // bounding box onto it, and draw the tiles the ordinary way.
+        SWR_NOTE_START(buildNote);
         SWRenderer saved = *swr;
         swr->fb = run->pixels;
         swr->fbPitch = (uint16_t) width;
@@ -2991,6 +3104,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         swr->maxX = saved.maxX; swr->maxY = saved.maxY;
         
         swrRunClassify(run);
+        SWR_NOTE_END(buildNote, "  of which: tile picture built");
     }
     run->lastUsedFrame = swr->frameCounter;
     
@@ -3559,6 +3673,7 @@ Renderer* SWRenderer_create(void)
     swrVtable.drawRectangleColor       = SWRenderer_drawRectangleColor;
     swrVtable.drawLine                 = SWRenderer_drawLine;
     swrVtable.drawTriangle             = SWRenderer_drawTriangle;
+    swrVtable.drawFilledEllipse        = SWRenderer_drawFilledEllipse;
     swrVtable.drawLineColor            = SWRenderer_drawLineColor;
     swrVtable.drawText                 = SWRenderer_drawText;
     swrVtable.drawTextColor            = SWRenderer_drawTextColor;
