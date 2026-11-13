@@ -535,17 +535,15 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
     g_liveLastPaceEnd = waitEnd;
     if (updateStart != 0)
         recordOpening(scriptUpdate, waitStart - updateStart, g_liveFramePending && !g_liveSkipped);
-    if (!g_liveFramePending) return;
+    /* An update that changed room never reached the swap (no frame pending), but
+     * its time is in the section's like any other, so it counts towards the
+     * longest update and the stalls; only swapped ones are drawn or skipped. */
+    bool swapped = g_liveFramePending;
     g_liveFramePending = false;
-    if (!ofPlatformSpeedMode()) ofDiagHalt("live pacing requires Speed mode");
+    if (swapped && !ofPlatformSpeedMode()) ofDiagHalt("live pacing requires Speed mode");
     if (runner->frameCount <= g_lastLiveUpdate) return;
     g_lastLiveUpdate = runner->frameCount;
-    if (g_frame != 0) {
-        LiveUpdateTimes *t = &g_liveSections[g_section].times[g_liveSkipped ? LIVE_SKIPPED : LIVE_DRAWN];
-        ++t->count;
-        t->workNanos += waitStart - updateStart;
-        t->waitNanos += waitEnd - waitStart;
-        g_liveSections[g_section].submitted += g_liveSubmitted;
+    if (g_frame != 0 && updateStart != 0) {
         uint64_t update = waitEnd - updateStart;
         if (update > g_liveSections[g_section].maxUpdateNanos) g_liveSections[g_section].maxUpdateNanos = update;
         if (update > LIVE_LONG_UPDATE_NANOS) ++g_liveSections[g_section].longUpdates;
@@ -553,6 +551,14 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
             ++g_liveSections[g_section].stalls;
             g_liveSections[g_section].stallNanos += update;
         }
+    }
+    if (!swapped) return;
+    if (g_frame != 0) {
+        LiveUpdateTimes *t = &g_liveSections[g_section].times[g_liveSkipped ? LIVE_SKIPPED : LIVE_DRAWN];
+        ++t->count;
+        t->workNanos += waitStart - updateStart;
+        t->waitNanos += waitEnd - waitStart;
+        g_liveSections[g_section].submitted += g_liveSubmitted;
         if (g_liveSubmitted) {
             /* A picture goes up at the end of its update's work. */
             if (g_liveLastShown != 0) {
