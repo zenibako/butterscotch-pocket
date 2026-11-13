@@ -168,6 +168,8 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
+        /* --read-log: every direct read of the texture pack and the music in the log, with what came before it. */
+        if (strcmp(argv[i], "--read-log") == 0) ofReadLogSetVerbose(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */
         if (strcmp(argv[i], "--sw-mixer") == 0) ofAudioUseSoftwareMixer(true);

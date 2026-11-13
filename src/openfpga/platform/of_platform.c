@@ -659,6 +659,9 @@ static void dumpFrameIfRequested(bool drawn) {
 #endif
 
 static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript) */
+int ofPlatformScriptFrame(void) {
+    return g_scriptFrame;
+}
 
 #ifdef OF_PC
 /* BS_FRAME_LOG=<file> (desktop) writes one line per drawn frame: frame,

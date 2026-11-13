@@ -70,6 +70,35 @@ static void packProbe(const char *path) {
     logInfo("SWR: %s is read directly, up to %u KB at a time.\n", path, (unsigned) (g_packPiece / 1024u));
 }
 
+/* The direct-read log (of_hooks.h). Reads never overlap: each reader waits for its
+ * read to finish, so "what came before" is simply the last read to finish. */
+static int g_readLast = -1;
+static uint64_t g_readLastEnd;
+static bool g_readVerbose;
+
+void ofReadLogSetVerbose(bool verbose) {
+    g_readVerbose = verbose;
+}
+
+void ofReadLogNote(int kind, uint32_t size, uint64_t refusedNanos, uint64_t waitNanos) {
+    uint64_t end = nowNanos();
+    uint64_t start = end - refusedNanos - waitNanos;
+    uint64_t since = g_readLastEnd != 0 && start > g_readLastEnd ? start - g_readLastEnd : 0;
+    int after = g_readLast < 0 || since > 50000000ull ? OF_READ_AFTER_IDLE
+              : g_readLast == OF_READLOG_TEX ? OF_READ_AFTER_TEX : OF_READ_AFTER_MUSIC;
+    ofBenchNoteRead(kind, after, refusedNanos + waitNanos);
+    if (g_readVerbose) {
+        static const char *const afterNames[] = { "tex", "music", "idle" };
+        unsigned refused = (unsigned) (refusedNanos / 100000u), wait = (unsigned) (waitNanos / 100000u);
+        unsigned gap = (unsigned) (since / 100000u);
+        logInfo("READ %s f%d %u B: refused %u.%u ms, wait %u.%u ms; after %s, %u.%u ms since\n",
+                kind == OF_READLOG_TEX ? "tex" : "music", ofPlatformScriptFrame(), (unsigned) size,
+                refused / 10, refused % 10, wait / 10, wait % 10, afterNames[after], gap / 10, gap % 10);
+    }
+    g_readLast = kind;
+    g_readLastEnd = end;
+}
+
 static bool packReadPiece(uint32_t offset, uint32_t size) {
     g_packDone = 0;
     g_packResult = 0;
@@ -78,7 +107,8 @@ static bool packReadPiece(uint32_t offset, uint32_t size) {
     while (of_file_read_async((int) g_packSlot, offset, g_packStage, size, packCallback) < 0) {
         if (nowNanos() - start > 50000000ull) return false;
     }
-    g_packRefusedNanos += nowNanos() - start;
+    uint64_t accepted = nowNanos();
+    g_packRefusedNanos += accepted - start;
     /* The poll is the OS's fallback for a lost interrupt. */
     while (!g_packDone && of_file_async_poll() != 1) {
         if (nowNanos() - start > OF_PACK_TIMEOUT_NANOS) {
@@ -91,6 +121,7 @@ static bool packReadPiece(uint32_t offset, uint32_t size) {
             return false;
         }
     }
+    ofReadLogNote(OF_READLOG_TEX, size, accepted - start, nowNanos() - accepted);
     return g_packResult >= 0;
 }
 
@@ -173,6 +204,14 @@ void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]) {
 
 uint64_t platformPackRefusedNanos(void) {
     return 0;
+}
+
+void ofReadLogSetVerbose(bool verbose) {
+    (void) verbose;
+}
+
+void ofReadLogNote(int kind, uint32_t size, uint64_t refusedNanos, uint64_t waitNanos) {
+    (void) kind; (void) size; (void) refusedNanos; (void) waitNanos;
 }
 
 bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *dest) {

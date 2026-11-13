@@ -81,6 +81,10 @@ int ofPlatformForcedSkip(void);
  * zero where reads are not direct. */
 enum { OF_READ_TEX_TEX, OF_READ_MUSIC_TEX, OF_READ_TEX_MUSIC, OF_READ_MUSIC_MUSIC, OF_READ_IDLE_TEX, OF_READ_FILE_TEX, OF_READ_COSTS };
 void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]);
+/* A direct read, for the live report's read table: kind as in OF_READLOG_*, and what came
+ * before it: OF_READ_AFTER_TEX or _MUSIC within 50 ms, otherwise _IDLE. */
+enum { OF_READ_AFTER_TEX, OF_READ_AFTER_MUSIC, OF_READ_AFTER_IDLE, OF_READ_AFTERS };
+void ofBenchNoteRead(int kind, int after, uint64_t nanos);
 /* What a call costs on this machine, in nanoseconds, each averaged over a few
  * thousand: reading the clock; a sprite draw on a skipped frame, which goes
  * through everything a draw does up to the first pixel and stops there; the
