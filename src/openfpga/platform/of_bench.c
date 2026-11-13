@@ -46,6 +46,12 @@ static struct {
     uint64_t readNanos[OF_READ_AFTERS + 1];
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_liveLastShown;
+/* Battle textures (ofBenchNotePrefetch, ofBenchNoteBattleLoads), live or not:
+ * items loaded ahead during encounters, and items battles still loaded at a draw. */
+static struct {
+    unsigned bursts, items, reads, loads;
+    uint64_t readNanos, nanos, loadNanos;
+} g_prefetchSections[OF_BENCH_MAX_SECTIONS];
 #define LIVE_LONG_UPDATE_NANOS 66666667ull
 #define LIVE_LONG_GAP_NANOS 100000000ull
 typedef struct {
@@ -357,6 +363,36 @@ void ofBenchNoteRead(int kind, int after, uint64_t nanos) {
     g_liveSections[g_section].readNanos[slot] += nanos;
 }
 
+void ofBenchNotePrefetch(unsigned items, unsigned reads, uint64_t readNanos, uint64_t nanos) {
+    if (!g_running || g_section >= OF_BENCH_MAX_SECTIONS) return;
+    ++g_prefetchSections[g_section].bursts;
+    g_prefetchSections[g_section].items += items;
+    g_prefetchSections[g_section].reads += reads;
+    g_prefetchSections[g_section].readNanos += readNanos;
+    g_prefetchSections[g_section].nanos += nanos;
+}
+
+void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos) {
+    if (!g_running || g_section >= OF_BENCH_MAX_SECTIONS) return;
+    g_prefetchSections[g_section].loads += items;
+    g_prefetchSections[g_section].loadNanos += nanos;
+}
+
+static void reportPrefetch(void) {
+    if (ofGame.battlePrefetch == NULL) return;
+    ofLogPrint("battle textures: loaded ahead in encounters (bursts, items, reads / mean ms, total ms);\n"
+               "loaded at a draw in battle (items, total ms)\n");
+    ofLogPrint("phase brst items  reads/mean  ahead-ms | drawn  ms\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        unsigned reads = g_prefetchSections[i].reads;
+        unsigned mean = reads ? (unsigned) (g_prefetchSections[i].readNanos / reads / 100000u) : 0;
+        ofLogPrint("%-5s %4u %5u %5u/%3u.%u %8u | %5u %4u\n", g_def.sections[i].tag, g_prefetchSections[i].bursts,
+                   g_prefetchSections[i].items, reads, mean / 10, mean % 10,
+                   (unsigned) (g_prefetchSections[i].nanos / 1000000u), g_prefetchSections[i].loads,
+                   (unsigned) (g_prefetchSections[i].loadNanos / 1000000u));
+    }
+}
+
 static void reportReads(void) {
     static const char *const names[OF_READ_AFTERS + 1] = { "tex<tex", "tex<mus", "tex<idle", "music" };
     ofLogPrint("direct reads: count / mean ms (tex<mus = texture read after a music read)\n");
@@ -507,6 +543,7 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
     ofLogPrint("%s\n", ofLogLoadPhases());
     if (g_def.livePacing) reportLive();
     else reportWork();
+    reportPrefetch();
     ofLogPrint("--- end of report ---\n"); /* ofLogDump keeps a report from its title to this line */
     ofLogDump();
     ofDiagHalt("benchmark finished");

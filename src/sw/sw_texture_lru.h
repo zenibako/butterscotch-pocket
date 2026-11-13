@@ -16,6 +16,18 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex);
 SWTexture* swrLoadPackedFloweyBackdrop(SWRenderer* swr);
 SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, int height);
 
+// Loads TPAG item `tpagIndex` as swrTextureForItem would on its first draw,
+// ahead of it (a battle's items while its encounter flashes). Only into free
+// room: it evicts nothing and leaves the heap's reserve, and an item already
+// there is left as it is. What is drawn does not change, only when items are read.
+typedef enum { SWR_PREFETCH_LOADED, SWR_PREFETCH_PRESENT, SWR_PREFETCH_SKIPPED, SWR_PREFETCH_FULL } SwrPrefetch;
+SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex);
+
+// Items swrTextureForItem has loaded for a draw since the last call, and the
+// time they took; the count starts again from zero.
+typedef struct { unsigned count; uint64_t nanos; } SwrItemLoads;
+void swrTakeItemLoads(SwrItemLoads* out);
+
 // Frees every per-item texture, e.g. before the renderer is destroyed.
 void swrFreeItemTextures(SWRenderer* swr);
 

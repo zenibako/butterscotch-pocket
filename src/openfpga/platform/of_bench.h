@@ -48,6 +48,7 @@ void ofPlatformSetSmoothLowres(bool enabled);
 /* Speed mode's battle size: every battle at full size (true) or every one at half size (false), instead of
  * the game's own choice per battle (ofGame.speedHalfBattle). --speed-full-battles / --speed-half-battles. */
 void ofPlatformSetSpeedFullBattles(bool full);
+void ofPlatformSetPrefetch(bool on);
 /* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
 const char *ofPlatformSpeedBattlesNote(void);
 /* Which way L's speed/accuracy setting is. */
@@ -85,6 +86,10 @@ void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]);
  * before it: OF_READ_AFTER_TEX or _MUSIC within 50 ms, otherwise _IDLE. */
 enum { OF_READ_AFTER_TEX, OF_READ_AFTER_MUSIC, OF_READ_AFTER_IDLE, OF_READ_AFTERS };
 void ofBenchNoteRead(int kind, int after, uint64_t nanos);
+/* A prefetch burst as its battle starts (items loaded ahead, their reads and
+ * time), and items a battle loaded at a draw instead; see prefetchCheck. */
+void ofBenchNotePrefetch(unsigned items, unsigned reads, uint64_t readNanos, uint64_t nanos);
+void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos);
 /* What a call costs on this machine, in nanoseconds, each averaged over a few
  * thousand: reading the clock; a sprite draw on a skipped frame, which goes
  * through everything a draw does up to the first pixel and stops there; the

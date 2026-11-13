@@ -3643,6 +3643,20 @@ void SWRenderer_setFloweySpeedAssets(Renderer* renderer)
     }
 }
 
+int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable) return SWR_PREFETCH_SKIPPED;
+    return (int) swrPrefetchItem((SWRenderer*) renderer, tpagIndex);
+}
+
+void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos)
+{
+    SwrItemLoads loads;
+    swrTakeItemLoads(&loads);
+    *count = loads.count;
+    *nanos = loads.nanos;
+}
+
 void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active)
 {
     ((SWRenderer*) renderer)->floweySpeedRoom = active;

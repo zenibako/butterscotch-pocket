@@ -168,6 +168,8 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
+        /* --no-prefetch: a battle's textures are read at their first draw, not during its encounter's flash. */
+        if (strcmp(argv[i], "--no-prefetch") == 0) ofPlatformSetPrefetch(false);
         /* --read-log: every direct read of the texture pack and the music in the log, with what came before it. */
         if (strcmp(argv[i], "--read-log") == 0) ofReadLogSetVerbose(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
