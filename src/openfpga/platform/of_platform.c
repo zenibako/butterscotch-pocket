@@ -419,6 +419,12 @@ static int32_t visibleWidth(Runner *runner) {
  * them at 320x240 loses nothing. Battles and menus use all 640x480 with small
  * fonts, and need the full resolution to stay legible. */
 static int g_speedFullBattles = -1; /* 1 all battles full size, 0 all half, -2 the game's choice; -1 not decided yet */
+const char *ofPlatformSpeedBattlesNote(void) {
+    if (!g_smoothLowres) return "";
+    if (g_speedFullBattles == 1) return ", battles at 640x480";
+    if (g_speedFullBattles == 0 || ofGame.speedHalfBattle == NULL) return ", battles at 320x240";
+    return g_speedFullBattles == -2 ? ", battles by list" : "";
+}
 void ofPlatformSetSpeedFullBattles(bool full) {
     g_speedFullBattles = full ? 1 : 0;
 }

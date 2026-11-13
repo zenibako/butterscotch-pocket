@@ -20,8 +20,8 @@ void ofBenchStart(void);
 bool ofBenchStartTour(bool livePacing);
 /* "--bench-battles-list 4,81,101": the battle tour visits these battles instead of its own (before ofBenchStartTour). */
 void ofBenchSetTourList(const char *list);
-/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
-bool ofBenchStartBulletTour(void);
+/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not); live pacing as for the battle tour. */
+bool ofBenchStartBulletTour(bool livePacing);
 /* "--bench-chaos-saber": the short Asriel encounter, if available. */
 bool ofBenchStartChaosSaber(void);
 /* The game's Flowey checkpoint tour, optionally with normal gameplay pacing. */
@@ -48,6 +48,8 @@ void ofPlatformSetSmoothLowres(bool enabled);
 /* Speed mode's battle size: every battle at full size (true) or every one at half size (false), instead of
  * the game's own choice per battle (ofGame.speedHalfBattle). --speed-full-battles / --speed-half-battles. */
 void ofPlatformSetSpeedFullBattles(bool full);
+/* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
+const char *ofPlatformSpeedBattlesNote(void);
 /* Which way L's speed/accuracy setting is. */
 bool ofPlatformSpeedMode(void);
 void ofSaveFsSetVolatile(bool enabled);

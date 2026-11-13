@@ -133,13 +133,15 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(tourSmooth || tourLive);
             if (!ofBenchStartTour(tourLive)) logWarn("Bench: this game has no battle tour\n");
         }
-        /* --bench-bullet-hell (accuracy) and --bench-bullet-hell-smooth (speed): the bullet tour. */
+        /* --bench-bullet-hell (accuracy), --bench-bullet-hell-smooth (speed) and --bench-bullet-hell-live (speed,
+         * paced as in play): the bullet tour. */
         bool bulletSmooth = strcmp(argv[i], "--bench-bullet-hell-smooth") == 0;
-        if (bulletSmooth || strcmp(argv[i], "--bench-bullet-hell") == 0) {
+        bool bulletLive = strcmp(argv[i], "--bench-bullet-hell-live") == 0;
+        if (bulletSmooth || bulletLive || strcmp(argv[i], "--bench-bullet-hell") == 0) {
             args.seed = 7;
             args.hasSeed = true;
-            ofPlatformSetSmoothLowres(bulletSmooth);
-            if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
+            ofPlatformSetSmoothLowres(bulletSmooth || bulletLive);
+            if (!ofBenchStartBulletTour(bulletLive)) logWarn("Bench: this game has no bullet-hell tour\n");
         }
         bool saberSmooth = strcmp(argv[i], "--bench-chaos-saber-smooth") == 0;
         if (saberSmooth || strcmp(argv[i], "--bench-chaos-saber") == 0) {

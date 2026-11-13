@@ -125,10 +125,10 @@ bool ofBenchStartTour(bool livePacing) {
     return true;
 }
 
-bool ofBenchStartBulletTour(void) {
+bool ofBenchStartBulletTour(bool livePacing) {
     if (ofGame.bulletScript == NULL) return false;
     benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
-               ofGame.bulletSections, ofGame.bulletSectionCount, true, false);
+               ofGame.bulletSections, ofGame.bulletSectionCount, true, livePacing);
     return true;
 }
 
@@ -432,8 +432,8 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
 #endif
     char drawn[40] = "";
     if (ofPlatformForcedSkip() > 0) snprintf(drawn, sizeof(drawn), ", drawing 1 frame in %d", ofPlatformForcedSkip());
-    ofLogPrint("=== %s benchmark, %s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
-               g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
+    ofLogPrint("=== %s benchmark, %s%s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
+               ofPlatformSpeedBattlesNote(), g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
 #ifndef OF_PC
     {
         /* Say which OS and bitstream this ran on; tables look alike otherwise. */

@@ -722,7 +722,8 @@ Mettaton EX and Asgore, 600 frames each from a Ruins room. `--bench-battles-list
 4,81,101` visits up to seven other battles (`global.battlegroup` values) the
 same way; the tour's own six replay it exactly. `--bench-battles-live` runs it
 in Speed with the limiter and adaptive draw skipping on, and reports as
-`--bench-flowey-live` does (see below).
+`--bench-flowey-live` does (see below); `--bench-bullet-hell-live` does the same
+for the bullet-hell tour.
 
 Undertale also has a bullet-hell tour: `--bench-bullet-hell` measures
 Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
