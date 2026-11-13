@@ -80,6 +80,13 @@ void ofReadLogSetVerbose(bool verbose) {
     g_readVerbose = verbose;
 }
 
+/* Music refills are frequent: logging each would fill the log's 160 KB in a
+ * run. The last few are kept and written out just before the next texture read,
+ * so the ones that come right before a texture read are in the log in full. */
+#define READLOG_MUSIC_KEPT 4
+static struct { int frame; uint32_t size; uint64_t refused, wait, end; } g_readMusic[READLOG_MUSIC_KEPT];
+static unsigned g_readMusicCount;
+
 void ofReadLogNote(int kind, uint32_t size, uint64_t refusedNanos, uint64_t waitNanos) {
     uint64_t end = nowNanos();
     uint64_t start = end - refusedNanos - waitNanos;
@@ -87,13 +94,29 @@ void ofReadLogNote(int kind, uint32_t size, uint64_t refusedNanos, uint64_t wait
     int after = g_readLast < 0 || since > 50000000ull ? OF_READ_AFTER_IDLE
               : g_readLast == OF_READLOG_TEX ? OF_READ_AFTER_TEX : OF_READ_AFTER_MUSIC;
     ofBenchNoteRead(kind, after, refusedNanos + waitNanos);
-    if (g_readVerbose) {
+    if (g_readVerbose && kind == OF_READLOG_MUSIC) {
+        unsigned slot = g_readMusicCount++ % READLOG_MUSIC_KEPT;
+        g_readMusic[slot].frame = ofPlatformScriptFrame();
+        g_readMusic[slot].size = size;
+        g_readMusic[slot].refused = refusedNanos;
+        g_readMusic[slot].wait = waitNanos;
+        g_readMusic[slot].end = end;
+    } else if (g_readVerbose) {
+        unsigned kept = g_readMusicCount < READLOG_MUSIC_KEPT ? g_readMusicCount : READLOG_MUSIC_KEPT;
+        for (unsigned i = g_readMusicCount - kept; i < g_readMusicCount; i++) {
+            unsigned slot = i % READLOG_MUSIC_KEPT;
+            unsigned wait = (unsigned) (g_readMusic[slot].wait / 100000u);
+            unsigned ago = (unsigned) ((start - g_readMusic[slot].end) / 100000u);
+            logInfo("READ music f%d %u B: wait %u.%u ms, ended %u.%u ms before the next texture read\n",
+                    g_readMusic[slot].frame, (unsigned) g_readMusic[slot].size, wait / 10, wait % 10, ago / 10, ago % 10);
+        }
+        g_readMusicCount = 0;
         static const char *const afterNames[] = { "tex", "music", "idle" };
         unsigned refused = (unsigned) (refusedNanos / 100000u), wait = (unsigned) (waitNanos / 100000u);
         unsigned gap = (unsigned) (since / 100000u);
-        logInfo("READ %s f%d %u B: refused %u.%u ms, wait %u.%u ms; after %s, %u.%u ms since\n",
-                kind == OF_READLOG_TEX ? "tex" : "music", ofPlatformScriptFrame(), (unsigned) size,
-                refused / 10, refused % 10, wait / 10, wait % 10, afterNames[after], gap / 10, gap % 10);
+        logInfo("READ tex f%d %u B: refused %u.%u ms, wait %u.%u ms; after %s, %u.%u ms since\n",
+                ofPlatformScriptFrame(), (unsigned) size, refused / 10, refused % 10, wait / 10, wait % 10,
+                afterNames[after], gap / 10, gap % 10);
     }
     g_readLast = kind;
     g_readLastEnd = end;
