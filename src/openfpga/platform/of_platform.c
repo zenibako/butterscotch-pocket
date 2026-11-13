@@ -997,18 +997,22 @@ static void createObject(const char *name) {
  * 6-10 ms back to back and 14-21 ms after a pause (2026-11-13, BsRead), and
  * Froggit's entry made 21 of them in one update. Where the game names the
  * items a starting battle will draw (battlePrefetch), they are loaded while
- * its encounter flashes instead: in the time each update would sleep, one
- * after another, so the update keeps its pace. Whatever is not loaded when
- * the battle starts is read at its first draw as before. Nothing drawn
+ * its encounter flashes instead, one after another: in each update's spare
+ * time and at least OF_PREFETCH_UPDATE_NANOS of it, so an update of the flash
+ * may run long. That only delays a frame of a still flash. (Spare time alone
+ * was too little on the Pocket: BsPre, 2026-11-13, loaded 1-2 items a battle.)
+ * Whatever is not loaded when the battle starts is read at its first draw as
+ * before. Nothing drawn
  * changes, only when the reads happen. --no-prefetch, or BS_PREFETCH=0 on
  * desktop, turns this off to compare. */
 #define OF_PREFETCH_MAX 128
-#define OF_PREFETCH_MARGIN_NANOS 8000000ull
+#define OF_PREFETCH_UPDATE_NANOS 25000000ull
+#define OF_PREFETCH_MARGIN_NANOS 2000000ull
 static int g_prefetchOn = -1; /* -1: not decided yet */
 static int16_t g_prefetchItems[OF_PREFETCH_MAX];
 static int g_prefetchCount, g_prefetchNext, g_prefetchBattle;
 static bool g_prefetchArmed = true;
-static struct { unsigned loaded, present, full, updates, reads; uint64_t nanos, readNanos, longest; } g_burst;
+static struct { unsigned loaded, present, full, updates, reads; uint64_t nanos, readNanos; } g_burst;
 
 void ofPlatformSetPrefetch(bool on) {
     g_prefetchOn = on;
@@ -1025,30 +1029,31 @@ static bool prefetchOn(void) {
 static void prefetchEnd(void) {
     if (g_prefetchCount == 0) return;
     unsigned ms = (unsigned) (g_burst.nanos / 1000000u);
-    logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room), %u reads, %u ms over %u updates\n",
-            g_prefetchBattle, g_burst.loaded, (unsigned) g_prefetchCount, g_burst.present, g_burst.full,
+    unsigned left = (unsigned) (g_prefetchCount - g_prefetchNext);
+    logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads, %u ms over %u updates\n",
+            g_prefetchBattle, g_burst.loaded, (unsigned) g_prefetchCount, g_burst.present, g_burst.full, left,
             g_burst.reads, ms, g_burst.updates);
-    ofBenchNotePrefetch(g_burst.loaded, g_burst.reads, g_burst.readNanos, g_burst.nanos);
+    ofBenchNotePrefetch(g_burst.loaded, g_burst.full, left, g_burst.updates, g_burst.reads, g_burst.readNanos, g_burst.nanos);
     g_prefetchCount = g_prefetchNext = 0;
 }
 
-/* Loads the next items until `until` is too near for another (or all of them
- * with `all`). */
+/* Loads the next items: at least one, then on while time is left before
+ * `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of them with `all`). */
 static void prefetchRun(uint64_t until, bool all) {
     if (g_prefetchNext >= g_prefetchCount || g_runner == NULL || g_runner->renderer == NULL) return;
     SwrTexturePackReadTotals before, after;
     swrTexturePackGetReadTotals(&before);
     uint64_t start = nowNanos();
     ++g_burst.updates;
+    uint64_t budgetEnd = start + OF_PREFETCH_UPDATE_NANOS;
+    if (until > OF_PREFETCH_MARGIN_NANOS && until - OF_PREFETCH_MARGIN_NANOS > budgetEnd) budgetEnd = until - OF_PREFETCH_MARGIN_NANOS;
+    bool first = true;
     while (g_prefetchNext < g_prefetchCount) {
-        uint64_t now = nowNanos();
-        uint64_t margin = g_burst.longest > OF_PREFETCH_MARGIN_NANOS ? g_burst.longest : OF_PREFETCH_MARGIN_NANOS;
-        if (!all && now + margin > until) break;
+        if (!all && !first && nowNanos() >= budgetEnd) break;
         int result = SWRenderer_prefetchItem(g_runner->renderer, g_prefetchItems[g_prefetchNext++]);
-        uint64_t took = nowNanos() - now;
         if (result == 0) {
             ++g_burst.loaded;
-            if (took > g_burst.longest) g_burst.longest = took;
+            first = false;
         } else if (result == 1) ++g_burst.present;
         else if (result == 3) ++g_burst.full;
     }

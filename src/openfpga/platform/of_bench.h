@@ -88,7 +88,8 @@ enum { OF_READ_AFTER_TEX, OF_READ_AFTER_MUSIC, OF_READ_AFTER_IDLE, OF_READ_AFTER
 void ofBenchNoteRead(int kind, int after, uint64_t nanos);
 /* A prefetch burst as its battle starts (items loaded ahead, their reads and
  * time), and items a battle loaded at a draw instead; see prefetchCheck. */
-void ofBenchNotePrefetch(unsigned items, unsigned reads, uint64_t readNanos, uint64_t nanos);
+void ofBenchNotePrefetch(unsigned items, unsigned noRoom, unsigned left, unsigned updates, unsigned reads,
+                         uint64_t readNanos, uint64_t nanos);
 void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos);
 /* What a call costs on this machine, in nanoseconds, each averaged over a few
  * thousand: reading the clock; a sprite draw on a skipped frame, which goes

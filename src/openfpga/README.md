@@ -549,8 +549,9 @@ keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
 
 In both modes, an Undertale battle's textures are read from the card while its
-encounter flashes ("!", the heart, about 1.5 s), in the time each update would
-otherwise sleep, instead of at their first draw in the battle. Its first frames
+encounter flashes ("!", the heart, about 1.5 s), instead of at their first draw
+in the battle: in each update's spare time and at least 25 ms of it, so an
+update of the still flash may run long. Its first frames
 then wait for few reads. The items each battle draws in its first 150 updates
 are in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
 tour over every `global.battlegroup`. Only free cache room is used, and nothing

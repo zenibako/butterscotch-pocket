@@ -49,7 +49,7 @@ static uint64_t g_liveLastShown;
 /* Battle textures (ofBenchNotePrefetch, ofBenchNoteBattleLoads), live or not:
  * items loaded ahead during encounters, and items battles still loaded at a draw. */
 static struct {
-    unsigned bursts, items, reads, loads;
+    unsigned bursts, items, noRoom, left, updates, reads, loads;
     uint64_t readNanos, nanos, loadNanos;
 } g_prefetchSections[OF_BENCH_MAX_SECTIONS];
 #define LIVE_LONG_UPDATE_NANOS 66666667ull
@@ -363,10 +363,14 @@ void ofBenchNoteRead(int kind, int after, uint64_t nanos) {
     g_liveSections[g_section].readNanos[slot] += nanos;
 }
 
-void ofBenchNotePrefetch(unsigned items, unsigned reads, uint64_t readNanos, uint64_t nanos) {
+void ofBenchNotePrefetch(unsigned items, unsigned noRoom, unsigned left, unsigned updates, unsigned reads,
+                         uint64_t readNanos, uint64_t nanos) {
     if (!g_running || g_section >= OF_BENCH_MAX_SECTIONS) return;
     ++g_prefetchSections[g_section].bursts;
     g_prefetchSections[g_section].items += items;
+    g_prefetchSections[g_section].noRoom += noRoom;
+    g_prefetchSections[g_section].left += left;
+    g_prefetchSections[g_section].updates += updates;
     g_prefetchSections[g_section].reads += reads;
     g_prefetchSections[g_section].readNanos += readNanos;
     g_prefetchSections[g_section].nanos += nanos;
@@ -380,14 +384,15 @@ void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos) {
 
 static void reportPrefetch(void) {
     if (ofGame.battlePrefetch == NULL) return;
-    ofLogPrint("battle textures: loaded ahead in encounters (bursts, items, reads / mean ms, total ms);\n"
-               "loaded at a draw in battle (items, total ms)\n");
-    ofLogPrint("phase brst items  reads/mean  ahead-ms | drawn  ms\n");
+    ofLogPrint("battle textures: loaded ahead in encounters (bursts, items, skipped for no room, not reached\n"
+               "by the battle's start, updates used, reads / mean ms, total ms); loaded at a draw in battle\n");
+    ofLogPrint("phase brst items room left upd  reads/mean  ahead-ms | drawn  ms\n");
     for (int i = 0; i < g_def.sectionCount; ++i) {
         unsigned reads = g_prefetchSections[i].reads;
         unsigned mean = reads ? (unsigned) (g_prefetchSections[i].readNanos / reads / 100000u) : 0;
-        ofLogPrint("%-5s %4u %5u %5u/%3u.%u %8u | %5u %4u\n", g_def.sections[i].tag, g_prefetchSections[i].bursts,
-                   g_prefetchSections[i].items, reads, mean / 10, mean % 10,
+        ofLogPrint("%-5s %4u %5u %4u %4u %3u %5u/%3u.%u %8u | %5u %4u\n", g_def.sections[i].tag, g_prefetchSections[i].bursts,
+                   g_prefetchSections[i].items, g_prefetchSections[i].noRoom, g_prefetchSections[i].left,
+                   g_prefetchSections[i].updates, reads, mean / 10, mean % 10,
                    (unsigned) (g_prefetchSections[i].nanos / 1000000u), g_prefetchSections[i].loads,
                    (unsigned) (g_prefetchSections[i].loadNanos / 1000000u));
     }
