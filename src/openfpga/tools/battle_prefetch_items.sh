@@ -22,7 +22,16 @@ groups="1,2,3,4,5,6,7 8,9,10,11,12,13,14 15,16,17,18,19,20,21 22,23,24,25,26,27,
 61,62,63,64,65,66,67 68,69,70,71,72,73,74 75,76,77,78,79,80,81 82,83,84,85,86,87,88
 89,90,91,92,93,94,95 100,101,120,121,122,123,124 125,126,127,128,129,130,131
 132,133,134,135,140,255,256"
-status=$(mktemp -d "${TMPDIR:-/tmp}/bsitems-status.XXXXXX")
+failed=0
+pids=""
+# Waits for the runs started so far; any that exited non-zero, setup failures
+# included, counts as failed.
+collect() {
+    for pid in $pids; do
+        wait "$pid" || failed=$((failed + 1))
+    done
+    pids=""
+}
 n=0
 for list in $groups; do
     n=$((n + 1))
@@ -38,12 +47,11 @@ for list in $groups; do
         rm -rf "$run"
         if [ $ok -eq 0 ]; then
             echo "run$n ($list) failed or did not finish; see $out/run$n.out" >&2
-            : > "$status/run$n.failed"
+            exit 1
         fi
     ) &
-    [ $((n % jobs)) -ne 0 ] || wait
+    pids="$pids $!"
+    [ $((n % jobs)) -ne 0 ] || collect
 done
-wait
-failed=$(ls "$status" | wc -l | tr -d ' ')
-rm -rf "$status"
+collect
 [ "$failed" -eq 0 ] || { echo "$failed run(s) failed" >&2; exit 1; }
