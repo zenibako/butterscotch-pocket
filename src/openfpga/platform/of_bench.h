@@ -45,6 +45,8 @@ bool ofPlatformShowLogAndHalt(void);
 void ofPlatformSetHiresAllowed(bool allowed);
 void ofPlatformSetSmoothLowres(bool enabled);
 /* Speed mode keeps battles at full size where the game allows it (speedFullResBattles); off by default. */
+/* Speed mode's battle size: every battle at full size (true) or every one at half size (false), instead of
+ * the game's own choice per battle (ofGame.speedHalfBattle). --speed-full-battles / --speed-half-battles. */
 void ofPlatformSetSpeedFullBattles(bool full);
 /* Which way L's speed/accuracy setting is. */
 bool ofPlatformSpeedMode(void);

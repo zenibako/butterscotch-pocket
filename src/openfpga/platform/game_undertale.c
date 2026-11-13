@@ -260,6 +260,35 @@ static bool battleUiActive(Runner *runner) {
     return enabled;
 }
 
+/* The battles Speed mode keeps at half size (speedHalfBattle): those estimated
+ * from the battle-tour measurements of 2026-11-13 to need more than a frame's
+ * 33 ms on the Pocket at full size, even drawing every other frame. They are
+ * global.battlegroup values. Battles in the other battle rooms (Flowey's) keep
+ * half size, as they had. */
+static const int16_t g_speedHalfBattles[] = {
+    2, 5, 6, 25, 31, 36, 41, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59, 60, 64, 65, 67, 68, 76, 77,
+    78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
+};
+
+static bool speedHalfBattle(Runner *runner) {
+    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
+        strcmp(runner->currentRoom->name, "room_battle") != 0)
+        return true;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return true;
+    static VMContext *idCtx;
+    static int32_t groupVar;
+    if (idCtx != ctx) {
+        groupVar = VM_getOrAllocateVarID(ctx, "battlegroup");
+        idCtx = ctx;
+    }
+    RValue group = Instance_getSelfVar(ctx->globalScopeInstance, groupVar);
+    int id = (int) RValue_toReal(group);
+    for (unsigned i = 0; i < sizeof(g_speedHalfBattles) / sizeof(g_speedHalfBattles[0]); ++i)
+        if (g_speedHalfBattles[i] == id) return true;
+    return false;
+}
+
 /* The battle tour over other battles (--bench-battles-list): each visit as the
  * tour makes its own (g_tourScript, g_tourJumps), 600 frames from the Ruins
  * room, so that a list of the tour's battles replays the tour exactly. */
@@ -333,6 +362,7 @@ const OfGame ofGame = {
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,
     .speedFullResBattles = true,
+    .speedHalfBattle = speedHalfBattle,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,

@@ -536,7 +536,14 @@ mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
 everything stays at 320x240.
 
 L switches to the alternative: every room at 320x240, with the renderer
-averaging each 2x2 block of texels when it shrinks a 640x480 screen. Fonts
+averaging each 2x2 block of texels when it shrinks a 640x480 screen.
+Undertale's battles are the exception: Speed draws them at 640x480, except
+the heaviest, which stay at 320x240. Those are the `global.battlegroup` values
+in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Flowey's own battle
+rooms. The size is chosen as a battle starts and kept until it ends. A battle too slow
+for full speed skips frames, as Speed does everywhere. `--speed-full-battles`
+and `--speed-half-battles` (desktop: `BS_SPEED_FULL_BATTLES=1` or `0`) put every
+battle at one size. Deltarune's battles stay at 320x240 unless asked. Fonts
 verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.

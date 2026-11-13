@@ -165,6 +165,7 @@ int main(int argc, char **argv) {
             if (!ofBenchStartSnow()) logWarn("Bench: this game has no snow patch benchmark\n");
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
+        if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */
         if (strcmp(argv[i], "--sw-mixer") == 0) ofAudioUseSoftwareMixer(true);

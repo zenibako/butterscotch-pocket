@@ -84,8 +84,11 @@ typedef struct {
     bool (*battleUiActive)(Runner *runner);
     /* Speed mode may keep battles (battleUiActive) at full resolution instead
      * of drawing them at half size: the game's own text, at a cost in frames.
-     * Only when asked (ofPlatformSetSpeedFullBattles). */
+     * With speedHalfBattle, Speed draws each battle at full size unless it says
+     * the battle is one of the heavy ones, kept at half size; asked once, as
+     * the battle starts. Without it, only when asked (ofPlatformSetSpeedFullBattles). */
     bool speedFullResBattles;
+    bool (*speedHalfBattle)(Runner *runner);
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;

@@ -418,7 +418,7 @@ static int32_t visibleWidth(Runner *runner) {
  * 640x480, but overworld rooms show a 320x240 view scaled up 2x, so drawing
  * them at 320x240 loses nothing. Battles and menus use all 640x480 with small
  * fonts, and need the full resolution to stay legible. */
-static int g_speedFullBattles = -1; /* -1: not decided yet */
+static int g_speedFullBattles = -1; /* 1 all battles full size, 0 all half, -2 the game's choice; -1 not decided yet */
 void ofPlatformSetSpeedFullBattles(bool full) {
     g_speedFullBattles = full ? 1 : 0;
 }
@@ -433,13 +433,25 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     }
     bool battle = g_runner != NULL && ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner);
     /* Speed mode can keep a battle at full size where the game allows it
-     * (speedFullResBattles), when asked with --speed-full-battles (or
-     * BS_SPEED_FULL_BATTLES=1 on desktop); off by default, since most battles
-     * are still too slow for it. The size then changes only as the battle
-     * starts or ends, under the flash that covers the room change, never in
-     * the middle of one; a battle too heavy for full speed skips frames. */
-    if (g_speedFullBattles < 0) g_speedFullBattles = getenv("BS_SPEED_FULL_BATTLES") != NULL;
-    bool lowres = g_smoothLowres && !(ofGame.speedFullResBattles && battle && g_speedFullBattles);
+     * (speedFullResBattles). Where the game says which battles are too heavy
+     * for that (speedHalfBattle), those are drawn at half size and the rest at
+     * full size; --speed-full-battles or --speed-half-battles (on desktop also
+     * BS_SPEED_FULL_BATTLES=1 or 0) puts every battle at one size. Without
+     * speedHalfBattle, battles are at full size only when asked. The size
+     * is chosen as a battle starts and kept until it ends, so it changes only
+     * under the flash that covers the room change, never in the middle of
+     * one; a battle too heavy for full speed skips frames. */
+    if (g_speedFullBattles < 0) {
+        const char *env = getenv("BS_SPEED_FULL_BATTLES");
+        g_speedFullBattles = env == NULL ? -2 : strcmp(env, "0") != 0;
+    }
+    static bool wasBattle, battleHalf;
+    if (battle && !wasBattle) {
+        if (g_speedFullBattles >= 0 || ofGame.speedHalfBattle == NULL) battleHalf = g_speedFullBattles != 1;
+        else battleHalf = ofGame.speedHalfBattle(g_runner);
+    }
+    wasBattle = battle;
+    bool lowres = g_smoothLowres && !(ofGame.speedFullResBattles && battle && !battleHalf);
     bool hires = g_hiresAvailable && !lowres && shown > OF_SCREEN_W;
     swrSmoothMinify = lowres;
     swrMirrorFaintAlpha = g_faintOverride >= 0 ? g_faintOverride : g_smoothLowres ? OF_SPEED_FAINT_ALPHA : 0;
