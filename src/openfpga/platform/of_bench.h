@@ -14,8 +14,12 @@
  * compared on the device. Started with "--bench" in the app arguments.
  */
 void ofBenchStart(void);
-/* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle. */
-bool ofBenchStartTour(void);
+/* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle.
+ * With livePacing ("--bench-battles-live", Speed mode) the frame limiter and adaptive skipping stay on and the
+ * report gives drawn and skipped frames and the rate actually reached, as the Flowey live tour does. */
+bool ofBenchStartTour(bool livePacing);
+/* "--bench-battles-list 4,81,101": the battle tour visits these battles instead of its own (before ofBenchStartTour). */
+void ofBenchSetTourList(const char *list);
 /* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
 bool ofBenchStartBulletTour(void);
 /* "--bench-chaos-saber": the short Asriel encounter, if available. */

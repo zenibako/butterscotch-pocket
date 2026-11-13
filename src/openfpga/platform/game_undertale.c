@@ -260,6 +260,64 @@ static bool battleUiActive(Runner *runner) {
     return enabled;
 }
 
+/* The battle tour over other battles (--bench-battles-list): each visit as the
+ * tour makes its own (g_tourScript, g_tourJumps), 600 frames from the Ruins
+ * room, so that a list of the tour's battles replays the tour exactly. */
+enum { TOUR_LIST_MAX = OF_BENCH_MAX_SECTIONS - 1, TOUR_VISIT = 600, TOUR_FIRST_VISIT = 1000 };
+static char g_listScript[4096];
+static OfJump g_listJumps[TOUR_LIST_MAX * 6];
+static OfBenchSection g_listSections[TOUR_LIST_MAX + 1];
+static char g_listNames[TOUR_LIST_MAX][32], g_listTags[TOUR_LIST_MAX][8], g_listSets[TOUR_LIST_MAX][80];
+
+static bool tourForList(const char *list, const char **script, const OfJump **jumps, int *jumpCount,
+                        const OfBenchSection **sections, int *sectionCount) {
+    /* The tour's walk to the first room; then each visit's moves, menu presses and confirms. */
+    static const char prefix[] =
+        "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z,700:R*200";
+    static const struct { int at; const char *key; } visit[] = {
+        {30, "L*20"}, {60, "R*20"}, {160, "Z"}, {168, "U*20"}, {200, "Z"}, {208, "D*20"}, {240, "Z"}, {248, "L*20"},
+        {280, "Z"}, {288, "R*20"}, {320, "Z"}, {328, "U*20"}, {360, "Z"}, {368, "D*20"}, {400, "Z"}, {408, "L*20"},
+        {440, "Z"}, {448, "R*20"}, {480, "Z"}, {488, "U*20"}, {530, "Z"}, {545, "Z"}, {560, "Z"},
+    };
+    int ids[TOUR_LIST_MAX], count = 0;
+    for (const char *p = list; *p != '\0';) {
+        char *end;
+        long id = strtol(p, &end, 10);
+        if (end == p || id < 1 || id > 9999 || count == TOUR_LIST_MAX) return false;
+        ids[count++] = (int) id;
+        p = end;
+        if (*p == ',') p++;
+        else if (*p != '\0') return false;
+    }
+    if (count == 0) return false;
+    size_t used = (size_t) snprintf(g_listScript, sizeof(g_listScript), "%s", prefix);
+    int nj = 0;
+    g_listSections[0] = (OfBenchSection) { "boot to the first room", TOUR_FIRST_VISIT, "boot", NULL, NULL, NULL };
+    for (int v = 0; v < count; v++) {
+        int base = TOUR_FIRST_VISIT + v * TOUR_VISIT;
+        for (size_t k = 0; k < sizeof(visit) / sizeof(visit[0]); k++) {
+            used += (size_t) snprintf(g_listScript + used, sizeof(g_listScript) - used, ",%d:%s", base + visit[k].at, visit[k].key);
+            if (used >= sizeof(g_listScript)) return false;
+        }
+        snprintf(g_listSets[v], sizeof(g_listSets[v]), "battlegroup=%d,border=0,mercy=0,hp=99,maxhp=99,encounter=0", ids[v]);
+        g_listJumps[nj++] = (OfJump) { base, 12, "encounter=0", NULL }; /* the Ruins room */
+        g_listJumps[nj++] = (OfJump) { base + 100, -1, g_listSets[v], "obj_battleblcon" };
+        g_listJumps[nj++] = (OfJump) { base + 250, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 350, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 450, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }; /* won */
+        snprintf(g_listNames[v], sizeof(g_listNames[v]), "battlegroup %d", ids[v]);
+        snprintf(g_listTags[v], sizeof(g_listTags[v]), "b%d", ids[v]);
+        g_listSections[v + 1] = (OfBenchSection) { g_listNames[v], base + TOUR_VISIT - 1, g_listTags[v], NULL, NULL, NULL };
+    }
+    *script = g_listScript;
+    *jumps = g_listJumps;
+    *jumpCount = nj;
+    *sections = g_listSections;
+    *sectionCount = count + 1;
+    return true;
+}
+
 const OfGame ofGame = {
     .title = "Undertale",
     .dataFiles = "data.win, textures.bin and music.bin",
@@ -288,6 +346,7 @@ const OfGame ofGame = {
     .tourJumpCount = (int) (sizeof(g_tourJumps) / sizeof(g_tourJumps[0])),
     .tourSections = g_tourSections,
     .tourSectionCount = (int) (sizeof(g_tourSections) / sizeof(g_tourSections[0])),
+    .tourForList = tourForList,
     .bulletTitle = "Undertale bullet-hell tour",
     .bulletScript = g_bulletScript,
     .bulletJumps = g_bulletJumps,

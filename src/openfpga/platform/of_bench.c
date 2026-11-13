@@ -70,7 +70,9 @@ static struct {
     bool tour;
     bool runProbes;
     bool livePacing;
+    bool floweyOpening; /* the Flowey tour's separate opening windows (ofGame.floweyOpening) */
 } g_def;
+static const char *g_tourList;
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
                        const OfBenchSection *sections, int sectionCount, bool tour, bool livePacing) {
@@ -81,6 +83,7 @@ static void benchStart(const char *title, const char *script, const OfJump *jump
     g_def.tour = tour;
     g_def.runProbes = !livePacing;
     g_def.livePacing = livePacing;
+    g_def.floweyOpening = false;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
@@ -96,10 +99,29 @@ void ofBenchStart(void) {
                ofGame.benchSections, ofGame.benchSectionCount, false, false);
 }
 
-bool ofBenchStartTour(void) {
+void ofBenchSetTourList(const char *list) {
+    g_tourList = list;
+}
+
+bool ofBenchStartTour(bool livePacing) {
     if (ofGame.tourScript == NULL) return false;
+    if (g_tourList != NULL) {
+        const char *script;
+        const OfJump *jumps;
+        const OfBenchSection *sections;
+        int jumpCount, sectionCount;
+        if (ofGame.tourForList == NULL ||
+            !ofGame.tourForList(g_tourList, &script, &jumps, &jumpCount, &sections, &sectionCount)) {
+            logWarn("Bench: cannot tour the battles \"%s\"\n", g_tourList);
+            return false;
+        }
+        static char title[96];
+        snprintf(title, sizeof(title), "%s of battles %s", ofGame.tourTitle, g_tourList);
+        benchStart(title, script, jumps, jumpCount, sections, sectionCount, true, livePacing);
+        return true;
+    }
     benchStart(ofGame.tourTitle, ofGame.tourScript, ofGame.tourJumps, ofGame.tourJumpCount,
-               ofGame.tourSections, ofGame.tourSectionCount, true, false);
+               ofGame.tourSections, ofGame.tourSectionCount, true, livePacing);
     return true;
 }
 
@@ -122,6 +144,7 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     if (ofGame.floweyScript == NULL) return false;
     benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
                ofGame.floweySections, ofGame.floweySectionCount, true, livePacing);
+    g_def.floweyOpening = true;
     if (ofGame.floweyOpeningCount > OF_BENCH_MAX_OPENING_WINDOWS)
         ofDiagHalt("Flowey benchmark has too many opening windows");
     for (int i = 0; i < ofGame.floweyOpeningCount; ++i) g_opening[i] = (OpeningTimes) {0};
@@ -280,7 +303,7 @@ static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
 static void reportWork(void);
 
 static void reportOpening(void) {
-    if (ofGame.floweyOpeningCount == 0) return;
+    if (!g_def.floweyOpening || ofGame.floweyOpeningCount == 0) return;
     ofLogPrint("Flowey opening, separate scripted windows\n");
     ofLogPrint("scene     upd  draw   tx-ms   max-ms  warm  warm-ms\n");
     for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
@@ -442,7 +465,7 @@ void ofBenchFrame(Runner *runner, bool skipped) {
 }
 
 static void recordOpening(int update, uint64_t work, bool drawn) {
-    if (update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
+    if (!g_def.floweyOpening || update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
     g_lastOpeningUpdate = update;
     uint64_t totalTexture = ofPerfTextureLoadNanos();
     uint64_t texture = totalTexture - g_lastOpeningTexture;
@@ -484,7 +507,7 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
         recordOpening(scriptUpdate, waitStart - updateStart, g_liveFramePending && !g_liveSkipped);
     if (!g_liveFramePending) return;
     g_liveFramePending = false;
-    if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
+    if (!ofPlatformSpeedMode()) ofDiagHalt("live pacing requires Speed mode");
     if (runner->frameCount <= g_lastLiveUpdate) return;
     g_lastLiveUpdate = runner->frameCount;
     if (g_frame != 0) {

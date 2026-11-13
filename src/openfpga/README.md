@@ -709,6 +709,14 @@ cost the most. `platform/of_bench.c` has the route and says what each
 table's columns are. Quote numbers from a report together with the commit
 it was built from.
 
+Undertale's battle tour, `--bench-battles` (Accuracy) and
+`--bench-battles-smooth` (Speed), visits Froggit, Toriel, Papyrus, Undyne,
+Mettaton EX and Asgore, 600 frames each from a Ruins room. `--bench-battles-list
+4,81,101` visits up to seven other battles (`global.battlegroup` values) the
+same way; the tour's own six replay it exactly. `--bench-battles-live` runs it
+in Speed with the limiter and adaptive draw skipping on, and reports as
+`--bench-flowey-live` does (see below).
+
 Undertale also has a bullet-hell tour: `--bench-bullet-hell` measures
 Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
 Asgore control is followed by two 150-frame natural attack sections,

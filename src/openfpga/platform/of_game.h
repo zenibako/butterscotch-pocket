@@ -101,6 +101,11 @@ typedef struct {
     int tourJumpCount;
     const OfBenchSection *tourSections;
     int tourSectionCount;
+    /* Optional: the battle tour over other battles ("--bench-battles-list 4,81,101"), each visited
+     * the way the tour visits its own. Fills in a script, jumps and sections that last for the run;
+     * false if the list is empty, too long or has an id the game does not have. */
+    bool (*tourForList)(const char *list, const char **script, const OfJump **jumps, int *jumpCount,
+                        const OfBenchSection **sections, int *sectionCount);
     /* A third benchmark ("--bench-bullet-hell"), or NULL: the same report over another script. */
     const char *bulletTitle;
     const char *bulletScript;
