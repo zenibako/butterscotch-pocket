@@ -502,7 +502,11 @@ SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
     uint32_t pageId = (uint32_t) tpag->texturePageId;
     if (swr->textures[pageId] != NULL || (swr->itemTextures != NULL && swr->itemTextures[tpagIndex] != NULL))
         return SWR_PREFETCH_PRESENT;
-    if (pageId < TEXTURE_RETRY_PAGES && retryAtFrame[pageId] != 0) return SWR_PREFETCH_SKIPPED;
+    // As a draw would: a page that ran out of memory waits until its retry frame.
+    if (pageId < TEXTURE_RETRY_PAGES && retryAtFrame[pageId] != 0) {
+        if (swr->frameCounter < retryAtFrame[pageId]) return SWR_PREFETCH_SKIPPED;
+        retryAtFrame[pageId] = 0;
+    }
     
     // Only into room that is free: nothing cached is given up for it, and the
     // heap keeps its reserve. loadItem's makeRoomFor and allocOrEvict then

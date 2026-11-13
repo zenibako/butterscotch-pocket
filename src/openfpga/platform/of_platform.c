@@ -1066,7 +1066,7 @@ static void prefetchEnd(void) {
     g_prefetchCount = g_prefetchNext = 0;
 }
 
-/* Loads the next items: at least one, then on while time is left before
+/* Tries the next items: at least one, then on while time is left before
  * `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of them with `all`). */
 static void prefetchRun(uint64_t until, bool all) {
     if (g_prefetchNext >= g_prefetchCount || g_runner == NULL || g_runner->renderer == NULL) return;
@@ -1079,11 +1079,10 @@ static void prefetchRun(uint64_t until, bool all) {
     bool first = true;
     while (g_prefetchNext < g_prefetchCount) {
         if (!all && !first && nowNanos() >= budgetEnd) break;
+        first = false;
         int result = SWRenderer_prefetchItem(g_runner->renderer, g_prefetchItems[g_prefetchNext++]);
-        if (result == 0) {
-            ++g_burst.loaded;
-            first = false;
-        } else if (result == 1) ++g_burst.present;
+        if (result == 0) ++g_burst.loaded;
+        else if (result == 1) ++g_burst.present;
         else if (result == 3) ++g_burst.full;
     }
     swrTexturePackGetReadTotals(&after);

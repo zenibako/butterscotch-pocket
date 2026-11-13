@@ -99,9 +99,14 @@ static bool leftEyeSkippedReady;
 
 /* Variable ids the Speed decisions below look up (speedHalfBattle, speedSkipRun). */
 static bool speedVarsResolved;
+/* The data file battlePrefetch last checked its table against, and whether it fit:
+ * forgotten with each VM, since a new data file may be loaded at the same address. */
+static const DataWin *g_prefetchChecked;
+static bool g_prefetchFits;
 
 static void forgetNativeVm(void) {
     speedVarsResolved = false;
+    g_prefetchChecked = NULL;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -350,19 +355,18 @@ static int speedSkipRun(Runner *runner) {
 #include "game_undertale_prefetch.h"
 
 static bool prefetchTableFits(const DataWin *dw) {
-    static const DataWin *checked;
-    static bool fits;
-    if (checked != dw) {
-        checked = dw;
-        fits = true;
+    if (g_prefetchChecked != dw) {
+        g_prefetchChecked = dw;
+        g_prefetchFits = true;
         for (size_t i = 0; i < sizeof(g_prefetchCheck) / sizeof(g_prefetchCheck[0]); ++i) {
             const int16_t *c = g_prefetchCheck[i];
             const TexturePageItem *item = (uint32_t) c[0] < dw->tpag.count ? &dw->tpag.items[c[0]] : NULL;
-            fits &= item != NULL && item->texturePageId == c[1] && item->sourceWidth == c[2] && item->sourceHeight == c[3];
+            g_prefetchFits &= item != NULL && item->texturePageId == c[1] && item->sourceWidth == c[2] &&
+                              item->sourceHeight == c[3];
         }
-        if (!fits) logInfo("Prefetch: this data file's textures are not the ones its table was made for; none loaded ahead\n");
+        if (!g_prefetchFits) logInfo("Prefetch: this data file's textures are not the ones its table was made for; none loaded ahead\n");
     }
-    return fits;
+    return g_prefetchFits;
 }
 
 static int battlePrefetch(Runner *runner, int16_t *items, int max, int *battle) {
