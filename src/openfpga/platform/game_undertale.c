@@ -271,7 +271,7 @@ static bool battleUiActive(Runner *runner) {
  * half size, as they had. */
 static const int16_t g_speedHalfBattles[] = {
     2, 5, 6, 25, 31, 36, 41, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59, 60, 64, 65, 67, 68, 76, 77,
-    78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
+    78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 94, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
 };
 
 /* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
