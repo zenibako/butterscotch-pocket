@@ -660,6 +660,35 @@ static void dumpFrameIfRequested(bool drawn) {
 #endif
 
 static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript) */
+
+#ifdef OF_PC
+/* BS_ITEM_LOG=<file> (desktop) writes a line for each texture item the first
+ * time it is drawn in each visit to a room: frame, room, TPAG index, page,
+ * width, height. tools/battle_prefetch_table.py makes the battle prefetch
+ * table from it. */
+void platformItemUsed(int32_t item, int page, int width, int height);
+void platformItemUsed(int32_t item, int page, int width, int height) {
+    static FILE *out;
+    static bool tried;
+    static uint32_t *seen;
+    static const Room *room;
+    static uint32_t visit;
+    if (!tried) {
+        tried = true;
+        const char *path = getenv("BS_ITEM_LOG");
+        if (path != NULL && (out = fopen(path, "w")) != NULL) seen = calloc(65536, sizeof(*seen));
+    }
+    if (out == NULL || seen == NULL || item < 0 || item >= 65536 || g_runner == NULL) return;
+    if (g_runner->currentRoom != room) {
+        room = g_runner->currentRoom;
+        ++visit;
+    }
+    if (seen[item] == visit) return;
+    seen[item] = visit;
+    fprintf(out, "%d %s %d %d %d %d\n", g_scriptFrame, room != NULL && room->name != NULL ? room->name : "?", (int) item,
+            page, width, height);
+}
+#endif
 int ofPlatformScriptFrame(void) {
     return g_scriptFrame;
 }

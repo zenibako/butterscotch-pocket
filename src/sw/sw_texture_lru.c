@@ -12,6 +12,10 @@
 #ifdef PLATFORM_PACK_READ
 void platformTextureLoadTime(uint64_t nanos);
 #endif
+#ifdef OF_PC
+// BS_ITEM_LOG (of_platform.c): items drawn, for the battle prefetch table.
+void platformItemUsed(int32_t item, int page, int width, int height);
+#endif
 
 static unsigned finishTextureLoad(uint64_t start)
 {
@@ -536,6 +540,9 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
     const TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
     int16_t pageId = tpag->texturePageId;
     if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) return NULL;
+#ifdef OF_PC
+    platformItemUsed(tpagIndex, pageId, tpag->sourceWidth, tpag->sourceHeight);
+#endif
     
     // The whole page, if something has loaded it.
     SWTexture* page = swr->textures[pageId];

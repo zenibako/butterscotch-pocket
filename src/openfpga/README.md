@@ -853,6 +853,7 @@ cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
 `BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
 `BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,
+`BS_ITEM_LOG=<file>` the texture items first drawn in each room visit,
 `BS_OBJECTS=<frame>` records live objects, `BS_DUMP_FRAME=<frame>` with
 `BS_DUMP_PATH=<file>` captures one image, and `BS_DUMP_EVERY=<n>` with
 `BS_DUMP_DIR=<directory>` captures periodically. `--draw-every 100000`
