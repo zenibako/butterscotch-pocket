@@ -722,9 +722,12 @@ it was built from.
 
 Undertale's battle tour, `--bench-battles` (Accuracy) and
 `--bench-battles-smooth` (Speed), visits Froggit, Toriel, Papyrus, Undyne,
-Mettaton EX and Asgore, 600 frames each from a Ruins room. `--bench-battles-list
-4,81,101` visits up to seven other battles (`global.battlegroup` values) the
-same way; the tour's own six replay it exactly. `--bench-battles-live` runs it
+Mettaton EX and Asgore, 600 frames each from a Ruins room. Added to one of
+the tour's options, `--bench-battles-list 4,81,101` makes it visit up to seven
+other battles (`global.battlegroup` values) the same way, for example
+`--bench-battles --bench-battles-list 4,81,101`, and likewise with
+`--bench-battles-smooth` or `--bench-battles-live`; on its own it starts nothing.
+The tour's own six replay the tour exactly. `--bench-battles-live` runs it
 in Speed with the limiter and adaptive draw skipping on, and reports as
 `--bench-flowey-live` does (see below); `--bench-bullet-hell-live` does the same
 for the bullet-hell tour.
