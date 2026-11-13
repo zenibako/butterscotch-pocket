@@ -3196,14 +3196,16 @@ bool swrFillCoversWhole(SWRenderer* swr, float x1, float y1, float x2, float y2)
 }
 
 #ifdef SW_HAS_PREMUL_BLEND
-// A translucent one-colour fill of the main buffer, read through its dirty-tile
-// map (see SWDirtyBuffer): a tile nothing has marked since the buffer was last
-// cleared still holds the clear's colour, so the fill turns every pixel of it
-// into one colour, worked out once. That colour is written without reading the
-// tile, and nothing is done there at all when it is the colour already there
-// (a fade to black over a mostly black battle screen). Only the marked tiles
-// are read and blended, as swrDrawHLineInt does every pixel; both give each
-// pixel the same value. The rows are clipped as swrDrawHLineInt clips them.
+// A one-colour fill of the main buffer, read through its dirty-tile map (see
+// SWDirtyBuffer): a tile nothing has marked since the buffer was last cleared
+// still holds the clear's colour, so the fill turns every pixel of it into one
+// colour, worked out once (the fill's own when opaque). That colour is written
+// without reading the tile, and nothing is done there at all when it is the
+// colour already there: a fade to black over a mostly black battle screen, or
+// the battle box, an opaque black rectangle over the black clear. Such tiles
+// stay unmarked, so the next clear leaves them alone too. Only the marked
+// tiles go through swrDrawHLineInt, as every row did; both give each pixel the
+// same value. The rows are clipped as swrDrawHLineInt clips them.
 // Returns false, having drawn nothing, when the map cannot be relied on.
 static bool swrFillKnownTiles(SWRenderer* swr, int x1i, int y1i, int xd, int yd, uintpixel_t color, int alpha)
 {
@@ -3212,7 +3214,7 @@ static bool swrFillKnownTiles(SWRenderer* swr, int x1i, int y1i, int xd, int yd,
         swr->fb != swr->mainFb || d->fb != swr->mainFb || swr->fbPitch != d->width ||
         d->width != swr->mainWidth || d->height != swr->mainHeight ||
         swr->maxX > d->width || swr->maxY > d->height || swr->portX < 0 || swr->portY < 0 ||
-        swr->blendMode != bm_normal || !swrIsPartialAlpha(alpha))
+        swr->blendMode != bm_normal || alpha < 4) // fainter than that, alphaBlend leaves the pixel be
         return false;
     // Nothing to gain when every tile the fill reaches is marked: the plain rows then.
     {
@@ -3229,7 +3231,8 @@ static bool swrFillKnownTiles(SWRenderer* swr, int x1i, int y1i, int xd, int yd,
     uint32_t srcGreen = swrGreen(color) * (uint32_t) alpha;
     uint32_t dstalpha = (uint32_t) (256 - alpha);
     uintpixel_t known = d->color;
-    uintpixel_t onKnown = swrBlendPremultiplied(known, srcRedBlue, srcGreen, dstalpha);
+    // Opaque, alphaBlend stores the colour itself.
+    uintpixel_t onKnown = alpha > 253 ? color : swrBlendPremultiplied(known, srcRedBlue, srcGreen, dstalpha);
     bool changes = onKnown != known;
     static int check = -1;
     if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
@@ -3347,7 +3350,8 @@ void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2
     }
     
 #ifdef SW_HAS_PREMUL_BLEND
-    if (!opaque && swrFillKnownTiles(swr, x1i, y1i, xd, yd, pxcolor, alphaInt)) return;
+    // (An opaque fill of the whole buffer goes the usual way below, which keeps it as the buffer's one colour.)
+    if ((!opaque || !wholeBuffer) && swrFillKnownTiles(swr, x1i, y1i, xd, yd, pxcolor, alphaInt)) return;
 #endif
     for (int y = 0; y <= yd; y++) {
         swrDrawHLineInt(renderer, x1i, y1i + y, xd, pxcolor, pxcolor, alphaInt);
