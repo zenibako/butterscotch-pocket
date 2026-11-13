@@ -307,6 +307,7 @@ static bool readDirect(OfAudioSystem *ut, uint32_t filePos, uint32_t want) {
     while (of_file_read_async((int) ut->directSlot, filePos, ut->directStage, want, directCallback) < 0) {
         if (nowNanos() - start > 50000000ull) return false;
     }
+    uint64_t accepted = nowNanos();
     /* The poll is the OS's fallback for a lost interrupt. */
     bool sawStateRequest = false;
     while (!g_directDone && of_file_async_poll() != 1) {
@@ -329,6 +330,7 @@ static bool readDirect(OfAudioSystem *ut, uint32_t filePos, uint32_t want) {
             return false;
         }
     }
+    ofReadLogNote(OF_READLOG_MUSIC, want, accepted - start, nowNanos() - accepted);
     return g_directDone && g_directResult >= 0;
 }
 

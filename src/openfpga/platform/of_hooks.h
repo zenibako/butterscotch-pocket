@@ -30,6 +30,13 @@ uint16_t *platformAcquireFramebuffer(int width, int height);
 void platformSetNextFramebuffer(uint16_t *framebuffer, int width, int height, int bpp);
 bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *dest);
 uint64_t platformPackRefusedNanos(void);
+/* The direct-read log (--read-log): every direct read of the texture pack or the music,
+ * noted with what came before it, for the benchmark's read table and, when asked, the log. */
+enum { OF_READLOG_TEX, OF_READLOG_MUSIC };
+void ofReadLogNote(int kind, uint32_t size, uint64_t refusedNanos, uint64_t waitNanos);
+void ofReadLogSetVerbose(bool verbose);
+/* The scripted update number (of_platform.c), for log lines. */
+int ofPlatformScriptFrame(void);
 void platformTextureLoadTime(uint64_t nanos);
 /* Port-internal: a file stored in the audio pack (of_audio_system.c). */
 bool ofAudioReadPackFile(const char *path, uint8_t **outData, uint32_t *outSize);

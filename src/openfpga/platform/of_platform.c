@@ -32,6 +32,7 @@
 #include "of_game.h"
 #include "sw_renderer.h"
 #include "sw_call_notes.h"
+#include "sw_texture_pack.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -661,6 +662,38 @@ static void dumpFrameIfRequested(bool drawn) {
 static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript) */
 
 #ifdef OF_PC
+/* BS_ITEM_LOG=<file> (desktop) writes a line for each texture item the first
+ * time it is drawn in each visit to a room: frame, room, TPAG index, page,
+ * width, height. tools/battle_prefetch_table.py makes the battle prefetch
+ * table from it. */
+void platformItemUsed(int32_t item, int page, int width, int height);
+void platformItemUsed(int32_t item, int page, int width, int height) {
+    static FILE *out;
+    static bool tried;
+    static uint32_t *seen;
+    static const Room *room;
+    static uint32_t visit;
+    if (!tried) {
+        tried = true;
+        const char *path = getenv("BS_ITEM_LOG");
+        if (path != NULL && (out = fopen(path, "w")) != NULL) seen = calloc(65536, sizeof(*seen));
+    }
+    if (out == NULL || seen == NULL || item < 0 || item >= 65536 || g_runner == NULL) return;
+    if (g_runner->currentRoom != room) {
+        room = g_runner->currentRoom;
+        ++visit;
+    }
+    if (seen[item] == visit) return;
+    seen[item] = visit;
+    fprintf(out, "%d %s %d %d %d %d\n", g_scriptFrame, room != NULL && room->name != NULL ? room->name : "?", (int) item,
+            page, width, height);
+}
+#endif
+int ofPlatformScriptFrame(void) {
+    return g_scriptFrame;
+}
+
+#ifdef OF_PC
 /* BS_FRAME_LOG=<file> (desktop) writes one line per drawn frame: frame,
  * room, width, step/draw/out/audio microseconds, calls per draw kind, and the
  * 32x16 tiles the renderer had marked as drawn in the buffer it cleared last
@@ -985,6 +1018,104 @@ static void createObject(const char *name) {
         return;
     }
     logWarn("Jump: no object %s\n", name);
+}
+
+/* ===[ Loading a battle's textures ahead ]===
+ *
+ * A battle's first draws read its textures from the card: each read costs
+ * 6-10 ms back to back and 14-21 ms after a pause (2026-11-13, BsRead), and
+ * Froggit's entry made 21 of them in one update. Where the game names the
+ * items a starting battle will draw (battlePrefetch), they are loaded while
+ * its encounter flashes instead, one after another: in each update's spare
+ * time and at least OF_PREFETCH_UPDATE_NANOS of it, so an update of the flash
+ * may run long. That only delays a frame of a still flash. (Spare time alone
+ * was too little on the Pocket: BsPre, 2026-11-13, loaded 1-2 items a battle.)
+ * Whatever is not loaded when the battle starts is read at its first draw as
+ * before. Nothing drawn
+ * changes, only when the reads happen. --no-prefetch, or BS_PREFETCH=0 on
+ * desktop, turns this off to compare. */
+#define OF_PREFETCH_MAX 128
+#define OF_PREFETCH_UPDATE_NANOS 25000000ull
+#define OF_PREFETCH_MARGIN_NANOS 2000000ull
+static int g_prefetchOn = -1; /* -1: not decided yet */
+static int16_t g_prefetchItems[OF_PREFETCH_MAX];
+static int g_prefetchCount, g_prefetchNext, g_prefetchBattle;
+static bool g_prefetchArmed = true;
+static struct { unsigned loaded, present, full, updates, reads; uint64_t nanos, readNanos; } g_burst;
+
+void ofPlatformSetPrefetch(bool on) {
+    g_prefetchOn = on;
+}
+
+static bool prefetchOn(void) {
+    if (g_prefetchOn < 0) {
+        const char *env = getenv("BS_PREFETCH");
+        g_prefetchOn = env == NULL || strcmp(env, "0") != 0;
+    }
+    return g_prefetchOn != 0 && ofGame.battlePrefetch != NULL;
+}
+
+static void prefetchEnd(void) {
+    if (g_prefetchCount == 0) return;
+    unsigned ms = (unsigned) (g_burst.nanos / 1000000u);
+    unsigned left = (unsigned) (g_prefetchCount - g_prefetchNext);
+    logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads, %u ms over %u updates\n",
+            g_prefetchBattle, g_burst.loaded, (unsigned) g_prefetchCount, g_burst.present, g_burst.full, left,
+            g_burst.reads, ms, g_burst.updates);
+    ofBenchNotePrefetch(g_burst.loaded, g_burst.full, left, g_burst.updates, g_burst.reads, g_burst.readNanos, g_burst.nanos);
+    g_prefetchCount = g_prefetchNext = 0;
+}
+
+/* Tries the next items: at least one, then on while time is left before
+ * `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of them with `all`). */
+static void prefetchRun(uint64_t until, bool all) {
+    if (g_prefetchNext >= g_prefetchCount || g_runner == NULL || g_runner->renderer == NULL) return;
+    SwrTexturePackReadTotals before, after;
+    swrTexturePackGetReadTotals(&before);
+    uint64_t start = nowNanos();
+    ++g_burst.updates;
+    uint64_t budgetEnd = start + OF_PREFETCH_UPDATE_NANOS;
+    if (until > OF_PREFETCH_MARGIN_NANOS && until - OF_PREFETCH_MARGIN_NANOS > budgetEnd) budgetEnd = until - OF_PREFETCH_MARGIN_NANOS;
+    bool first = true;
+    while (g_prefetchNext < g_prefetchCount) {
+        if (!all && !first && nowNanos() >= budgetEnd) break;
+        first = false;
+        int result = SWRenderer_prefetchItem(g_runner->renderer, g_prefetchItems[g_prefetchNext++]);
+        if (result == 0) ++g_burst.loaded;
+        else if (result == 1) ++g_burst.present;
+        else if (result == 3) ++g_burst.full;
+    }
+    swrTexturePackGetReadTotals(&after);
+    g_burst.reads += (unsigned) ((after.directReads + after.stdioReads) - (before.directReads + before.stdioReads));
+    g_burst.readNanos += (after.directNanos + after.stdioNanos) - (before.directNanos + before.stdioNanos);
+    g_burst.nanos += nowNanos() - start;
+}
+
+/* Once an update, before it runs: starts a burst as an encounter begins, ends
+ * it as the battle does, and counts the items battles still load at a draw. */
+static void prefetchCheck(void) {
+    if (g_runner == NULL || g_runner->renderer == NULL) return;
+    bool battle = ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner);
+    unsigned loads;
+    uint64_t loadNanos;
+    SWRenderer_takeItemLoads(&loads, &loadNanos);
+    if (battle && loads != 0) ofBenchNoteBattleLoads(loads, loadNanos);
+    if (!prefetchOn()) return;
+    int battleId = 0;
+    int count = ofGame.battlePrefetch(g_runner, g_prefetchItems, OF_PREFETCH_MAX, &battleId);
+    if (count == 0) {
+        prefetchEnd();
+        g_prefetchArmed = true;
+        return;
+    }
+    if (!g_prefetchArmed) return;
+    g_prefetchArmed = false;
+    memset(&g_burst, 0, sizeof(g_burst));
+    g_prefetchCount = count;
+    g_prefetchNext = 0;
+    g_prefetchBattle = battleId;
+    /* Without a frame limit (desktop runs) there is no spare time to wait for. */
+    if (g_uncapped) prefetchRun(0, true);
 }
 
 /* Scripted input for repeatable runs (the benchmark, and BS_SCRIPT on
@@ -1318,6 +1449,7 @@ bool platformHandleEvents(void) {
     if (g_debugMode && of_btn_pressed(OF_BTN_R1)) ofPerfToggleLog();
     if (of_btn_pressed(OF_BTN_L1)) toggleSpeed();
     runInputScript();
+    prefetchCheck();
     decideFrameSkip();
     if (g_runner == NULL) return false;
     if (g_profileRequested) {
@@ -1396,6 +1528,7 @@ bool platformHandleEvents(void) {
 }
 
 void platformSleepUntil(uint64_t time) {
+    prefetchRun(time, false);
     if (g_uncapped) return;
     uint64_t start = nowNanos();
     if (!g_smoothLowres || g_menuClosed) {

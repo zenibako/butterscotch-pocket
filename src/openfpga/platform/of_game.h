@@ -93,6 +93,11 @@ typedef struct {
      * the game is in steady action that keeps its pace better that way (Flowey's
      * fight once its intro is over), otherwise 1. NULL: always 1. */
     int (*speedSkipRun)(Runner *runner);
+    /* The texture items a battle about to start will draw, for the platform to
+     * load while the encounter's flash leaves time to spare (see swrPrefetchItem):
+     * at most max of them into items, first needed first, and the battle's
+     * number into battle. 0 when no battle is starting. NULL: none ahead. */
+    int (*battlePrefetch)(Runner *runner, int16_t *items, int max, int *battle);
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;

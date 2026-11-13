@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #ifdef OF_PC
 #include <stdio.h>
@@ -10,6 +11,10 @@
 
 #ifdef PLATFORM_PACK_READ
 void platformTextureLoadTime(uint64_t nanos);
+#endif
+#ifdef OF_PC
+// BS_ITEM_LOG (of_platform.c): items drawn, for the battle prefetch table.
+void platformItemUsed(int32_t item, int page, int width, int height);
 #endif
 
 static unsigned finishTextureLoad(uint64_t start)
@@ -450,6 +455,87 @@ SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, i
     return texture;
 }
 
+// Whether TPAG item `tpagIndex` is one loaded on its own (an item the game
+// was shipped with, on a page the texture pack holds); if so, its page and
+// the page's size.
+static bool packedItem(SWRenderer* swr, int32_t tpagIndex, const TexturePageItem** outTpag, int* pageW, int* pageH)
+{
+    DataWin* dw = swr->base.dataWin;
+    if (tpagIndex < 0 || (uint32_t) tpagIndex >= dw->tpag.count) return false;
+    const TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
+    int16_t pageId = tpag->texturePageId;
+    *outTpag = tpag;
+    return pageId >= 0 && (size_t) tpagIndex < swr->originalTPagCount && (uint32_t) pageId < swr->textureCount &&
+           tpag->sourceWidth > 0 && tpag->sourceHeight > 0 && swrTexturePackGetSize((uint32_t) pageId, pageW, pageH);
+}
+
+static void keepItem(SWRenderer* swr, int32_t tpagIndex, SWTexture* item)
+{
+    item->lastUsedFrame = swr->frameCounter;
+    swr->itemTextures[tpagIndex] = item;
+    swr->itemBytes += pageBytes(item);
+}
+
+static void ensureItemTable(SWRenderer* swr)
+{
+    if (swr->itemTextures == NULL) {
+        swr->itemTextures = (SWTexture**) safeCalloc(swr->originalTPagCount, sizeof(SWTexture*));
+        swr->itemCount = swr->originalTPagCount;
+    }
+}
+
+// Items loaded by a first draw (not by swrPrefetchItem), for the benchmark.
+static SwrItemLoads drawLoads;
+
+void swrTakeItemLoads(SwrItemLoads* out)
+{
+    *out = drawLoads;
+    memset(&drawLoads, 0, sizeof(drawLoads));
+}
+
+SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
+{
+    const TexturePageItem* tpag;
+    int pageW, pageH;
+    // Flowey's fight decodes some items its own way (loadItem's openingItem).
+    if (swr->floweySpeedRoom || !packedItem(swr, tpagIndex, &tpag, &pageW, &pageH)) return SWR_PREFETCH_SKIPPED;
+    uint32_t pageId = (uint32_t) tpag->texturePageId;
+    if (swr->textures[pageId] != NULL || (swr->itemTextures != NULL && swr->itemTextures[tpagIndex] != NULL))
+        return SWR_PREFETCH_PRESENT;
+    // As a draw would: a page that ran out of memory waits until its retry frame.
+    if (pageId < TEXTURE_RETRY_PAGES && retryAtFrame[pageId] != 0) {
+        if (swr->frameCounter < retryAtFrame[pageId]) return SWR_PREFETCH_SKIPPED;
+        retryAtFrame[pageId] = 0;
+    }
+    
+    // Only into room that is free: nothing cached is given up for it, and the
+    // heap keeps its reserve. loadItem's makeRoomFor and allocOrEvict then
+    // have nothing to evict.
+    int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
+    int top = tpag->sourceY > 0 ? tpag->sourceY - 1 : 0;
+    int right = tpag->sourceX + tpag->sourceWidth + 1 < pageW ? tpag->sourceX + tpag->sourceWidth + 1 : pageW;
+    int bottom = tpag->sourceY + tpag->sourceHeight + 1 < pageH ? tpag->sourceY + tpag->sourceHeight + 1 : pageH;
+    if (left >= right || top >= bottom) return SWR_PREFETCH_SKIPPED;
+    size_t bytes = (size_t) (right - left) * (size_t) (bottom - top) * sizeof(uintpixel_t);
+    if (cachedBytes(swr) + bytes > TEXTURE_CACHE_BYTES) return SWR_PREFETCH_FULL;
+#ifdef TEXTURE_CACHE_RESERVE_BYTES
+#if defined(OF_NATIVE_SAVESTATES) && !defined(OF_PC)
+    if (platformHeapCanReserve(TEXTURE_CACHE_RESERVE_BYTES + bytes) <= 0) return SWR_PREFETCH_FULL;
+#else
+    void* probe = malloc(TEXTURE_CACHE_RESERVE_BYTES + bytes);
+    if (probe == NULL) return SWR_PREFETCH_FULL;
+    free(probe);
+#endif
+#endif
+    
+    ensureItemTable(swr);
+    bool outOfMemory;
+    SWTexture* item = loadItem(swr, tpag, pageId, pageW, pageH, tpagIndex, &outOfMemory);
+    if (item == NULL) return SWR_PREFETCH_SKIPPED; // a draw will try again
+    keepItem(swr, tpagIndex, item);
+    return SWR_PREFETCH_LOADED;
+}
+
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 {
     DataWin* dw = swr->base.dataWin;
@@ -458,6 +544,9 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
     const TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
     int16_t pageId = tpag->texturePageId;
     if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) return NULL;
+#ifdef OF_PC
+    platformItemUsed(tpagIndex, pageId, tpag->sourceWidth, tpag->sourceHeight);
+#endif
     
     // The whole page, if something has loaded it.
     SWTexture* page = swr->textures[pageId];
@@ -468,13 +557,9 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
     
     // Items the game was shipped with, on pages the pack holds, are loaded on their own.
     int pageW, pageH;
-    if ((size_t) tpagIndex < swr->originalTPagCount && (uint32_t) pageId < swr->textureCount &&
-        tpag->sourceWidth > 0 && tpag->sourceHeight > 0 && swrTexturePackGetSize((uint32_t) pageId, &pageW, &pageH))
+    if (packedItem(swr, tpagIndex, &tpag, &pageW, &pageH))
     {
-        if (swr->itemTextures == NULL) {
-            swr->itemTextures = (SWTexture**) safeCalloc(swr->originalTPagCount, sizeof(SWTexture*));
-            swr->itemCount = swr->originalTPagCount;
-        }
+        ensureItemTable(swr);
         
         SWTexture* item = swr->itemTextures[tpagIndex];
         if (LIKELY(item != NULL)) {
@@ -513,13 +598,13 @@ SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
             return NULL;
         }
         
-        item->lastUsedFrame = swr->frameCounter;
-        swr->itemTextures[tpagIndex] = item;
-        swr->itemBytes += pageBytes(item);
+        keepItem(swr, tpagIndex, item);
 #ifdef TEXTURE_CACHE_RESERVE_BYTES
         keepHeapReserve(swr);
 #endif
         // Keep the log short. The benchmark counts fast loads too.
+        drawLoads.count++;
+        drawLoads.nanos += nowNanos() - loadStart;
         unsigned tookMs = finishTextureLoad(loadStart);
         if (tookMs >= 20) {
             swrTexturePackTakeStats(&stats);

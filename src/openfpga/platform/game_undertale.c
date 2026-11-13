@@ -99,9 +99,14 @@ static bool leftEyeSkippedReady;
 
 /* Variable ids the Speed decisions below look up (speedHalfBattle, speedSkipRun). */
 static bool speedVarsResolved;
+/* The data file battlePrefetch last checked its table against, and whether it fit:
+ * forgotten with each VM, since a new data file may be loaded at the same address. */
+static const DataWin *g_prefetchChecked;
+static bool g_prefetchFits;
 
 static void forgetNativeVm(void) {
     speedVarsResolved = false;
+    g_prefetchChecked = NULL;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -275,7 +280,7 @@ static const int16_t g_speedHalfBattles[] = {
 };
 
 /* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
-static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject;
+static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject, g_encounterObject;
 static const void *g_speedObjectsOf;
 
 static void resolveSpeedVars(Runner *runner) {
@@ -287,10 +292,11 @@ static void resolveSpeedVars(Runner *runner) {
         speedVarsResolved = true;
     }
     if (g_speedObjectsOf != runner->dataWin) {
-        g_speedMasterObject = -1;
+        g_speedMasterObject = g_encounterObject = -1;
         for (uint32_t i = 0; i < runner->dataWin->objt.count; i++) {
             const char *name = runner->dataWin->objt.objects[i].name;
             if (name != NULL && strcmp(name, "obj_flowey_master") == 0) g_speedMasterObject = (int32_t) i;
+            if (name != NULL && strcmp(name, "obj_battleblcon") == 0) g_encounterObject = (int32_t) i;
         }
         g_speedObjectsOf = runner->dataWin;
     }
@@ -337,6 +343,57 @@ static int speedSkipRun(Runner *runner) {
         return numeric(intro) && RValue_toReal(intro) == -1 ? 2 : 1;
     }
     return 1;
+}
+
+/* battlePrefetch: an overworld encounter makes obj_battleblcon (the "!", the
+ * heart and the flash) with global.battlegroup set, and about 47 updates later
+ * the game is in room_battle. While it is there, outside a battle room, the
+ * battle's items are the ones the table gives: those nearly every battle draws,
+ * then that battlegroup's own. The table holds TPAG indices of the data file it
+ * was recorded from; where three of them are not the same items, nothing is
+ * loaded ahead. */
+#include "game_undertale_prefetch.h"
+
+static bool prefetchTableFits(const DataWin *dw) {
+    if (g_prefetchChecked != dw) {
+        g_prefetchChecked = dw;
+        g_prefetchFits = true;
+        for (size_t i = 0; i < sizeof(g_prefetchCheck) / sizeof(g_prefetchCheck[0]); ++i) {
+            const int16_t *c = g_prefetchCheck[i];
+            const TexturePageItem *item = (uint32_t) c[0] < dw->tpag.count ? &dw->tpag.items[c[0]] : NULL;
+            g_prefetchFits &= item != NULL && item->texturePageId == c[1] && item->sourceWidth == c[2] &&
+                              item->sourceHeight == c[3];
+        }
+        if (!g_prefetchFits) logInfo("Prefetch: this data file's textures are not the ones its table was made for; none loaded ahead\n");
+    }
+    return g_prefetchFits;
+}
+
+static int battlePrefetch(Runner *runner, int16_t *items, int max, int *battle) {
+    if (runner->dataWin == NULL || battleUiActive(runner) || !prefetchTableFits(runner->dataWin)) return 0;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return 0;
+    resolveSpeedVars(runner);
+    if (g_encounterObject < 0) return 0;
+    bool encounter = false;
+    for (ptrdiff_t i = 0; i < arrlen(runner->instances) && !encounter; ++i) {
+        const Instance *instance = runner->instances[i];
+        encounter = instance != NULL && instance->active && !instance->destroyed && instance->objectIndex == g_encounterObject;
+    }
+    if (!encounter) return 0;
+    RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
+    if (!numeric(group)) return 0;
+    int id = (int) RValue_toReal(group);
+    *battle = id;
+    int count = 0;
+    for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
+        items[count++] = g_prefetchCommon[i];
+    for (size_t g = 0; g < sizeof(g_prefetchGroups) / sizeof(g_prefetchGroups[0]); ++g) {
+        if (g_prefetchGroups[g].group != id) continue;
+        for (unsigned i = 0; i < g_prefetchGroups[g].count && count < max; ++i)
+            items[count++] = g_prefetchItems[g_prefetchGroups[g].start + i];
+    }
+    return count;
 }
 
 /* The battle tour over other battles (--bench-battles-list): each visit as the
@@ -414,6 +471,7 @@ const OfGame ofGame = {
     .speedFullResBattles = true,
     .speedHalfBattle = speedHalfBattle,
     .speedSkipRun = speedSkipRun,
+    .battlePrefetch = battlePrefetch,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,

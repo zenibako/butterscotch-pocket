@@ -40,6 +40,12 @@ void SWRenderer_setContrastEnabled(Renderer* renderer, bool enabled);
 void SWRenderer_setFloweySpeedAssets(Renderer* renderer);
 void SWRenderer_setFloweySpeedRoom(Renderer* renderer, bool active);
 void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer);
+/* Loads a TPAG item ahead of its first draw, into free cache room only; see
+ * swrPrefetchItem. Returns its SwrPrefetch result: 0 loaded, 1 already there,
+ * 2 not one loaded on its own (or it failed), 3 no free room. */
+int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex);
+/* Items loaded for a draw since the last call (not prefetched), and their time. */
+void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos);
 /* Whether a filled draw_circle/draw_ellipse with this centre and these radii would put nothing on the target: it
  * lies wholly outside, beyond a pixel's margin. False for any renderer but this one. Such a call still settles held
  * layers, so a caller may leave one out only when a draw since the last thing held has done that already. */
