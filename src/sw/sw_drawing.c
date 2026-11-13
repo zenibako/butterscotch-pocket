@@ -2707,6 +2707,9 @@ static void swrDrawSpriteRotatedInternal(
             dst = capture->pixels + row * capture->width + rowFrom - minXc;
         } else {
             dst = swr->fb + cy * swr->fbPitch + rowFrom;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+            if (!banded) // marked below, part by part
+#endif
             swrDirtyRow(swr, cy, rowFrom, rowTo);
         }
         float oy = rowY - pya;
@@ -2747,6 +2750,9 @@ static void swrDrawSpriteRotatedInternal(
             float alongV = sh_dh * (-sinA * (0.5f - pxa) + cosA * oy + localPivotY);
             parts = swrTurnedRowParts(&bands, alongU, bandUx, bandInvUx, alongV, bandVx, bandInvVx,
                                       rowFrom, rowTo, partFrom, partTo);
+            // Only the parts can be written, so only they stop holding the
+            // clear's colour: the next partial clear has less to rewrite.
+            for (int part = 0; part < parts; part++) swrDirtyRow(swr, cy, partFrom[part], partTo[part]);
         }
 #endif
         uintpixel_t* rowDst = dst;
