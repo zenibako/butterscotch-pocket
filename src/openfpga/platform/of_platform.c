@@ -274,13 +274,19 @@ static int32_t visibleWidth(Runner *runner);
  * debt; once that reaches half a frame, one frame is run without drawing to
  * the screen (swrSkipFrame) and the time it saves pays the debt, by shortening
  * the wait at the end of the frame. The game keeps its pace and loses
- * smoothness instead. The debt is capped at one frame so a long stall (a room
- * load) is not chased with a burst of fast frames, and no two frames in a row
- * are skipped. */
+ * smoothness instead. Time lost oversleeping in the limiter is debt too. The
+ * debt is capped, at one frame (a battle: a frame and a half), so a long stall
+ * (a room load) is not chased with a burst of fast frames. No two frames in a
+ * row are skipped, except where the game allows two (ofGame.speedSkipRun). */
 #define OF_SPEED_FAINT_ALPHA 8
 #define OF_SKIP_DEBT_NANOS 16000000ull
 #define OF_SKIP_DEBT_CAP_NANOS 33000000ull
+#define OF_SKIP_DEBT_CAP_BATTLE_NANOS 50000000ull
+/* The limiter sleeps to this far short of its deadline and spins the rest:
+ * a sleep on the Pocket comes back late by a few milliseconds. */
+#define OF_SLEEP_MARGIN_NANOS 5000000
 static uint64_t g_debtNanos = 0;
+static uint64_t g_debtCap = OF_SKIP_DEBT_CAP_NANOS;
 static bool g_skipThisFrame = false;
 static int g_faintOverride = -1;
 static int g_forceSkip = 0;
@@ -341,12 +347,25 @@ void ofPlatformSpriteCosts(int *width, int *height, unsigned nanos[7], unsigned 
 }
 
 static void decideFrameSkip(void) {
-    static bool lastSkipped = false;
+    static int skippedInRow = 0;
     static int32_t lastShown = 0;
     static int frame = 0;
     frame++;
     int32_t shown = visibleWidth(g_runner);
-    bool skip = g_smoothLowres && !g_uncapped && !lastSkipped && g_debtNanos >= OF_SKIP_DEBT_NANOS;
+    int run = 1;
+    bool battle = false;
+    if (g_smoothLowres && g_runner != NULL) {
+        if (ofGame.speedSkipRun != NULL) run = ofGame.speedSkipRun(g_runner);
+        battle = ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner);
+    }
+    static int lastRun = 1;
+    if (run != lastRun) {
+        logInfo("Speed: up to %d updates in a row may go undrawn\n", run);
+        lastRun = run;
+    }
+    g_debtCap = battle || run > 1 ? OF_SKIP_DEBT_CAP_BATTLE_NANOS : OF_SKIP_DEBT_CAP_NANOS;
+    if (g_debtNanos > g_debtCap) g_debtNanos = g_debtCap;
+    bool skip = g_smoothLowres && !g_uncapped && skippedInRow < run && g_debtNanos >= OF_SKIP_DEBT_NANOS;
     if (g_forceSkip > 0) skip = frame % g_forceSkip != 0;
     /* Not across a change of picture size (the display mode follows the frame
      * that is drawn), not while paused or about to be (that frame is the one
@@ -356,7 +375,7 @@ static void decideFrameSkip(void) {
     if (g_dumpFrame == g_dumpTarget) skip = false;
 #endif
     lastShown = shown;
-    lastSkipped = skip;
+    skippedInRow = skip ? skippedInRow + 1 : 0;
     g_skipThisFrame = skip;
     swrSkipFrame = skip;
 }
@@ -718,6 +737,17 @@ void platformSwapBuffers(void) {
     }
 #endif
     scriptProfileFrame();
+#ifdef OF_PC
+    /* BS_SLOW_DRAW_US=n spends n microseconds on every drawn frame, as the
+     * Pocket's slower drawing would, so that frame skipping can be tried here. */
+    static long slowDraw = -1;
+    if (slowDraw < 0) slowDraw = getenv("BS_SLOW_DRAW_US") != NULL ? atol(getenv("BS_SLOW_DRAW_US")) : 0;
+    if (slowDraw > 0) {
+        uint64_t until = nowNanos() + (uint64_t) slowDraw * 1000u;
+        while (nowNanos() < until) {
+        }
+    }
+#endif
     /* Words drawn over the picture are not the renderer's: it then clears
      * the whole of this buffer next time it gets it. */
     bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);
@@ -1371,18 +1401,23 @@ void platformSleepUntil(uint64_t time) {
         g_debtNanos = 0;
     } else if (start > time) {
         g_debtNanos += start - time;
-        if (g_debtNanos > OF_SKIP_DEBT_CAP_NANOS) g_debtNanos = OF_SKIP_DEBT_CAP_NANOS;
+        if (g_debtNanos > g_debtCap) g_debtNanos = g_debtCap;
     } else {
         uint64_t paid = time - start < g_debtNanos ? time - start : g_debtNanos;
         time -= paid;
         g_debtNanos -= paid;
     }
     int64_t remaining = (int64_t) time - (int64_t) start;
-    if (remaining > 2000000)
-        usleep((useconds_t) ((remaining - 1000000) / 1000));
+    if (remaining > OF_SLEEP_MARGIN_NANOS + 1000000)
+        usleep((useconds_t) ((remaining - OF_SLEEP_MARGIN_NANOS) / 1000));
     while (nowNanos() < time) {
     }
     uint64_t end = nowNanos();
+    /* Coming back late is lost time like any other, to be made up the same way. */
+    if (g_smoothLowres && end > time && start <= time) {
+        g_debtNanos += end - time;
+        if (g_debtNanos > g_debtCap) g_debtNanos = g_debtCap;
+    }
     ofPerfAddSleep(end - start);
     ofBenchPacedFrame(g_runner, g_scriptFrame, start, end);
 }

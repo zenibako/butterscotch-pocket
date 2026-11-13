@@ -89,6 +89,10 @@ typedef struct {
      * the battle starts. Without it, only when asked (ofPlatformSetSpeedFullBattles). */
     bool speedFullResBattles;
     bool (*speedHalfBattle)(Runner *runner);
+    /* How many updates in a row Speed may leave undrawn when it is behind: 2 where
+     * the game is in steady action that keeps its pace better that way (Flowey's
+     * fight once its intro is over), otherwise 1. NULL: always 1. */
+    int (*speedSkipRun)(Runner *runner);
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;

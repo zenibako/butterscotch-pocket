@@ -589,10 +589,14 @@ kept as a debt; when it reaches half a frame, one frame is run without
 drawing to the screen and the time that saves pays the debt, so the game
 keeps its pace and loses smoothness instead. The game's Draw events still
 run on a skipped frame, because Undertale keeps logic in them; only the
-pixel work is left out, and drawing to surfaces still happens. No two
-frames in a row are skipped, and the debt is capped at one frame so a long
-stall (a room load) is not chased with a burst of fast frames. The
-benchmark never skips.
+pixel work is left out, and drawing to surfaces still happens. Time the
+limiter loses by waking late from a sleep counts as debt too. No two frames
+in a row are skipped, except in Undertale's Photoshop Flowey fight once its
+intro is over (`obj_flowey_master.introcon` is -1) and the player has HP,
+where two may be. The debt is capped at one frame, a frame and a half in a
+battle, so a long stall (a room load) is not chased with a burst of fast
+frames. The benchmark never skips. On desktop, `BS_SLOW_DRAW_US=<n>` spends
+n microseconds on every drawn frame, so that skipping can be tried there.
 
 ## Texture pack
 

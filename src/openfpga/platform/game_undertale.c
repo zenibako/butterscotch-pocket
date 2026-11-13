@@ -97,7 +97,11 @@ static bool previewSkippedReady;
 static bool leftEyeSkippedReady;
 #endif
 
+/* Variable ids the Speed decisions below look up (speedHalfBattle, speedSkipRun). */
+static bool speedVarsResolved;
+
 static void forgetNativeVm(void) {
+    speedVarsResolved = false;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -270,23 +274,69 @@ static const int16_t g_speedHalfBattles[] = {
     78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
 };
 
+/* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
+static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject;
+static const void *g_speedObjectsOf;
+
+static void resolveSpeedVars(Runner *runner) {
+    if (!speedVarsResolved) {
+        VMContext *ctx = runner->vmContext;
+        g_speedGroupVar = VM_getOrAllocateVarID(ctx, "battlegroup");
+        g_speedIntroVar = VM_getOrAllocateVarID(ctx, "introcon");
+        g_speedHpVar = VM_getOrAllocateVarID(ctx, "hp");
+        speedVarsResolved = true;
+    }
+    if (g_speedObjectsOf != runner->dataWin) {
+        g_speedMasterObject = -1;
+        for (uint32_t i = 0; i < runner->dataWin->objt.count; i++) {
+            const char *name = runner->dataWin->objt.objects[i].name;
+            if (name != NULL && strcmp(name, "obj_flowey_master") == 0) g_speedMasterObject = (int32_t) i;
+        }
+        g_speedObjectsOf = runner->dataWin;
+    }
+}
+
 static bool speedHalfBattle(Runner *runner) {
     if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
-        strcmp(runner->currentRoom->name, "room_battle") != 0)
+        strcmp(runner->currentRoom->name, "room_battle") != 0 || runner->dataWin == NULL)
         return true;
     VMContext *ctx = runner->vmContext;
     if (ctx == NULL || ctx->globalScopeInstance == NULL) return true;
-    static VMContext *idCtx;
-    static int32_t groupVar;
-    if (idCtx != ctx) {
-        groupVar = VM_getOrAllocateVarID(ctx, "battlegroup");
-        idCtx = ctx;
-    }
-    RValue group = Instance_getSelfVar(ctx->globalScopeInstance, groupVar);
+    resolveSpeedVars(runner);
+    RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
     int id = (int) RValue_toReal(group);
     for (unsigned i = 0; i < sizeof(g_speedHalfBattles) / sizeof(g_speedHalfBattles[0]); ++i)
         if (g_speedHalfBattles[i] == id) return true;
     return false;
+}
+
+/* Speed's skipping (speedSkipRun): in Flowey's fight (room_floweyx) once its
+ * intro is over, two updates in a row may go undrawn. Its draws take 52-57 ms on
+ * the Pocket, longer than one skipped update can make up. The intro's own
+ * marker says when it is over: obj_flowey_master's introcon becomes -1 at the
+ * end of its authored intro. That, and the player still having HP, is checked
+ * every update; anything else, or anything missing, keeps the usual one. */
+static bool numeric(RValue value) {
+    return value.type == RVALUE_REAL || value.type == RVALUE_INT32 || value.type == RVALUE_INT64;
+}
+
+static int speedSkipRun(Runner *runner) {
+    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
+        strcmp(runner->currentRoom->name, "room_floweyx") != 0 || runner->dataWin == NULL)
+        return 1;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return 1;
+    resolveSpeedVars(runner);
+    if (g_speedMasterObject < 0) return 1;
+    RValue hp = Instance_getSelfVar(ctx->globalScopeInstance, g_speedHpVar);
+    if (!numeric(hp) || RValue_toReal(hp) <= 0) return 1;
+    for (ptrdiff_t i = 0; i < arrlen(runner->instances); ++i) {
+        Instance *instance = runner->instances[i];
+        if (instance == NULL || !instance->active || instance->destroyed || instance->objectIndex != g_speedMasterObject) continue;
+        RValue intro = Instance_getSelfVar(instance, g_speedIntroVar);
+        return numeric(intro) && RValue_toReal(intro) == -1 ? 2 : 1;
+    }
+    return 1;
 }
 
 /* The battle tour over other battles (--bench-battles-list): each visit as the
@@ -363,6 +413,7 @@ const OfGame ofGame = {
     .battleUiActive = battleUiActive,
     .speedFullResBattles = true,
     .speedHalfBattle = speedHalfBattle,
+    .speedSkipRun = speedSkipRun,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,
