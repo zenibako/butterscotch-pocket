@@ -764,7 +764,8 @@ section. The `drawn` and `skip` rows give average work, limiter wait, and
 total milliseconds per update. Full speed is 30 updates per second. A last
 table gives the pictures shown per second, the longest update and how many
 took over two frames (67 ms), and the longest wait between pictures and how
-many waited over 100 ms.
+many waited over 100 ms. `steady/s` is the update rate leaving out stalls
+(updates over 100 ms, usually room loads), which are counted with their time.
 
 `--bench-snow` measures room 57 (`room_tundra_snowpuzz`, the room with the
 "Dog Marriage" sign), whose snow patch draws and tests 400 dots a frame. It

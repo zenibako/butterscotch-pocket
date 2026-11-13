@@ -37,6 +37,10 @@ static struct {
      * frames, and the longest wait between pictures and those over 100 ms. */
     uint64_t maxUpdateNanos, maxGapNanos;
     unsigned longUpdates, longGaps;
+    /* Updates over 100 ms (room loads, texture reads) and the time they took, so the
+     * rate the rest kept can be told from time lost to a few stalls. */
+    uint64_t stallNanos;
+    unsigned stalls;
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
 static uint64_t g_liveLastShown;
 #define LIVE_LONG_UPDATE_NANOS 66666667ull
@@ -385,6 +389,15 @@ static void reportLive(void) {
                    maxUpdate, g_liveSections[i].longUpdates, maxGap, g_liveSections[i].longGaps);
     }
     ofLogPrint("shown/s = pictures per second; max-upd, max-gap in ms; gap = time between pictures\n");
+    ofLogPrint("phase steady/s stalls stall-ms\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        uint64_t micros = g_liveSections[i].micros, stallMicros = g_liveSections[i].stallNanos / 1000u;
+        unsigned rest = g_liveSections[i].updates - g_liveSections[i].stalls;
+        unsigned steady = micros > stallMicros ? (unsigned) ((uint64_t) rest * 10000000u / (micros - stallMicros)) : 0;
+        ofLogPrint("%-5s %6u.%u %6u %8u\n", g_def.sections[i].tag, steady / 10, steady % 10,
+                   g_liveSections[i].stalls, (unsigned) (stallMicros / 1000u));
+    }
+    ofLogPrint("steady/s = updates per second leaving out stalls (updates over 100 ms) and their time\n");
     reportOpening();
 }
 
@@ -536,6 +549,10 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
         uint64_t update = waitEnd - updateStart;
         if (update > g_liveSections[g_section].maxUpdateNanos) g_liveSections[g_section].maxUpdateNanos = update;
         if (update > LIVE_LONG_UPDATE_NANOS) ++g_liveSections[g_section].longUpdates;
+        if (update > LIVE_LONG_GAP_NANOS) {
+            ++g_liveSections[g_section].stalls;
+            g_liveSections[g_section].stallNanos += update;
+        }
         if (g_liveSubmitted) {
             /* A picture goes up at the end of its update's work. */
             if (g_liveLastShown != 0) {
