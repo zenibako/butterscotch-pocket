@@ -33,7 +33,14 @@ typedef struct {
 static struct {
     unsigned updates, submitted, micros, rate;
     LiveUpdateTimes times[LIVE_KINDS];
+    /* Stalls, apart from the averages: the longest update and those over two
+     * frames, and the longest wait between pictures and those over 100 ms. */
+    uint64_t maxUpdateNanos, maxGapNanos;
+    unsigned longUpdates, longGaps;
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
+static uint64_t g_liveLastShown;
+#define LIVE_LONG_UPDATE_NANOS 66666667ull
+#define LIVE_LONG_GAP_NANOS 100000000ull
 typedef struct {
     unsigned updates, draws, warmDraws;
     uint64_t textureNanos, maxWorkNanos, warmWorkNanos;
@@ -368,6 +375,16 @@ static void reportLive(void) {
         }
     }
     ofLogPrint("wait = time in the frame limiter\n");
+    ofLogPrint("phase shown/s max-upd >67ms max-gap >100ms\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        unsigned micros = g_liveSections[i].micros;
+        unsigned shown = micros ? (unsigned) ((uint64_t) g_liveSections[i].submitted * 10000000u / micros) : 0;
+        unsigned maxUpdate = (unsigned) (g_liveSections[i].maxUpdateNanos / 1000000u);
+        unsigned maxGap = (unsigned) (g_liveSections[i].maxGapNanos / 1000000u);
+        ofLogPrint("%-5s %4u.%u %7u %5u %7u %6u\n", g_def.sections[i].tag, shown / 10, shown % 10,
+                   maxUpdate, g_liveSections[i].longUpdates, maxGap, g_liveSections[i].longGaps);
+    }
+    ofLogPrint("shown/s = pictures per second; max-upd, max-gap in ms; gap = time between pictures\n");
     reportOpening();
 }
 
@@ -516,6 +533,18 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
         t->workNanos += waitStart - updateStart;
         t->waitNanos += waitEnd - waitStart;
         g_liveSections[g_section].submitted += g_liveSubmitted;
+        uint64_t update = waitEnd - updateStart;
+        if (update > g_liveSections[g_section].maxUpdateNanos) g_liveSections[g_section].maxUpdateNanos = update;
+        if (update > LIVE_LONG_UPDATE_NANOS) ++g_liveSections[g_section].longUpdates;
+        if (g_liveSubmitted) {
+            /* A picture goes up at the end of its update's work. */
+            if (g_liveLastShown != 0) {
+                uint64_t gap = waitStart - g_liveLastShown;
+                if (gap > g_liveSections[g_section].maxGapNanos) g_liveSections[g_section].maxGapNanos = gap;
+                if (gap > LIVE_LONG_GAP_NANOS) ++g_liveSections[g_section].longGaps;
+            }
+            g_liveLastShown = waitStart;
+        }
     }
     advanceBenchFrame(runner, waitEnd);
 }
