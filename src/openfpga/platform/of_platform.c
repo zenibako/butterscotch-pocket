@@ -438,6 +438,9 @@ static int32_t visibleWidth(Runner *runner) {
  * them at 320x240 loses nothing. Battles and menus use all 640x480 with small
  * fonts, and need the full resolution to stay legible. */
 static int g_speedFullBattles = -1; /* 1 all battles full size, 0 all half, -2 the game's choice; -1 not decided yet */
+/* The size Speed chose as the current battle started (see platformGetWindowSize).
+ * A restored Memory forgets it, so a battle restored into is sized afresh. */
+static bool g_wasBattle, g_battleHalf;
 const char *ofPlatformSpeedBattlesNote(void) {
     if (!g_smoothLowres) return "";
     if (g_speedFullBattles == 1) return ", battles at 640x480";
@@ -470,13 +473,12 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
         const char *env = getenv("BS_SPEED_FULL_BATTLES");
         g_speedFullBattles = env == NULL ? -2 : strcmp(env, "0") != 0;
     }
-    static bool wasBattle, battleHalf;
-    if (battle && !wasBattle) {
-        if (g_speedFullBattles >= 0 || ofGame.speedHalfBattle == NULL) battleHalf = g_speedFullBattles != 1;
-        else battleHalf = ofGame.speedHalfBattle(g_runner);
+    if (battle && !g_wasBattle) {
+        if (g_speedFullBattles >= 0 || ofGame.speedHalfBattle == NULL) g_battleHalf = g_speedFullBattles != 1;
+        else g_battleHalf = ofGame.speedHalfBattle(g_runner);
     }
-    wasBattle = battle;
-    bool lowres = g_smoothLowres && !(ofGame.speedFullResBattles && battle && !battleHalf);
+    g_wasBattle = battle;
+    bool lowres = g_smoothLowres && !(ofGame.speedFullResBattles && battle && !g_battleHalf);
     bool hires = g_hiresAvailable && !lowres && shown > OF_SCREEN_W;
     swrSmoothMinify = lowres;
     swrMirrorFaintAlpha = g_faintOverride >= 0 ? g_faintOverride : g_smoothLowres ? OF_SPEED_FAINT_ALPHA : 0;
@@ -1450,6 +1452,8 @@ void ofPlatformSnapshotGet(uint32_t values[3]) {
 
 void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
     g_snapshotNotice = false; g_noticeUntil = 0;
+    /* The battle on screen may not be the one the size was chosen for. */
+    g_wasBattle = false;
     g_scriptFrame = (int)values[0];
     g_smoothLowres = values[2] != 0;
 #ifdef OF_PC
