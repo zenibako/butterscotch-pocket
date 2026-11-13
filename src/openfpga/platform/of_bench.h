@@ -14,10 +14,14 @@
  * compared on the device. Started with "--bench" in the app arguments.
  */
 void ofBenchStart(void);
-/* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle. */
-bool ofBenchStartTour(void);
-/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not). */
-bool ofBenchStartBulletTour(void);
+/* "--bench-battles": the game's battle tour instead, if it has one (false if not). Each section is one battle.
+ * With livePacing ("--bench-battles-live", Speed mode) the frame limiter and adaptive skipping stay on and the
+ * report gives drawn and skipped frames and the rate actually reached, as the Flowey live tour does. */
+bool ofBenchStartTour(bool livePacing);
+/* "--bench-battles-list 4,81,101": the battle tour visits these battles instead of its own (before ofBenchStartTour). */
+void ofBenchSetTourList(const char *list);
+/* "--bench-bullet-hell": the game's bullet tour instead, if it has one (false if not); live pacing as for the battle tour. */
+bool ofBenchStartBulletTour(bool livePacing);
 /* "--bench-chaos-saber": the short Asriel encounter, if available. */
 bool ofBenchStartChaosSaber(void);
 /* The game's Flowey checkpoint tour, optionally with normal gameplay pacing. */
@@ -41,7 +45,11 @@ bool ofPlatformShowLogAndHalt(void);
 void ofPlatformSetHiresAllowed(bool allowed);
 void ofPlatformSetSmoothLowres(bool enabled);
 /* Speed mode keeps battles at full size where the game allows it (speedFullResBattles); off by default. */
+/* Speed mode's battle size: every battle at full size (true) or every one at half size (false), instead of
+ * the game's own choice per battle (ofGame.speedHalfBattle). --speed-full-battles / --speed-half-battles. */
 void ofPlatformSetSpeedFullBattles(bool full);
+/* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
+const char *ofPlatformSpeedBattlesNote(void);
 /* Which way L's speed/accuracy setting is. */
 bool ofPlatformSpeedMode(void);
 void ofSaveFsSetVolatile(bool enabled);

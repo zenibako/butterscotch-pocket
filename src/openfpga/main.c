@@ -97,6 +97,9 @@ int main(int argc, char **argv) {
     /* The game cores show a progress bar while loading; the benchmark entries
      * (and --debug, or --verbose-load) keep the OS terminal with the load log. */
     bool verboseLoad = false;
+    /* --bench-battles-list <ids>: which battles the battle tour visits; read first, whatever the order. */
+    for (int i = 0; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--bench-battles-list") == 0) ofBenchSetTourList(argv[i + 1]);
     for (int i = 0; i < argc; i++) {
         if (strncmp(argv[i], "--bench", 7) == 0 || strncmp(argv[i], "--focus-", 8) == 0 ||
             strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "--verbose-load") == 0)
@@ -120,21 +123,25 @@ int main(int argc, char **argv) {
             if (lowres) ofPlatformSetHiresAllowed(false);
             ofBenchStart();
         }
-        /* --bench-battles (accuracy) and --bench-battles-smooth (speed): the battle tour. */
+        /* --bench-battles (accuracy), --bench-battles-smooth (speed) and --bench-battles-live (speed, paced as
+         * in play, with frames skipped as play skips them): the battle tour. */
         bool tourSmooth = strcmp(argv[i], "--bench-battles-smooth") == 0;
-        if (tourSmooth || strcmp(argv[i], "--bench-battles") == 0) {
+        bool tourLive = strcmp(argv[i], "--bench-battles-live") == 0;
+        if (tourSmooth || tourLive || strcmp(argv[i], "--bench-battles") == 0) {
             args.seed = 7;
             args.hasSeed = true;
-            ofPlatformSetSmoothLowres(tourSmooth);
-            if (!ofBenchStartTour()) logWarn("Bench: this game has no battle tour\n");
+            ofPlatformSetSmoothLowres(tourSmooth || tourLive);
+            if (!ofBenchStartTour(tourLive)) logWarn("Bench: this game has no battle tour\n");
         }
-        /* --bench-bullet-hell (accuracy) and --bench-bullet-hell-smooth (speed): the bullet tour. */
+        /* --bench-bullet-hell (accuracy), --bench-bullet-hell-smooth (speed) and --bench-bullet-hell-live (speed,
+         * paced as in play): the bullet tour. */
         bool bulletSmooth = strcmp(argv[i], "--bench-bullet-hell-smooth") == 0;
-        if (bulletSmooth || strcmp(argv[i], "--bench-bullet-hell") == 0) {
+        bool bulletLive = strcmp(argv[i], "--bench-bullet-hell-live") == 0;
+        if (bulletSmooth || bulletLive || strcmp(argv[i], "--bench-bullet-hell") == 0) {
             args.seed = 7;
             args.hasSeed = true;
-            ofPlatformSetSmoothLowres(bulletSmooth);
-            if (!ofBenchStartBulletTour()) logWarn("Bench: this game has no bullet-hell tour\n");
+            ofPlatformSetSmoothLowres(bulletSmooth || bulletLive);
+            if (!ofBenchStartBulletTour(bulletLive)) logWarn("Bench: this game has no bullet-hell tour\n");
         }
         bool saberSmooth = strcmp(argv[i], "--bench-chaos-saber-smooth") == 0;
         if (saberSmooth || strcmp(argv[i], "--bench-chaos-saber") == 0) {
@@ -160,6 +167,7 @@ int main(int argc, char **argv) {
             if (!ofBenchStartSnow()) logWarn("Bench: this game has no snow patch benchmark\n");
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
+        if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);
         /* --sw-mixer: the software mix instead of the hardware mixer, to compare the two. */
         if (strcmp(argv[i], "--sw-mixer") == 0) ofAudioUseSoftwareMixer(true);
@@ -229,7 +237,7 @@ int main(int argc, char **argv) {
     args.traceFrames = true;
 #endif
     if (ofBenchLivePacing() && ofPlatformForcedSkip() > 0) {
-        logError("Bench: Flowey live pacing cannot be combined with forced skipping\n");
+        logError("Bench: live pacing cannot be combined with forced skipping\n");
         return EXIT_FAILURE;
     }
 

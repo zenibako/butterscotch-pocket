@@ -97,7 +97,11 @@ static bool previewSkippedReady;
 static bool leftEyeSkippedReady;
 #endif
 
+/* Variable ids the Speed decisions below look up (speedHalfBattle, speedSkipRun). */
+static bool speedVarsResolved;
+
 static void forgetNativeVm(void) {
+    speedVarsResolved = false;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -260,6 +264,139 @@ static bool battleUiActive(Runner *runner) {
     return enabled;
 }
 
+/* The battles Speed mode keeps at half size (speedHalfBattle): those estimated
+ * from the battle-tour measurements of 2026-11-13 to need more than a frame's
+ * 33 ms on the Pocket at full size, even drawing every other frame. They are
+ * global.battlegroup values. Battles in the other battle rooms (Flowey's) keep
+ * half size, as they had. */
+static const int16_t g_speedHalfBattles[] = {
+    2, 5, 6, 25, 31, 36, 41, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59, 60, 64, 65, 67, 68, 76, 77,
+    78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 94, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
+};
+
+/* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
+static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject;
+static const void *g_speedObjectsOf;
+
+static void resolveSpeedVars(Runner *runner) {
+    if (!speedVarsResolved) {
+        VMContext *ctx = runner->vmContext;
+        g_speedGroupVar = VM_getOrAllocateVarID(ctx, "battlegroup");
+        g_speedIntroVar = VM_getOrAllocateVarID(ctx, "introcon");
+        g_speedHpVar = VM_getOrAllocateVarID(ctx, "hp");
+        speedVarsResolved = true;
+    }
+    if (g_speedObjectsOf != runner->dataWin) {
+        g_speedMasterObject = -1;
+        for (uint32_t i = 0; i < runner->dataWin->objt.count; i++) {
+            const char *name = runner->dataWin->objt.objects[i].name;
+            if (name != NULL && strcmp(name, "obj_flowey_master") == 0) g_speedMasterObject = (int32_t) i;
+        }
+        g_speedObjectsOf = runner->dataWin;
+    }
+}
+
+static bool speedHalfBattle(Runner *runner) {
+    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
+        strcmp(runner->currentRoom->name, "room_battle") != 0 || runner->dataWin == NULL)
+        return true;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return true;
+    resolveSpeedVars(runner);
+    RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
+    int id = (int) RValue_toReal(group);
+    for (unsigned i = 0; i < sizeof(g_speedHalfBattles) / sizeof(g_speedHalfBattles[0]); ++i)
+        if (g_speedHalfBattles[i] == id) return true;
+    return false;
+}
+
+/* Speed's skipping (speedSkipRun): in Flowey's fight (room_floweyx) once its
+ * intro is over, two updates in a row may go undrawn. Its draws take 52-57 ms on
+ * the Pocket, longer than one skipped update can make up. The intro's own
+ * marker says when it is over: obj_flowey_master's introcon becomes -1 at the
+ * end of its authored intro. That, and the player still having HP, is checked
+ * every update; anything else, or anything missing, keeps the usual one. */
+static bool numeric(RValue value) {
+    return value.type == RVALUE_REAL || value.type == RVALUE_INT32 || value.type == RVALUE_INT64;
+}
+
+static int speedSkipRun(Runner *runner) {
+    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
+        strcmp(runner->currentRoom->name, "room_floweyx") != 0 || runner->dataWin == NULL)
+        return 1;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return 1;
+    resolveSpeedVars(runner);
+    if (g_speedMasterObject < 0) return 1;
+    RValue hp = Instance_getSelfVar(ctx->globalScopeInstance, g_speedHpVar);
+    if (!numeric(hp) || RValue_toReal(hp) <= 0) return 1;
+    for (ptrdiff_t i = 0; i < arrlen(runner->instances); ++i) {
+        Instance *instance = runner->instances[i];
+        if (instance == NULL || !instance->active || instance->destroyed || instance->objectIndex != g_speedMasterObject) continue;
+        RValue intro = Instance_getSelfVar(instance, g_speedIntroVar);
+        return numeric(intro) && RValue_toReal(intro) == -1 ? 2 : 1;
+    }
+    return 1;
+}
+
+/* The battle tour over other battles (--bench-battles-list): each visit as the
+ * tour makes its own (g_tourScript, g_tourJumps), 600 frames from the Ruins
+ * room, so that a list of the tour's battles replays the tour exactly. */
+enum { TOUR_LIST_MAX = OF_BENCH_MAX_SECTIONS - 1, TOUR_VISIT = 600, TOUR_FIRST_VISIT = 1000 };
+static char g_listScript[4096];
+static OfJump g_listJumps[TOUR_LIST_MAX * 6];
+static OfBenchSection g_listSections[TOUR_LIST_MAX + 1];
+static char g_listNames[TOUR_LIST_MAX][32], g_listTags[TOUR_LIST_MAX][8], g_listSets[TOUR_LIST_MAX][80];
+
+static bool tourForList(const char *list, const char **script, const OfJump **jumps, int *jumpCount,
+                        const OfBenchSection **sections, int *sectionCount) {
+    /* The tour's walk to the first room; then each visit's moves, menu presses and confirms. */
+    static const char prefix[] =
+        "30:Z,100:Z,160:Z,220:Z,230:D,238:D,246:D,254:D,262:D,270:D,278:D,286:D,300:R,308:R,330:Z,370:R,380:Z,700:R*200";
+    static const struct { int at; const char *key; } visit[] = {
+        {30, "L*20"}, {60, "R*20"}, {160, "Z"}, {168, "U*20"}, {200, "Z"}, {208, "D*20"}, {240, "Z"}, {248, "L*20"},
+        {280, "Z"}, {288, "R*20"}, {320, "Z"}, {328, "U*20"}, {360, "Z"}, {368, "D*20"}, {400, "Z"}, {408, "L*20"},
+        {440, "Z"}, {448, "R*20"}, {480, "Z"}, {488, "U*20"}, {530, "Z"}, {545, "Z"}, {560, "Z"},
+    };
+    int ids[TOUR_LIST_MAX], count = 0;
+    for (const char *p = list; *p != '\0';) {
+        char *end;
+        long id = strtol(p, &end, 10);
+        if (end == p || id < 1 || id > 9999 || count == TOUR_LIST_MAX) return false;
+        ids[count++] = (int) id;
+        p = end;
+        if (*p == ',') p++;
+        else if (*p != '\0') return false;
+    }
+    if (count == 0) return false;
+    size_t used = (size_t) snprintf(g_listScript, sizeof(g_listScript), "%s", prefix);
+    int nj = 0;
+    g_listSections[0] = (OfBenchSection) { "boot to the first room", TOUR_FIRST_VISIT, "boot", NULL, NULL, NULL };
+    for (int v = 0; v < count; v++) {
+        int base = TOUR_FIRST_VISIT + v * TOUR_VISIT;
+        for (size_t k = 0; k < sizeof(visit) / sizeof(visit[0]); k++) {
+            used += (size_t) snprintf(g_listScript + used, sizeof(g_listScript) - used, ",%d:%s", base + visit[k].at, visit[k].key);
+            if (used >= sizeof(g_listScript)) return false;
+        }
+        snprintf(g_listSets[v], sizeof(g_listSets[v]), "battlegroup=%d,border=0,mercy=0,hp=99,maxhp=99,encounter=0", ids[v]);
+        g_listJumps[nj++] = (OfJump) { base, 12, "encounter=0", NULL }; /* the Ruins room */
+        g_listJumps[nj++] = (OfJump) { base + 100, -1, g_listSets[v], "obj_battleblcon" };
+        g_listJumps[nj++] = (OfJump) { base + 250, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 350, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 450, -1, "hp=99", NULL };
+        g_listJumps[nj++] = (OfJump) { base + 500, -1, "monster[0]=0,monster[1]=0,monster[2]=0,hp=99", NULL }; /* won */
+        snprintf(g_listNames[v], sizeof(g_listNames[v]), "battlegroup %d", ids[v]);
+        snprintf(g_listTags[v], sizeof(g_listTags[v]), "b%d", ids[v]);
+        g_listSections[v + 1] = (OfBenchSection) { g_listNames[v], base + TOUR_VISIT - 1, g_listTags[v], NULL, NULL, NULL };
+    }
+    *script = g_listScript;
+    *jumps = g_listJumps;
+    *jumpCount = nj;
+    *sections = g_listSections;
+    *sectionCount = count + 1;
+    return true;
+}
+
 const OfGame ofGame = {
     .title = "Undertale",
     .dataFiles = "data.win, textures.bin and music.bin",
@@ -275,6 +412,8 @@ const OfGame ofGame = {
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,
     .speedFullResBattles = true,
+    .speedHalfBattle = speedHalfBattle,
+    .speedSkipRun = speedSkipRun,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,
@@ -288,6 +427,7 @@ const OfGame ofGame = {
     .tourJumpCount = (int) (sizeof(g_tourJumps) / sizeof(g_tourJumps[0])),
     .tourSections = g_tourSections,
     .tourSectionCount = (int) (sizeof(g_tourSections) / sizeof(g_tourSections[0])),
+    .tourForList = tourForList,
     .bulletTitle = "Undertale bullet-hell tour",
     .bulletScript = g_bulletScript,
     .bulletJumps = g_bulletJumps,

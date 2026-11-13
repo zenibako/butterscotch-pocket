@@ -536,7 +536,14 @@ mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
 everything stays at 320x240.
 
 L switches to the alternative: every room at 320x240, with the renderer
-averaging each 2x2 block of texels when it shrinks a 640x480 screen. Fonts
+averaging each 2x2 block of texels when it shrinks a 640x480 screen.
+Undertale's battles are the exception: Speed draws them at 640x480, except
+the heaviest, which stay at 320x240. Those are the `global.battlegroup` values
+in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Flowey's own battle
+rooms. The size is chosen as a battle starts and kept until it ends. A battle too slow
+for full speed skips frames, as Speed does everywhere. `--speed-full-battles`
+and `--speed-half-battles` (desktop: `BS_SPEED_FULL_BATTLES=1` or `0`) put every
+battle at one size. Deltarune's battles stay at 320x240 unless asked. Fonts
 verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
@@ -582,10 +589,14 @@ kept as a debt; when it reaches half a frame, one frame is run without
 drawing to the screen and the time that saves pays the debt, so the game
 keeps its pace and loses smoothness instead. The game's Draw events still
 run on a skipped frame, because Undertale keeps logic in them; only the
-pixel work is left out, and drawing to surfaces still happens. No two
-frames in a row are skipped, and the debt is capped at one frame so a long
-stall (a room load) is not chased with a burst of fast frames. The
-benchmark never skips.
+pixel work is left out, and drawing to surfaces still happens. Time the
+limiter loses by waking late from a sleep counts as debt too. No two frames
+in a row are skipped, except in Undertale's Photoshop Flowey fight once its
+intro is over (`obj_flowey_master.introcon` is -1) and the player has HP,
+where two may be. The debt is capped at one frame, a frame and a half in a
+battle, so a long stall (a room load) is not chased with a burst of fast
+frames. The benchmark never skips. On desktop, `BS_SLOW_DRAW_US=<n>` spends
+n microseconds on every drawn frame, so that skipping can be tried there.
 
 ## Texture pack
 
@@ -709,6 +720,18 @@ cost the most. `platform/of_bench.c` has the route and says what each
 table's columns are. Quote numbers from a report together with the commit
 it was built from.
 
+Undertale's battle tour, `--bench-battles` (Accuracy) and
+`--bench-battles-smooth` (Speed), visits Froggit, Toriel, Papyrus, Undyne,
+Mettaton EX and Asgore, 600 frames each from a Ruins room. Added to one of
+the tour's options, `--bench-battles-list 4,81,101` makes it visit up to seven
+other battles (`global.battlegroup` values) the same way, for example
+`--bench-battles --bench-battles-list 4,81,101`, and likewise with
+`--bench-battles-smooth` or `--bench-battles-live`; on its own it starts nothing.
+The tour's own six replay the tour exactly. `--bench-battles-live` runs it
+in Speed with the limiter and adaptive draw skipping on, and reports as
+`--bench-flowey-live` does (see below); `--bench-bullet-hell-live` does the same
+for the bullet-hell tour.
+
 Undertale also has a bullet-hell tour: `--bench-bullet-hell` measures
 Accuracy and `--bench-bullet-hell-smooth` measures Speed. Its 600-frame
 Asgore control is followed by two 150-frame natural attack sections,
@@ -741,7 +764,11 @@ controls alone while it runs.
 mode limiter and adaptive draw skipping. The report shows gameplay updates
 per wall-clock second, display submissions, and skipped draws for each
 section. The `drawn` and `skip` rows give average work, limiter wait, and
-total milliseconds per update. Full speed is 30 updates per second.
+total milliseconds per update. Full speed is 30 updates per second. A last
+table gives the pictures shown per second, the longest update and how many
+took over two frames (67 ms), and the longest wait between pictures and how
+many waited over 100 ms. `steady/s` is the update rate leaving out stalls
+(updates over 100 ms, usually room loads), which are counted with their time.
 
 `--bench-snow` measures room 57 (`room_tundra_snowpuzz`, the room with the
 "Dog Marriage" sign), whose snow patch draws and tests 400 dots a frame. It

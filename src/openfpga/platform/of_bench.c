@@ -33,7 +33,18 @@ typedef struct {
 static struct {
     unsigned updates, submitted, micros, rate;
     LiveUpdateTimes times[LIVE_KINDS];
+    /* Stalls, apart from the averages: the longest update and those over two
+     * frames, and the longest wait between pictures and those over 100 ms. */
+    uint64_t maxUpdateNanos, maxGapNanos;
+    unsigned longUpdates, longGaps;
+    /* Updates over 100 ms (room loads, texture reads) and the time they took, so the
+     * rate the rest kept can be told from time lost to a few stalls. */
+    uint64_t stallNanos;
+    unsigned stalls;
 } g_liveSections[OF_BENCH_MAX_SECTIONS];
+static uint64_t g_liveLastShown;
+#define LIVE_LONG_UPDATE_NANOS 66666667ull
+#define LIVE_LONG_GAP_NANOS 100000000ull
 typedef struct {
     unsigned updates, draws, warmDraws;
     uint64_t textureNanos, maxWorkNanos, warmWorkNanos;
@@ -70,7 +81,9 @@ static struct {
     bool tour;
     bool runProbes;
     bool livePacing;
+    bool floweyOpening; /* the Flowey tour's separate opening windows (ofGame.floweyOpening) */
 } g_def;
+static const char *g_tourList;
 
 static void benchStart(const char *title, const char *script, const OfJump *jumps, int jumpCount,
                        const OfBenchSection *sections, int sectionCount, bool tour, bool livePacing) {
@@ -81,6 +94,7 @@ static void benchStart(const char *title, const char *script, const OfJump *jump
     g_def.tour = tour;
     g_def.runProbes = !livePacing;
     g_def.livePacing = livePacing;
+    g_def.floweyOpening = false;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
@@ -96,17 +110,36 @@ void ofBenchStart(void) {
                ofGame.benchSections, ofGame.benchSectionCount, false, false);
 }
 
-bool ofBenchStartTour(void) {
+void ofBenchSetTourList(const char *list) {
+    g_tourList = list;
+}
+
+bool ofBenchStartTour(bool livePacing) {
     if (ofGame.tourScript == NULL) return false;
+    if (g_tourList != NULL) {
+        const char *script;
+        const OfJump *jumps;
+        const OfBenchSection *sections;
+        int jumpCount, sectionCount;
+        if (ofGame.tourForList == NULL ||
+            !ofGame.tourForList(g_tourList, &script, &jumps, &jumpCount, &sections, &sectionCount)) {
+            logWarn("Bench: cannot tour the battles \"%s\"\n", g_tourList);
+            return false;
+        }
+        static char title[96];
+        snprintf(title, sizeof(title), "%s of battles %s", ofGame.tourTitle, g_tourList);
+        benchStart(title, script, jumps, jumpCount, sections, sectionCount, true, livePacing);
+        return true;
+    }
     benchStart(ofGame.tourTitle, ofGame.tourScript, ofGame.tourJumps, ofGame.tourJumpCount,
-               ofGame.tourSections, ofGame.tourSectionCount, true, false);
+               ofGame.tourSections, ofGame.tourSectionCount, true, livePacing);
     return true;
 }
 
-bool ofBenchStartBulletTour(void) {
+bool ofBenchStartBulletTour(bool livePacing) {
     if (ofGame.bulletScript == NULL) return false;
     benchStart(ofGame.bulletTitle, ofGame.bulletScript, ofGame.bulletJumps, ofGame.bulletJumpCount,
-               ofGame.bulletSections, ofGame.bulletSectionCount, true, false);
+               ofGame.bulletSections, ofGame.bulletSectionCount, true, livePacing);
     return true;
 }
 
@@ -122,6 +155,7 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     if (ofGame.floweyScript == NULL) return false;
     benchStart(ofGame.floweyTitle, ofGame.floweyScript, ofGame.floweyJumps, ofGame.floweyJumpCount,
                ofGame.floweySections, ofGame.floweySectionCount, true, livePacing);
+    g_def.floweyOpening = true;
     if (ofGame.floweyOpeningCount > OF_BENCH_MAX_OPENING_WINDOWS)
         ofDiagHalt("Flowey benchmark has too many opening windows");
     for (int i = 0; i < ofGame.floweyOpeningCount; ++i) g_opening[i] = (OpeningTimes) {0};
@@ -280,7 +314,7 @@ static unsigned pipeMicros(const SWPipeRasterNotes *notes, SWRasterPath path) {
 static void reportWork(void);
 
 static void reportOpening(void) {
-    if (ofGame.floweyOpeningCount == 0) return;
+    if (!g_def.floweyOpening || ofGame.floweyOpeningCount == 0) return;
     ofLogPrint("Flowey opening, separate scripted windows\n");
     ofLogPrint("scene     upd  draw   tx-ms   max-ms  warm  warm-ms\n");
     for (int i = 0; i < ofGame.floweyOpeningCount; ++i) {
@@ -345,6 +379,25 @@ static void reportLive(void) {
         }
     }
     ofLogPrint("wait = time in the frame limiter\n");
+    ofLogPrint("phase shown/s max-upd >67ms max-gap >100ms\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        unsigned micros = g_liveSections[i].micros;
+        unsigned shown = micros ? (unsigned) ((uint64_t) g_liveSections[i].submitted * 10000000u / micros) : 0;
+        unsigned maxUpdate = (unsigned) (g_liveSections[i].maxUpdateNanos / 1000000u);
+        unsigned maxGap = (unsigned) (g_liveSections[i].maxGapNanos / 1000000u);
+        ofLogPrint("%-5s %4u.%u %7u %5u %7u %6u\n", g_def.sections[i].tag, shown / 10, shown % 10,
+                   maxUpdate, g_liveSections[i].longUpdates, maxGap, g_liveSections[i].longGaps);
+    }
+    ofLogPrint("shown/s = pictures per second; max-upd, max-gap in ms; gap = time between pictures\n");
+    ofLogPrint("phase steady/s stalls stall-ms\n");
+    for (int i = 0; i < g_def.sectionCount; ++i) {
+        uint64_t micros = g_liveSections[i].micros, stallMicros = g_liveSections[i].stallNanos / 1000u;
+        unsigned rest = g_liveSections[i].updates - g_liveSections[i].stalls;
+        unsigned steady = micros > stallMicros ? (unsigned) ((uint64_t) rest * 10000000u / (micros - stallMicros)) : 0;
+        ofLogPrint("%-5s %6u.%u %6u %8u\n", g_def.sections[i].tag, steady / 10, steady % 10,
+                   g_liveSections[i].stalls, (unsigned) (stallMicros / 1000u));
+    }
+    ofLogPrint("steady/s = updates per second leaving out stalls (updates over 100 ms) and their time\n");
     reportOpening();
 }
 
@@ -409,8 +462,8 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
 #endif
     char drawn[40] = "";
     if (ofPlatformForcedSkip() > 0) snprintf(drawn, sizeof(drawn), ", drawing 1 frame in %d", ofPlatformForcedSkip());
-    ofLogPrint("=== %s benchmark, %s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
-               g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
+    ofLogPrint("=== %s benchmark, %s%s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
+               ofPlatformSpeedBattlesNote(), g_def.livePacing ? ", live pacing" : "", note[0] != '\0' ? ", " : "", note, drawn);
 #ifndef OF_PC
     {
         /* Say which OS and bitstream this ran on; tables look alike otherwise. */
@@ -442,7 +495,7 @@ void ofBenchFrame(Runner *runner, bool skipped) {
 }
 
 static void recordOpening(int update, uint64_t work, bool drawn) {
-    if (update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
+    if (!g_def.floweyOpening || update <= g_lastOpeningUpdate || g_openingWindow >= ofGame.floweyOpeningCount) return;
     g_lastOpeningUpdate = update;
     uint64_t totalTexture = ofPerfTextureLoadNanos();
     uint64_t texture = totalTexture - g_lastOpeningTexture;
@@ -482,17 +535,39 @@ void ofBenchPacedFrame(Runner *runner, int scriptUpdate, uint64_t waitStart, uin
     g_liveLastPaceEnd = waitEnd;
     if (updateStart != 0)
         recordOpening(scriptUpdate, waitStart - updateStart, g_liveFramePending && !g_liveSkipped);
-    if (!g_liveFramePending) return;
+    /* An update that changed room never reached the swap (no frame pending), but
+     * its time is in the section's like any other, so it counts towards the
+     * longest update and the stalls; only swapped ones are drawn or skipped. */
+    bool swapped = g_liveFramePending;
     g_liveFramePending = false;
-    if (!ofPlatformSpeedMode()) ofDiagHalt("Flowey live pacing requires Speed mode");
+    if (swapped && !ofPlatformSpeedMode()) ofDiagHalt("live pacing requires Speed mode");
     if (runner->frameCount <= g_lastLiveUpdate) return;
     g_lastLiveUpdate = runner->frameCount;
+    if (g_frame != 0 && updateStart != 0) {
+        uint64_t update = waitEnd - updateStart;
+        if (update > g_liveSections[g_section].maxUpdateNanos) g_liveSections[g_section].maxUpdateNanos = update;
+        if (update > LIVE_LONG_UPDATE_NANOS) ++g_liveSections[g_section].longUpdates;
+        if (update > LIVE_LONG_GAP_NANOS) {
+            ++g_liveSections[g_section].stalls;
+            g_liveSections[g_section].stallNanos += update;
+        }
+    }
+    if (!swapped) return;
     if (g_frame != 0) {
         LiveUpdateTimes *t = &g_liveSections[g_section].times[g_liveSkipped ? LIVE_SKIPPED : LIVE_DRAWN];
         ++t->count;
         t->workNanos += waitStart - updateStart;
         t->waitNanos += waitEnd - waitStart;
         g_liveSections[g_section].submitted += g_liveSubmitted;
+        if (g_liveSubmitted) {
+            /* A picture goes up at the end of its update's work. */
+            if (g_liveLastShown != 0) {
+                uint64_t gap = waitStart - g_liveLastShown;
+                if (gap > g_liveSections[g_section].maxGapNanos) g_liveSections[g_section].maxGapNanos = gap;
+                if (gap > LIVE_LONG_GAP_NANOS) ++g_liveSections[g_section].longGaps;
+            }
+            g_liveLastShown = waitStart;
+        }
     }
     advanceBenchFrame(runner, waitEnd);
 }

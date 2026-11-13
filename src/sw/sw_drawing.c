@@ -2317,6 +2317,129 @@ static void swrDrawGrowingVineRows(SWRenderer* swr, const SWVineGrowthRows* rows
 }
 #endif
 
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+// A turned sprite's opaque texels, as bands of texture rows: each band the
+// rows' extent from its first opaque texel to the one after its last
+// (swrRowBounds), in texel coordinates relative to the sprite's corner and
+// widened by a texel each way. A sprite that is mostly transparent around a
+// shape (Asgore's trident) then has most of its turned rectangle left out
+// row by row, rather than every pixel there finding its texel transparent.
+#define SWR_TURNED_BANDS 12
+typedef struct {
+    int count;
+    float u0[SWR_TURNED_BANDS], u1[SWR_TURNED_BANDS]; // texel columns
+    float v0[SWR_TURNED_BANDS], v1[SWR_TURNED_BANDS]; // texel rows
+} SWTurnedBands;
+
+// Fills the bands for texels [sx, sx + sw) x [sy, sy + sh) of the texture; false
+// when there are none to use or they would leave out too little to pay. The
+// rows start as bands of their own (a tall sprite's in groups, at most 64
+// bands), and the two neighbours whose joining adds the least area are joined
+// until SWR_TURNED_BANDS are left: a trident's shaft rows stay apart from the
+// narrow rows of its prongs.
+static bool swrTurnedBands(SWTexture* texture, int sx, int sy, int sw, int sh, SWTurnedBands* bands)
+{
+    if (!texture->immutable || sw <= 0 || sh <= 0 || sx < 0 || sy < 0 ||
+        sx + sw > texture->width || sy + sh > texture->height) return false;
+    const uint16_t* bounds = swrRowBounds(texture);
+    if (bounds == NULL) return false;
+    enum { MOST = 64 };
+    int r0[MOST], r1[MOST], lo[MOST], hi[MOST];
+    int rowsPer = (sh + MOST - 1) / MOST;
+    int n = 0;
+    for (int first = 0; first < sh; first += rowsPer) {
+        int last = swrMin(first + rowsPer, sh);
+        int a = sw, z = 0;
+        for (int r = first; r < last; r++) {
+            int from = (int) bounds[2 * (sy + r)] - sx, end = (int) bounds[2 * (sy + r) + 1] - sx;
+            if (from < 0) from = 0;
+            if (end > sw) end = sw;
+            if (from >= end) continue; // nothing opaque in the sprite's part of the row
+            if (a > from) a = from;
+            if (z < end) z = end;
+        }
+        if (a >= z) continue;
+        r0[n] = first; r1[n] = last; lo[n] = a; hi[n] = z;
+        n++;
+    }
+    while (n > SWR_TURNED_BANDS) {
+        int best = 0;
+        long bestAdded = LONG_MAX;
+        for (int i = 0; i + 1 < n; i++) {
+            long joined = (long) (r1[i + 1] - r0[i]) * (swrMax(hi[i], hi[i + 1]) - swrMin(lo[i], lo[i + 1]));
+            long added = joined - (long) (r1[i] - r0[i]) * (hi[i] - lo[i]) - (long) (r1[i + 1] - r0[i + 1]) * (hi[i + 1] - lo[i + 1]);
+            if (added < bestAdded) { bestAdded = added; best = i; }
+        }
+        r1[best] = r1[best + 1];
+        lo[best] = swrMin(lo[best], lo[best + 1]);
+        hi[best] = swrMax(hi[best], hi[best + 1]);
+        for (int i = best + 1; i + 1 < n; i++) { r0[i] = r0[i + 1]; r1[i] = r1[i + 1]; lo[i] = lo[i + 1]; hi[i] = hi[i + 1]; }
+        n--;
+    }
+    long covered = 0;
+    for (int i = 0; i < n; i++) {
+        bands->u0[i] = (float) (lo[i] - 1);
+        bands->u1[i] = (float) (hi[i] + 1);
+        bands->v0[i] = (float) (r0[i] - 1);
+        bands->v1[i] = (float) (r1[i] + 1);
+        covered += (long) (r1[i] - r0[i]) * (hi[i] - lo[i]);
+    }
+    bands->count = n;
+    return n > 0 && covered * 4 <= (long) sw * sh * 3;
+}
+
+// Narrows [*from, *to] to the pixels cx of a row where a + ax * cx is in [lo, hi).
+FORCE_INLINE void swrTurnedRange(float a, float ax, float invAx, float lo, float hi, float* from, float* to)
+{
+    if (ax > 1.0e-6f || ax < -1.0e-6f) {
+        float p = (lo - a) * invAx, q = (hi - a) * invAx;
+        if (p > q) { float t = p; p = q; q = t; }
+        if (*from < p) *from = p;
+        if (*to > q) *to = q;
+    } else if (a < lo || a >= hi) {
+        // Level along the row: all of it or none, by more than the bands' spare texel.
+        *to = *from - 1.0f;
+    }
+}
+
+// The parts of row [rowFrom, rowTo) whose pixels can take an opaque texel, in
+// order and apart, given the texel coordinate along the row: column u0 + ux * cx
+// and row v0 + vx * cx at pixel centre cx + 0.5 (here folded into u0 and v0).
+// Each part is widened by a pixel each way. Returns how many.
+static int swrTurnedRowParts(const SWTurnedBands* bands, float u0, float ux, float invUx, float v0, float vx, float invVx,
+                             int rowFrom, int rowTo, int* from, int* to)
+{
+    int parts = 0;
+    for (int b = 0; b < bands->count; b++) {
+        float lo = (float) rowFrom, hi = (float) rowTo;
+        swrTurnedRange(v0, vx, invVx, bands->v0[b], bands->v1[b], &lo, &hi);
+        swrTurnedRange(u0, ux, invUx, bands->u0[b], bands->u1[b], &lo, &hi);
+        if (lo > hi) continue;
+        int a = swrFloor(lo) - 1, z = swrCeiling(hi) + 2;
+        if (a < rowFrom) a = rowFrom;
+        if (z > rowTo) z = rowTo;
+        if (a >= z) continue;
+        // Insert in order of start, joining what touches.
+        int i = parts;
+        while (i > 0 && from[i - 1] > a) { from[i] = from[i - 1]; to[i] = to[i - 1]; i--; }
+        from[i] = a;
+        to[i] = z;
+        parts++;
+    }
+    int kept = 0;
+    for (int i = 0; i < parts; i++) {
+        if (kept > 0 && from[i] <= to[kept - 1]) {
+            if (to[kept - 1] < to[i]) to[kept - 1] = to[i];
+        } else {
+            from[kept] = from[i];
+            to[kept] = to[i];
+            kept++;
+        }
+    }
+    return kept;
+}
+#endif
+
 static void swrDrawSpriteRotatedInternal(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
@@ -2445,6 +2568,18 @@ static void swrDrawSpriteRotatedInternal(
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
     bool copyHalfTint = blendmode == bm_normal && alpha > 253 && (tintColor & 0x7fff) == 0x4210;
 #endif
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    // An opaque normal draw writes the texel's tinted colour as it is
+    // (alphaBlend's copy), worked out again only when the texel changes.
+    bool plainCopy = blendmode == bm_normal && alpha > 253;
+    uintpixel_t lastTexel = 0, lastTinted = 0; // no opaque texel is 0
+    SWTurnedBands bands;
+    bool banded = capture == NULL && !cachedRows && !flipX && !flipY && swrTurnedBands(texture, sx, sy, sw, sh, &bands);
+    // Where along a row the texel is, as the per-pixel sums below give it.
+    float bandUx = sw_dw * cosA, bandVx = -sh_dh * sinA;
+    float bandInvUx = (bandUx > 1.0e-6f || bandUx < -1.0e-6f) ? 1.0f / bandUx : 0.0f;
+    float bandInvVx = (bandVx > 1.0e-6f || bandVx < -1.0e-6f) ? 1.0f / bandVx : 0.0f;
+#endif
 
     // Half of the box round a turned sprite is outside the sprite, and the
     // test below costs a pixel there most of what one inside costs. So each
@@ -2454,6 +2589,11 @@ static void swrDrawSpriteRotatedInternal(
     // Each edge's x for a row is its x at its first corner plus the row's
     // distance from that corner times its slope; a level edge crosses no row.
     #define SWR_TURNED_SPARE 2.0f
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+    #define SWR_TURNED_PARTS_MAX SWR_TURNED_BANDS
+#else
+    #define SWR_TURNED_PARTS_MAX 1
+#endif
     float edgeSlope[4], edgeLow[4], edgeHigh[4], edgeReach[4];
     bool edgeLevel[4];
     for (int e = 0; !cachedRows && e < 4; e++) // not i: a compiler without C99 for-scoping still has the corners' i
@@ -2567,6 +2707,9 @@ static void swrDrawSpriteRotatedInternal(
             dst = capture->pixels + row * capture->width + rowFrom - minXc;
         } else {
             dst = swr->fb + cy * swr->fbPitch + rowFrom;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+            if (!banded) // marked below, part by part
+#endif
             swrDirtyRow(swr, cy, rowFrom, rowTo);
         }
         float oy = rowY - pya;
@@ -2597,7 +2740,31 @@ static void swrDrawSpriteRotatedInternal(
             }
         }
         
-        for (int cx = rowFrom; cx < rowTo; cx++, dst++, texX += texStepX, texY += texStepY)
+        int partFrom[SWR_TURNED_PARTS_MAX], partTo[SWR_TURNED_PARTS_MAX];
+        int parts = 1;
+        partFrom[0] = rowFrom;
+        partTo[0] = rowTo;
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+        if (banded) {
+            float alongU = sw_dw * (cosA * (0.5f - pxa) + sinA * oy + localPivotX);
+            float alongV = sh_dh * (-sinA * (0.5f - pxa) + cosA * oy + localPivotY);
+            parts = swrTurnedRowParts(&bands, alongU, bandUx, bandInvUx, alongV, bandVx, bandInvVx,
+                                      rowFrom, rowTo, partFrom, partTo);
+            // Only the parts can be written, so only they stop holding the
+            // clear's colour: the next partial clear has less to rewrite.
+            for (int part = 0; part < parts; part++) swrDirtyRow(swr, cy, partFrom[part], partTo[part]);
+        }
+#endif
+        uintpixel_t* rowDst = dst;
+        int32_t rowTexX = texX, rowTexY = texY;
+        for (int part = 0; part < parts; part++)
+        {
+        // The same values the steps from rowFrom reach, and the same wrap.
+        uint32_t skipped = (uint32_t) (partFrom[part] - rowFrom);
+        dst = rowDst + skipped;
+        texX = (int32_t) ((uint32_t) rowTexX + skipped * (uint32_t) texStepX);
+        texY = (int32_t) ((uint32_t) rowTexY + skipped * (uint32_t) texStepY);
+        for (int cx = partFrom[part]; cx < partTo[part]; cx++, dst++, texX += texStepX, texY += texStepY)
         {
             int tx, ty;
             // Far enough from every line between texels (the sprite's edges are two of them)?
@@ -2642,11 +2809,26 @@ static void swrDrawSpriteRotatedInternal(
             }
             
             uintpixel_t src = srcPixels[srcOffset + (ptrdiff_t) ty * srcPitch + tx];
+#ifdef SW_NO_SEMI_TRANSPARENT_TEXTURE_SUPPORT
+            // Transparent: on to the next pixel straight away. Most pixels
+            // here are, and this keeps the jump back as short as it can be.
+            if (!swrIsOpaque(src)) continue;
+#endif
 
             if (swrIsOpaque(src)) {
 #if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING && !defined SW_INACCURATE_TINTING
                 if (copyHalfTint) {
                     *dst = swrTintHalf(src);
+                    continue;
+                }
+#endif
+#if PIXEL_SIZE == 16 && !defined SW_DITHERED_BLENDING
+                if (plainCopy) {
+                    if (src != lastTexel) {
+                        lastTexel = src;
+                        lastTinted = tint(tintColor, src);
+                    }
+                    *dst = lastTinted;
                     continue;
                 }
 #endif
@@ -2657,8 +2839,10 @@ static void swrDrawSpriteRotatedInternal(
                 swrCalculateAlphaBlending(dst, src, tintColor, alpha, blendmode);
 #endif
         }
+        }
     }
     #undef SWR_TURNED_SPARE
+    #undef SWR_TURNED_PARTS_MAX
     #undef SWR_TURNED_COLUMNS
     #undef SWR_TURNED_NEAR
     #undef SWR_TURNED_STEP_SPAN
@@ -3011,6 +3195,93 @@ bool swrFillCoversWhole(SWRenderer* swr, float x1, float y1, float x2, float y2)
     return x1i <= 0 && y1i <= 0 && x1i + xd >= swr->mainWidth && y1i + yd + 1 >= swr->mainHeight;
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+// A one-colour fill of the main buffer, read through its dirty-tile map (see
+// SWDirtyBuffer): a tile nothing has marked since the buffer was last cleared
+// still holds the clear's colour, so the fill turns every pixel of it into one
+// colour, worked out once (the fill's own when opaque). That colour is written
+// without reading the tile, and nothing is done there at all when it is the
+// colour already there: a fade to black over a mostly black battle screen, or
+// the battle box, an opaque black rectangle over the black clear. Such tiles
+// stay unmarked, so the next clear leaves them alone too. Only the marked
+// tiles go through swrDrawHLineInt, as every row did; both give each pixel the
+// same value. The rows are clipped as swrDrawHLineInt clips them.
+// Returns false, having drawn nothing, when the map cannot be relied on.
+static bool swrFillKnownTiles(SWRenderer* swr, int x1i, int y1i, int xd, int yd, uintpixel_t color, int alpha)
+{
+    SWDirtyBuffer* d = swr->dirty;
+    if (d == NULL || swr->dirtyMark != d || !d->known || swr->clearHeld || swr->baseMode != 0 ||
+        swr->fb != swr->mainFb || d->fb != swr->mainFb || swr->fbPitch != d->width ||
+        d->width != swr->mainWidth || d->height != swr->mainHeight ||
+        swr->maxX > d->width || swr->maxY > d->height || swr->portX < 0 || swr->portY < 0 ||
+        swr->blendMode != bm_normal || alpha < 4) // fainter than that, alphaBlend leaves the pixel be
+        return false;
+    // Nothing to gain when every tile the fill reaches is marked: the plain rows then.
+    {
+        int top = swrMax(y1i, swr->portY), bottom = swrMin(y1i + yd, swr->maxY - 1);
+        int left = swrMax(x1i, swr->portX), right = swrMin(x1i + xd, swr->maxX);
+        if (top > bottom || left >= right) return false;
+        uint32_t span = swrDirtyMask(left, right);
+        bool anyKnown = false;
+        for (int r = top >> SWR_DIRTY_TILE_H_SHIFT; r <= bottom >> SWR_DIRTY_TILE_H_SHIFT && !anyKnown; r++)
+            anyKnown = ((d->rows[r] | d->baseRows[r]) & span) != span;
+        if (!anyKnown) return false;
+    }
+    uint32_t srcRedBlue = swrSpreadRedBlue(color) * (uint32_t) alpha;
+    uint32_t srcGreen = swrGreen(color) * (uint32_t) alpha;
+    uint32_t dstalpha = (uint32_t) (256 - alpha);
+    uintpixel_t known = d->color;
+    // Opaque, alphaBlend stores the colour itself.
+    uintpixel_t onKnown = alpha > 253 ? color : swrBlendPremultiplied(known, srcRedBlue, srcGreen, dstalpha);
+    bool changes = onKnown != known;
+    static int check = -1;
+    if (check < 0) check = getenv("BS_CHECK_CLEAR") != NULL;
+    for (int y = y1i; y <= y1i + yd; y++) {
+        if (y < swr->portY || y >= swr->maxY) continue;
+        int dx = x1i, dw = xd;
+        if (dx < swr->portX) { dw += dx - swr->portX; dx = swr->portX; }
+        if (dx + dw >= swr->maxX) dw = swr->maxX - dx;
+        if (dw <= 0) continue;
+        int end = dx + dw;
+        uintpixel_t* line = &swr->fb[y * swr->fbPitch];
+        uint32_t marked = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT] | d->baseRows[y >> SWR_DIRTY_TILE_H_SHIFT];
+        uint32_t span = swrDirtyMask(dx, end);
+        if ((marked & span) == span) {
+            swrDrawHLineInt((Renderer*) swr, dx, y, dw, color, color, alpha);
+            continue;
+        }
+        // Runs of whole tiles that are all marked or all known.
+        for (int x = dx; x < end; ) {
+            int tile = x >> SWR_DIRTY_TILE_W_SHIFT;
+            bool isMarked = (marked >> tile) & 1u;
+            int runEnd = (tile + 1) << SWR_DIRTY_TILE_W_SHIFT;
+            while (runEnd < end && (bool) ((marked >> (runEnd >> SWR_DIRTY_TILE_W_SHIFT)) & 1u) == isMarked)
+                runEnd += 1 << SWR_DIRTY_TILE_W_SHIFT;
+            if (runEnd > end) runEnd = end;
+            if (isMarked) {
+                // The row's own blend, as before (its clip and marks change nothing here).
+                swrDrawHLineInt((Renderer*) swr, x, y, runEnd - x, color, color, alpha);
+            } else {
+                if (check) {
+                    for (int i = x; i < runEnd; i++) {
+                        if (line[i] != known) {
+                            logError("swr: unmarked write at %d,%d under a fill: %04x, cleared to %04x\n", i, y,
+                                     (unsigned) line[i], (unsigned) known);
+                            abort();
+                        }
+                    }
+                }
+                if (changes) swrFillPixels(line + x, (size_t) (runEnd - x), onKnown);
+            }
+            x = runEnd;
+        }
+        // Tiles that still hold the clear's colour stay unmarked.
+        if (changes) swrDirtyRow(swr, y, dx, end);
+    }
+    return true;
+}
+#endif
+
 void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uintpixel_t pxcolor, float alpha)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
@@ -3078,6 +3349,10 @@ void swrFillRectangle(Renderer* renderer, float x1, float y1, float x2, float y2
         return;
     }
     
+#ifdef SW_HAS_PREMUL_BLEND
+    // (An opaque fill of the whole buffer goes the usual way below, which keeps it as the buffer's one colour.)
+    if ((!opaque || !wholeBuffer) && swrFillKnownTiles(swr, x1i, y1i, xd, yd, pxcolor, alphaInt)) return;
+#endif
     for (int y = 0; y <= yd; y++) {
         swrDrawHLineInt(renderer, x1i, y1i + y, xd, pxcolor, pxcolor, alphaInt);
     }
