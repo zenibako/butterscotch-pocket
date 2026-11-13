@@ -282,8 +282,11 @@ static int32_t visibleWidth(Runner *runner);
 #define OF_SKIP_DEBT_NANOS 16000000ull
 #define OF_SKIP_DEBT_CAP_NANOS 33000000ull
 #define OF_SKIP_DEBT_CAP_BATTLE_NANOS 50000000ull
-/* The limiter sleeps to this far short of its deadline and spins the rest:
- * a sleep on the Pocket comes back late by a few milliseconds. */
+/* In Accuracy the limiter sleeps to this far short of its deadline and spins
+ * the rest. Speed does not sleep at all: a sleep comes back late by however
+ * long the OS's timer rounds it to (a few milliseconds on the Pocket, 2.5 or 5
+ * on macOS), however short it is asked to be, and that lateness came out of
+ * every frame that waited (BsRes2, 2026-11-13: overworld frames at 37 ms). */
 #define OF_SLEEP_MARGIN_NANOS 5000000
 static uint64_t g_debtNanos = 0;
 static uint64_t g_debtCap = OF_SKIP_DEBT_CAP_NANOS;
@@ -1408,7 +1411,7 @@ void platformSleepUntil(uint64_t time) {
         g_debtNanos -= paid;
     }
     int64_t remaining = (int64_t) time - (int64_t) start;
-    if (remaining > OF_SLEEP_MARGIN_NANOS + 1000000)
+    if (!g_smoothLowres && remaining > OF_SLEEP_MARGIN_NANOS + 1000000)
         usleep((useconds_t) ((remaining - OF_SLEEP_MARGIN_NANOS) / 1000));
     while (nowNanos() < time) {
     }
