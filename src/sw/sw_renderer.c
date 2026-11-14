@@ -737,8 +737,8 @@ static void SWRenderer_drawSprite(Renderer* renderer, int32_t tpagIndex, float x
             // place behind the boss and projectiles. Later layers are baked in.
             if (swr->floweyPipeFrame == swr->frameCounter) return;
             if (swr->blendMode == bm_normal &&
-                fabsf(x - 400.0f) <= 1.01f && fabsf(y + 20.0f) <= 0.51f &&
-                fabsf(xscale - 1.0f) <= 0.0051f && yscale == 1.0f && angleDeg == 0.0f &&
+                x >= 390.0f && x <= 415.0f && y >= -35.0f && y <= -10.0f &&
+                xscale >= 0.95f && xscale <= 1.05f && yscale == 1.0f && angleDeg == 0.0f &&
                 alpha == 1.0f && originX == 0.0f && originY == 0.0f &&
                 tpag->sourceWidth == 190 && tpag->sourceHeight == 181 &&
                 tpag->targetX == 0 && tpag->targetY == 0 && tpag->targetWidth == 190 && tpag->targetHeight == 181 &&
