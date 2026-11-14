@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 #include <limits.h>
 #include <float.h>
 #ifdef OF_PC
@@ -1324,6 +1326,50 @@ static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
 }
 #endif
 
+#ifdef SW_HAS_PREMUL_BLEND
+/**
+ * Blend one source colour over a run of n pixels (a fade's row: the whole draw samples
+ * one texel). Each result depends only on the pixel under it, so the last one is kept
+ * and written again while that pixel repeats; with 16-bit pixels two equal neighbours
+ * are checked and written as one word. Every pixel gets exactly what the per-pixel
+ * blend would have given it.
+ */
+FORCE_INLINE void swrBlendOneColourRun(uintpixel_t* d, int n, bool half, uintpixel_t tinted,
+                                       uint32_t srcRedBlue, uint32_t srcGreen, uint32_t dstalpha,
+                                       uint32_t* lastUnder, uintpixel_t* lastResult)
+{
+    uint32_t under = *lastUnder;
+    uintpixel_t result = *lastResult;
+    int x = 0;
+#define SWR_BLEND_ONE(i) do { \
+        uintpixel_t u_ = d[i]; \
+        if (u_ != under) { \
+            result = half ? swrBlendHalf(u_, tinted) : swrBlendPremultiplied(u_, srcRedBlue, srcGreen, dstalpha); \
+            under = u_; \
+        } \
+        d[i] = result; \
+    } while (0)
+#if PIXEL_SIZE == 16
+    if (n > 0 && ((uintptr_t) d & 2)) { SWR_BLEND_ONE(0); x = 1; }
+    for (; x + 1 < n; x += 2) {
+        uint32_t pair;
+        memcpy(&pair, d + x, sizeof(pair));
+        if (pair == under * 0x10001u) {
+            pair = (uint32_t) result * 0x10001u;
+            memcpy(d + x, &pair, sizeof(pair));
+        } else {
+            SWR_BLEND_ONE(x);
+            SWR_BLEND_ONE(x + 1);
+        }
+    }
+#endif
+    for (; x < n; x++) SWR_BLEND_ONE(x);
+#undef SWR_BLEND_ONE
+    *lastUnder = under;
+    *lastResult = result;
+}
+#endif
+
 /**
  * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
  * A cached half-size texture can supply the coverage of each sampled pixel.
@@ -1785,6 +1831,8 @@ static void swrDrawSpriteInternal(
         uintpixel_t lastTinted = 0;
         uint32_t lastUnder = 0xFFFFFFFF; // no 16-bit pixel: nothing kept yet
         uintpixel_t lastResult = 0;
+        // Every column of the draw samples the same texel column (a stretched 1x1 fade).
+        bool oneTexel = dw > 0 && ((ixs2 + (fixedp_t) (dw - 1) * oxs2) >> fp_prec) == (ixs2 >> fp_prec);
         SWR_PROBE_PATH(4);
         
         fixedp_t ys2 = iys2;
@@ -1812,6 +1860,22 @@ static void swrDrawSpriteInternal(
             // The blend depends only on the pixel under it and the source
             // colour, and a fade usually goes over long stretches of one
             // colour: the last result is kept and used again while both repeat.
+            if (oneTexel) {
+                // A fade stretches one texel over the screen: one source colour for the row.
+                uintpixel_t pixel = srcline[(int)(ixs2 >> fp_prec)];
+                if (!swrIsOpaque(pixel)) continue;
+                if (pixel != lastPixel) {
+                    lastTinted = tint(tintColor, pixel);
+                    srcRedBlue = swrSpreadRedBlue(lastTinted) * alpha;
+                    srcGreen = swrGreen(lastTinted) * alpha;
+                    lastPixel = pixel;
+                    lastUnder = 0xFFFFFFFF;
+                }
+                if (from < to)
+                    swrBlendOneColourRun(dstline + from, to - from, alpha == 128 && swrFavorSpeed, lastTinted,
+                                         srcRedBlue, srcGreen, dstalpha, &lastUnder, &lastResult);
+                continue;
+            }
             if (alpha == 128 && swrFavorSpeed) {
                 for (int x = from; x < to; x++, xs2 += oxs2) {
                     uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
