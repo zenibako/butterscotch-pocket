@@ -1326,6 +1326,37 @@ static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
 }
 #endif
 
+/**
+ * Copy the opaque texels of an unscaled row and leave the rest of the destination as
+ * it is. When source and destination share their alignment, two texels are read as
+ * one word and written together if both are opaque; any pair with a transparent texel
+ * goes texel by texel, so every pixel ends up exactly as the per-texel loop leaves it.
+ */
+FORCE_INLINE void swrCopyKeyedRow(uintpixel_t* d, const uintpixel_t* s, int n)
+{
+    int x = 0;
+#if PIXEL_SIZE == 16
+    if (n >= 4 && (((uintptr_t) d ^ (uintptr_t) s) & 3) == 0) {
+        if ((uintptr_t) d & 2) {
+            if (swrIsOpaque(s[0])) d[0] = s[0];
+            x = 1;
+        }
+        for (; x + 1 < n; x += 2) {
+            uint32_t pair;
+            memcpy(&pair, s + x, sizeof(pair));
+            if (swrIsOpaque((uintpixel_t) pair) && swrIsOpaque((uintpixel_t) (pair >> 16))) {
+                memcpy(d + x, &pair, sizeof(pair));
+            } else {
+                if (swrIsOpaque(s[x])) d[x] = s[x];
+                if (swrIsOpaque(s[x + 1])) d[x + 1] = s[x + 1];
+            }
+        }
+    }
+#endif
+    for (; x < n; x++)
+        if (swrIsOpaque(s[x])) d[x] = s[x];
+}
+
 #ifdef SW_HAS_PREMUL_BLEND
 /**
  * Blend one source colour over a run of n pixels (a fade's row: the whole draw samples
@@ -2038,12 +2069,7 @@ static void swrDrawSpriteInternal(
                     if (from < 0) from = 0;
                     if (to > dw) to = dw;
                 }
-                for (int x = from; x < to; x++)
-                {
-                    uintpixel_t pixel = srcline[x];
-                    if (swrIsOpaque(pixel))
-                        dstline[x] = pixel;
-                }
+                swrCopyKeyedRow(dstline + from, srcline + from, to - from);
             }
             else
             {
