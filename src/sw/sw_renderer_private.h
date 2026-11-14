@@ -330,15 +330,6 @@ typedef struct SWDirtyBuffer {
     SWBaseKey baseKey;
     uint32_t baseRows[SWR_DIRTY_MAX_ROWS];
     uint32_t keep[SWR_DIRTY_MAX_ROWS];
-    // The last held background written whole into this buffer (see
-    // swrTiledHeldWrite): every row y is bgPatterns[y * bgPeriod ..] laid
-    // along it, except in the tiles marked in rows since, which is all that
-    // `rows` means while bgValid (known is then false).
-    bool bgValid;
-    int bgPeriod, bgWidth, bgHeight;
-    uint32_t bgGeneration;
-    uintpixel_t* bgPatterns;
-    size_t bgCapacity;      // pixels allocated at bgPatterns
 } SWDirtyBuffer;
 
 // Bit counts for the tile masks; the builtins are missing from TinyCC, MSVC and old GCC.
@@ -403,7 +394,6 @@ FORCE_INLINE void swrDirtyRectIn(SWRenderer* swr, const uintpixel_t* target, int
 // Fills the whole main buffer with one colour: only what needs it (see above).
 void swrClearMain(SWRenderer* swr, uintpixel_t color);
 int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key);
-uint32_t swrDirtyCurrentGeneration(void);
 void swrBaseFinish(SWRenderer* swr, bool drawn);
 
 // Inlined function definitions included below

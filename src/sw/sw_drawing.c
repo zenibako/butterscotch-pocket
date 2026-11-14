@@ -4235,126 +4235,6 @@ FORCE_INLINE void swrTiledPassPattern(const SWTiledPass* pass, int y, uintpixel_
 }
 #endif
 
-// The buffer being drawn no longer holds a recorded held background.
-static void swrBackgroundForget(SWRenderer* swr)
-{
-    if (swr->dirty != NULL) swr->dirty->bgValid = false;
-}
-
-// The held background's record in the buffer being drawn (see
-// SWDirtyBuffer::bgValid), made ready for a write with this period: NULL
-// when there is none to keep (switched off, or not drawing into a tracked
-// buffer). bgValid is left true only when the buffer still holds the last
-// one written there, in which case the tiles marked since are in d->rows.
-static SWDirtyBuffer* swrBackgroundRecord(SWRenderer* swr, int period, bool off)
-{
-    SWDirtyBuffer* d = swr->dirty;
-    if (off || d == NULL || d->fb != swr->mainFb || swr->fb != swr->mainFb ||
-        d->width != swr->mainWidth || d->height != swr->mainHeight) {
-        swrBackgroundForget(swr);
-        return NULL;
-    }
-    if (d->bgGeneration != swrDirtyCurrentGeneration() || d->bgPeriod != period ||
-        d->bgWidth != swr->mainWidth || d->bgHeight != swr->mainHeight) d->bgValid = false;
-    size_t need = (size_t) swr->mainHeight * (size_t) period;
-    if (d->bgCapacity < need) {
-        uintpixel_t* grown = (uintpixel_t*) realloc(d->bgPatterns, need * sizeof(uintpixel_t));
-        d->bgValid = false;
-        if (grown == NULL) {
-            free(d->bgPatterns);
-            d->bgPatterns = NULL;
-            d->bgCapacity = 0;
-            return NULL;
-        }
-        d->bgPatterns = grown;
-        d->bgCapacity = need;
-    }
-    return d;
-}
-
-// Writes row y of the held background, laid out in row[] from the stretch
-// (its first `first` pixels, repeating every `period`), and records the
-// stretch. With reuse, the buffer's row already holds the stretch recorded
-// last time except in the tiles marked since: those are written whole, and
-// elsewhere only the pixels whose stretch entry differs.
-static void swrBackgroundRow(SWRenderer* swr, SWDirtyBuffer* d, bool reuse, int y, const uintpixel_t* pattern,
-                             int first, int period, const uintpixel_t* row)
-{
-    int width = swr->mainWidth;
-    uintpixel_t* dst = &swr->mainFb[y * width];
-    if (d == NULL) {
-        memcpy(dst, row, (size_t) width * sizeof(uintpixel_t));
-        return;
-    }
-    uintpixel_t* old = &d->bgPatterns[(size_t) y * period];
-    if (!reuse) {
-        memcpy(dst, row, (size_t) width * sizeof(uintpixel_t));
-        memcpy(old, pattern, (size_t) first * sizeof(uintpixel_t));
-        return;
-    }
-    uint32_t touched = d->rows[y >> SWR_DIRTY_TILE_H_SHIFT];
-    int changed[SWR_TILED_PERIOD_MAX], n = 0;
-    for (int i = 0; i < first; i++)
-        if (old[i] != pattern[i]) changed[n++] = i;
-    if (n * 4 > first) {
-        // Most of the stretch moved: one copy of the whole row is cheaper.
-        memcpy(dst, row, (size_t) width * sizeof(uintpixel_t));
-    } else {
-        for (int k = 0; k < n; k++)
-            for (int x = changed[k]; x < width; x += period) dst[x] = row[x];
-        while (touched != 0) {
-            int c0 = swrLowestBit(touched), c1 = c0;
-            while (c1 < 32 && (touched & (1u << c1))) c1++;
-            touched &= c1 >= 32 ? 0 : ~((1u << c1) - 1);
-            int x0 = c0 << SWR_DIRTY_TILE_W_SHIFT, x1 = c1 << SWR_DIRTY_TILE_W_SHIFT;
-            if (x1 > width) x1 = width;
-            if (x0 < x1) memcpy(&dst[x0], &row[x0], (size_t) (x1 - x0) * sizeof(uintpixel_t));
-        }
-    }
-    if (n > 0) memcpy(old, pattern, (size_t) first * sizeof(uintpixel_t));
-}
-
-static void swrBackgroundCheck(const SWRenderer* swr, const SWDirtyBuffer* d);
-
-// After a held background was written whole into the buffer: from here on
-// d->rows collects only what is drawn over it, for the next write there.
-static void swrBackgroundDone(SWRenderer* swr, SWDirtyBuffer* d, int period)
-{
-    if (d == NULL) return;
-    d->bgValid = true;
-    d->bgPeriod = period;
-    d->bgWidth = swr->mainWidth;
-    d->bgHeight = swr->mainHeight;
-    d->bgGeneration = swrDirtyCurrentGeneration();
-    d->known = false; // not one colour outside the marked tiles: the next clear is a whole one
-    d->baseValid = false;
-    memset(d->rows, 0, sizeof(d->rows));
-    memset(d->baseRows, 0, sizeof(d->baseRows));
-    swr->dirtyMark = d;
-    swrBackgroundCheck(swr, d);
-}
-
-// BS_CHECK_BG=1 (desktop, slow): every pixel of the buffer must be what a
-// whole write of the background would have put there.
-static void swrBackgroundCheck(const SWRenderer* swr, const SWDirtyBuffer* d)
-{
-    static int check = -1;
-    if (check < 0) check = getenv("BS_CHECK_BG") != NULL;
-    if (!check) return;
-    static uint32_t checked;
-    for (int y = 0; y < d->bgHeight; y++) {
-        const uintpixel_t* stretch = &d->bgPatterns[(size_t) y * d->bgPeriod];
-        for (int x = 0; x < d->bgWidth; x++) {
-            if (swr->mainFb[y * d->bgWidth + x] != stretch[x % d->bgPeriod]) {
-                logError("swr: kept background differs at %d,%d in a %dx%d buffer: %04x, expected %04x\n", x, y,
-                         d->bgWidth, d->bgHeight, (unsigned) swr->mainFb[y * d->bgWidth + x], (unsigned) stretch[x % d->bgPeriod]);
-                abort();
-            }
-        }
-    }
-    if (++checked % 300 == 1) logInfo("swr: held background checked %u times\n", checked);
-}
-
 // Writes the held clear's colour over the whole main buffer, the tiled passes
 // held over it and the fills held over those, a row at a time. Leaves none
 // held. With fills, the buffer's row is filled with what they make of the
@@ -4371,8 +4251,8 @@ static void swrBackgroundCheck(const SWRenderer* swr, const SWDirtyBuffer* d)
 // out. Every pixel comes out as the copies would have left it.
 void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
 {
-#if PIXEL_SIZE != 16 || !defined SW_HAS_PREMUL_BLEND || defined SW_DITHERED_BLENDING
     swrDirtyAll(swr);
+#if PIXEL_SIZE != 16 || !defined SW_HAS_PREMUL_BLEND || defined SW_DITHERED_BLENDING
     swrFillPixels(swr->mainFb, (size_t) swr->mainWidth * swr->mainHeight, color);
 #else
     int count = swr->tiledHeldCount, fills = swrFillHeldCount;
@@ -4390,12 +4270,6 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
         // the previous row's, so is the stretch, and row[] is already laid.
         static int noMemo = -1;
         if (noMemo < 0) noMemo = getenv("BS_NO_BG_REUSE") != NULL;
-        // This buffer's last held background (see SWDirtyBuffer::bgValid):
-        // where nothing has been drawn over it since, only the pixels whose
-        // stretch entry changed are written.
-        SWDirtyBuffer* d = swrBackgroundRecord(swr, period, noMemo);
-        bool reuse = d != NULL && d->bgValid;
-        if (d == NULL) swrDirtyAll(swr);
         int lastSource[SWR_TILED_HELD_MAX];
         uint8_t rowIds[SWR_TILED_HELD_MAX][SWR_TILED_OWN_SIDE];
         bool idsKnown = !noMemo;
@@ -4412,7 +4286,7 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
                 lastSource[p] = source;
             }
             if (same) {
-                swrBackgroundRow(swr, d, reuse, y, pattern, first, period, row);
+                memcpy(&swr->mainFb[y * width], row, (size_t) width * sizeof(uintpixel_t));
                 continue;
             }
             swrFillPixels(pattern, (size_t) period, color);
@@ -4430,13 +4304,10 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
                 }
                 laid = true;
             }
-            swrBackgroundRow(swr, d, reuse, y, pattern, first, period, row);
+            memcpy(&swr->mainFb[y * width], row, (size_t) width * sizeof(uintpixel_t));
         }
-        swrBackgroundDone(swr, d, period);
         return;
     }
-    swrBackgroundForget(swr);
-    swrDirtyAll(swr);
     if (fills == 0) {
         for (int y = 0; y < swr->mainHeight; y++) {
             uintpixel_t* dstline = &swr->mainFb[y * swr->mainWidth];
