@@ -170,6 +170,11 @@ void swrFramebufferTouched(void)
     swrDirtyGeneration++;
 }
 
+uint32_t swrDirtyCurrentGeneration(void)
+{
+    return swrDirtyGeneration;
+}
+
 // Picks up what is known of the platform buffer about to be drawn in.
 MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
 {
@@ -259,6 +264,7 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
     memset(d->rows, 0, sizeof(d->rows));
     memset(d->baseRows, 0, sizeof(d->baseRows));
     d->baseValid = false;
+    d->bgValid = false;
     swr->dirtyMark = d;
 }
 
@@ -388,6 +394,8 @@ static void SWRenderer_destroy(Renderer* renderer)
     free(swr->hintedGlyphs);
     free(swr->contrastItems);
     free(swr->contrastFonts);
+    if (swr->dirtyBuffers != NULL)
+        for (int i = 0; i < SWR_DIRTY_BUFFERS; i++) free(swr->dirtyBuffers[i].bgPatterns);
     free(swr->dirtyBuffers);
     swr->dirtyBuffers = swr->dirty = swr->dirtyMark = NULL;
     
