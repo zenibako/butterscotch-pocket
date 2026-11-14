@@ -4168,6 +4168,17 @@ static bool swrTiledHeldRepeats(const SWRenderer* swr, int count, int* step)
     return true;
 }
 
+// Which of the pass's texel rows lands on row y of the buffer, or -1 for none:
+// the only thing about y that swrTiledPassPattern's result depends on.
+FORCE_INLINE int swrTiledPassSourceRow(const SWTiledPass* pass, int y)
+{
+    int fromOrigin = y - pass->originY;
+    if (y < pass->minY || y >= pass->maxY || fromOrigin < 0) return -1;
+    int copyY = fromOrigin / pass->stepY, row = fromOrigin - copyY * pass->stepY;
+    if (copyY >= pass->countY || row >= pass->height) return -1;
+    return row;
+}
+
 // What the pass puts on row y, into one stretch of the row: `pattern[i]`
 // stands for every pixel x of the row with x % period == i. The same pixels
 // as swrTiledPassRow, from one copy instead of every copy across the row.
@@ -4224,7 +4235,23 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
         SWFilledMemo filledMemo = { 0 };
         int width = swr->mainWidth, first = period < width ? period : width;
         bool laid = false; // row[] holds a row laid out from the stretch now in row[0..first)
+        // A row's stretch depends only on which texel row each pass puts on
+        // it (the colour and fills are the same for every row): when those are
+        // the previous row's, so is the stretch, and row[] is already laid.
+        static int noMemo = -1;
+        if (noMemo < 0) noMemo = getenv("BS_NO_BG_REUSE") != NULL;
+        int lastSource[SWR_TILED_HELD_MAX];
         for (int y = 0; y < swr->mainHeight; y++) {
+            bool same = laid && !noMemo;
+            for (int p = 0; p < count; p++) {
+                int source = swrTiledPassSourceRow(&swrTiledHeld[p], y);
+                if (!laid || source != lastSource[p]) same = false;
+                lastSource[p] = source;
+            }
+            if (same) {
+                memcpy(&swr->mainFb[y * width], row, (size_t) width * sizeof(uintpixel_t));
+                continue;
+            }
             swrFillPixels(pattern, (size_t) period, color);
             for (int p = 0; p < count; p++) swrTiledPassPattern(&swrTiledHeld[p], y, pattern, period, &memos[p]);
             if (fills > 0)
