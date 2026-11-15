@@ -103,13 +103,16 @@ static bool speedVarsResolved;
  * forgotten with each VM, since a new data file may be loaded at the same address. */
 static const DataWin *g_prefetchChecked;
 static bool g_prefetchFits;
-/* Whether battlePrefetch saw an encounter last time, so that obj_battler carries it on. */
+/* Whether battlePrefetch saw an encounter last time, so that obj_battler carries it on,
+ * and how many updates obj_battler has had so far. */
 static bool g_encounterOn;
+static int g_heartUpdates;
 
 static void forgetNativeVm(void) {
     speedVarsResolved = false;
     g_prefetchChecked = NULL;
     g_encounterOn = false;
+    g_heartUpdates = 0;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -399,18 +402,34 @@ static bool instanceOf(const Runner *runner, int32_t object) {
     return false;
 }
 
+/* obj_battler's updates before room_battle: the black screen and the blinking
+ * heart, then obj_transheart's fall. Its alarm 2 is set to 30 as it is made,
+ * then 2 more to room_goto (desktop, room 57 and the Ruins, 2026-11-15: 30
+ * updates from the "!"'s hand-over to room_battle). */
+#define UT_HEART_UPDATES 30
+
 /* An encounter starts with obj_battleblcon and goes on while it or the
  * obj_battler it hands over to is there. obj_battler alone (a scripted
- * battle's start) does not start one. */
-static bool encounterGoingOn(Runner *runner) {
+ * battle's start) does not start one. Into left: -1 while the "!" is up,
+ * then the updates obj_battler has left. */
+static bool encounterGoingOn(Runner *runner, int *left) {
     bool was = g_encounterOn;
     g_encounterOn = false;
     if (runner->dataWin == NULL || battleUiActive(runner)) return false;
     VMContext *ctx = runner->vmContext;
     if (ctx == NULL || ctx->globalScopeInstance == NULL) return false;
     resolveSpeedVars(runner);
-    g_encounterOn = instanceOf(runner, g_encounterObject) || (was && instanceOf(runner, g_battlerObject));
-    return g_encounterOn;
+    if (instanceOf(runner, g_encounterObject)) {
+        g_heartUpdates = 0;
+        *left = -1;
+    } else if (was && instanceOf(runner, g_battlerObject)) {
+        *left = UT_HEART_UPDATES - g_heartUpdates++;
+        if (*left < 1) *left = 1;
+    } else {
+        return false;
+    }
+    g_encounterOn = true;
+    return true;
 }
 
 /* One of the table's lists for a merge: entries[i] at at[i], in order of at. */
@@ -427,8 +446,8 @@ static int32_t prefetchListEntry(const PrefetchList *list) {
     return sound < 0 ? 0 : OF_PREFETCH_SOUND(sound);
 }
 
-static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle) {
-    if (!encounterGoingOn(runner) || !prefetchTableFits(runner->dataWin)) return 0;
+static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
+    if (!encounterGoingOn(runner, left) || !prefetchTableFits(runner->dataWin)) return 0;
     VMContext *ctx = runner->vmContext;
     RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
     if (!numeric(group)) return 0;

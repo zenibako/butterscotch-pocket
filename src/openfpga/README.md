@@ -551,9 +551,11 @@ strokes remain readable. Those screens cost about a quarter of the pixels.
 In both modes, an Undertale battle's textures and first sounds are read from
 the card during its encounter, from the "!" until the battle room starts (the
 "!", the blinking heart and its fall to the FIGHT button, 49 updates, about
-1.6 s), instead of at their first draw or play in the battle: in each update's
-spare time and at least 50 ms of it, so an update of the encounter may run
-long. The items each battle draws in its first 150 updates, and the bubble
+1.6 s), instead of at their first draw or play in the battle. While the "!" is
+up, only in each update's spare time, so it keeps its pace. Then, over the
+black screen and the heart's fall (30 updates), at least one entry and 50 ms an
+update, or what is left spread over the updates left, so an update there may
+run long. The items each battle draws in its first 150 updates, and the bubble
 sprite and font of its first enemy speech bubble however late that comes, are
 in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
 tour over every `global.battlegroup`, with the sounds: those nearly every

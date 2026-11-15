@@ -1073,12 +1073,17 @@ static void createObject(const char *name) {
  * will draw and play first (battlePrefetch: its textures, its first enemy
  * speech bubble's, the sounds of its first turns and that bubble's voice, in
  * order of first use), it is loaded during the encounter instead, from the "!"
- * until the battle room starts, one after another: in each update's spare time
- * and at least OF_PREFETCH_UPDATE_NANOS of it, so an update of the encounter
- * may run long. That delays the encounter's frames, not the battle's.
+ * until the battle room starts, one after another. While the game wants what
+ * is on screen kept at its pace (the "!", over the room), only in each update's
+ * spare time. Then (the black screen and the heart's fall) at least one entry
+ * an update and at least OF_PREFETCH_UPDATE_NANOS, or the time the entries
+ * still to load are expected to take over the updates left, so that the
+ * encounter's last updates run long rather than the battle's first.
  * (Spare time alone was too little on the Pocket: BsPre, 2026-11-13, loaded
  * 1-2 items a battle; with 25 ms an update, BsBubble rc.49 left a sound or
- * item to the battle where its 60 ms room frames gave no spare time.)
+ * item to the battle where its 60 ms room frames gave no spare time. Loading
+ * at least 50 ms an update from the "!" on, BsBubble rc.50 loaded everything
+ * but made the "!" noticeably longer.)
  * Whatever is not loaded when the battle starts is read at its first draw or
  * play as before. Nothing drawn or played changes, only when the reads
  * happen. --no-prefetch, or BS_PREFETCH=0 on desktop, turns this off to compare. */
@@ -1088,8 +1093,15 @@ static void createObject(const char *name) {
 static int g_prefetchOn = -1; /* -1: not decided yet */
 static int32_t g_prefetchEntries[OF_PREFETCH_MAX];
 static int g_prefetchCount, g_prefetchNext, g_prefetchBattle, g_prefetchItemCount, g_prefetchSoundCount;
+/* battlePrefetch's left for this update: -1 spare time only, else the updates left. */
+static int g_prefetchLeft = -1;
 static bool g_prefetchArmed = true;
-static struct { unsigned loaded, present, full, updates, reads, sounds, soundsThere, itemsLeft, soundsLeft; uint64_t nanos, readNanos; } g_burst;
+static struct {
+    unsigned loaded, present, full, updates, spareUpdates, reads, sounds, soundsThere, itemsLeft, soundsLeft;
+    unsigned done[2]; /* entries taken so far: items, sounds */
+    uint64_t nanos, readNanos, spareNanos;
+    uint64_t doneNanos[2], doneMost[2]; /* and the time they took, in all and the most for one */
+} g_burst;
 
 void ofPlatformSetPrefetch(bool on) {
     g_prefetchOn = on;
@@ -1110,9 +1122,11 @@ static void prefetchEnd(void) {
         if (g_prefetchEntries[i] >= 0) ++g_burst.itemsLeft;
         else ++g_burst.soundsLeft;
     }
-    logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads, %u ms over %u updates\n",
+    logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads, %u ms over %u updates "
+            "(%u ms over %u in spare time)\n",
             g_prefetchBattle, g_burst.loaded, (unsigned) g_prefetchItemCount, g_burst.present, g_burst.full,
-            g_burst.itemsLeft, g_burst.reads, ms, g_burst.updates);
+            g_burst.itemsLeft, g_burst.reads, ms, g_burst.updates, (unsigned) (g_burst.spareNanos / 1000000u),
+            g_burst.spareUpdates);
     if (g_prefetchSoundCount != 0)
         logInfo("Prefetch: battle %d: %u of %u sounds loaded (%u there, %u not reached)\n", g_prefetchBattle, g_burst.sounds,
                 (unsigned) g_prefetchSoundCount, g_burst.soundsThere, g_burst.soundsLeft);
@@ -1121,22 +1135,53 @@ static void prefetchEnd(void) {
     g_prefetchCount = g_prefetchNext = g_prefetchItemCount = g_prefetchSoundCount = 0;
 }
 
-/* Loads the next entries: at least one, then on while time is left before
- * `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of them with
- * `all`). */
+/* How long an entry of the kind of `entry` (an item or a sound) is expected
+ * to take: the mean of those of its kind taken so far in this burst, or the
+ * Pocket's usual (an item about two reads, 2026-11-13; a sound about 47 ms,
+ * 2026-11-15) before any. With `most`, the longest one so far if longer: what
+ * spare time must hold for the entry not to make the update late. */
+#define OF_PREFETCH_ITEM_GUESS_NANOS 30000000ull
+#define OF_PREFETCH_SOUND_GUESS_NANOS 50000000ull
+static uint64_t prefetchGuess(int32_t entry, bool most) {
+    int kind = entry < 0;
+    uint64_t usual = kind ? OF_PREFETCH_SOUND_GUESS_NANOS : OF_PREFETCH_ITEM_GUESS_NANOS;
+    if (g_burst.done[kind] == 0) return usual;
+    if (most) return g_burst.doneMost[kind] > usual ? g_burst.doneMost[kind] : usual;
+    return g_burst.doneNanos[kind] / g_burst.done[kind];
+}
+
+/* Loads the next entries (all of them with `all`). With g_prefetchLeft < 0,
+ * only those expected to end before `until`; otherwise at least one, then on
+ * while time is left before `until`, within OF_PREFETCH_UPDATE_NANOS of
+ * starting, or within the expected time of the entries still to load over the
+ * updates left. */
 static void prefetchRun(uint64_t until, bool all) {
     if (g_prefetchNext >= g_prefetchCount || g_runner == NULL || g_runner->renderer == NULL) return;
+    uint64_t start = nowNanos();
+    bool spare = !all && g_prefetchLeft < 0;
+    uint64_t spareEnd = until > OF_PREFETCH_MARGIN_NANOS ? until - OF_PREFETCH_MARGIN_NANOS : 0;
+    uint64_t budgetEnd = spareEnd;
+    if (spare) {
+        if (start + prefetchGuess(g_prefetchEntries[g_prefetchNext], true) > spareEnd) return;
+    } else if (!all) {
+        uint64_t expected = 0;
+        for (int i = g_prefetchNext; i < g_prefetchCount; ++i) expected += prefetchGuess(g_prefetchEntries[i], false);
+        uint64_t budget = expected / (uint64_t) g_prefetchLeft;
+        if (budget < OF_PREFETCH_UPDATE_NANOS) budget = OF_PREFETCH_UPDATE_NANOS;
+        if (start + budget > budgetEnd) budgetEnd = start + budget;
+        all = g_prefetchLeft <= 1; /* the last update before the battle */
+    }
     SwrTexturePackReadTotals before, after;
     swrTexturePackGetReadTotals(&before);
-    uint64_t start = nowNanos();
     ++g_burst.updates;
-    uint64_t budgetEnd = start + OF_PREFETCH_UPDATE_NANOS;
-    if (until > OF_PREFETCH_MARGIN_NANOS && until - OF_PREFETCH_MARGIN_NANOS > budgetEnd) budgetEnd = until - OF_PREFETCH_MARGIN_NANOS;
+    if (spare) ++g_burst.spareUpdates;
     bool first = true;
     while (g_prefetchNext < g_prefetchCount) {
-        if (!all && !first && nowNanos() >= budgetEnd) break;
+        uint64_t now = nowNanos();
+        if (spare ? now + prefetchGuess(g_prefetchEntries[g_prefetchNext], true) > spareEnd : !all && !first && now >= budgetEnd) break;
         first = false;
         int32_t entry = g_prefetchEntries[g_prefetchNext++];
+        int kind = entry < 0;
         if (entry >= 0) {
             int result = SWRenderer_prefetchItem(g_runner->renderer, (int16_t) entry);
             if (result == 0) ++g_burst.loaded;
@@ -1147,11 +1192,16 @@ static void prefetchRun(uint64_t until, bool all) {
             if (result == 0) ++g_burst.sounds;
             else if (result == 1) ++g_burst.soundsThere;
         }
+        uint64_t took = nowNanos() - now;
+        ++g_burst.done[kind];
+        g_burst.doneNanos[kind] += took;
+        if (took > g_burst.doneMost[kind]) g_burst.doneMost[kind] = took;
     }
     swrTexturePackGetReadTotals(&after);
     g_burst.reads += (unsigned) ((after.directReads + after.stdioReads) - (before.directReads + before.stdioReads));
     g_burst.readNanos += (after.directNanos + after.stdioNanos) - (before.directNanos + before.stdioNanos);
     g_burst.nanos += nowNanos() - start;
+    if (spare) g_burst.spareNanos += nowNanos() - start;
 }
 
 /* Once an update, before it runs: starts a burst as an encounter begins, ends
@@ -1164,8 +1214,9 @@ static void prefetchCheck(void) {
     SWRenderer_takeItemLoads(&loads, &loadNanos);
     if (battle && loads != 0) ofBenchNoteBattleLoads(loads, loadNanos);
     if (!prefetchOn()) return;
-    int battleId = 0;
-    int count = ofGame.battlePrefetch(g_runner, g_prefetchEntries, OF_PREFETCH_MAX, &battleId);
+    int battleId = 0, left = -1;
+    int count = ofGame.battlePrefetch(g_runner, g_prefetchEntries, OF_PREFETCH_MAX, &battleId, &left);
+    g_prefetchLeft = left;
     if (count == 0) {
         prefetchEnd();
         g_prefetchArmed = true;

@@ -101,8 +101,10 @@ typedef struct {
      * load during its encounter (see swrPrefetchItem and ofAudioPreloadSound): at
      * most max entries, first needed first, each a texture item (TPAG index) or,
      * as OF_PREFETCH_SOUND(index), a sound (SOND index); and the battle's number
-     * into battle. 0 when no battle is starting. NULL: none ahead. */
-    int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle);
+     * into battle; and into left, -1 while what is on screen should keep its pace
+     * (load in spare time only), otherwise how many updates are left before the
+     * battle starts (at least 1). 0 when no battle is starting. NULL: none ahead. */
+    int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle, int *left);
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;
