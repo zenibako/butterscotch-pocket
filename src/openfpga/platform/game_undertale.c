@@ -103,15 +103,15 @@ static bool speedVarsResolved;
  * forgotten with each VM, since a new data file may be loaded at the same address. */
 static const DataWin *g_prefetchChecked;
 static bool g_prefetchFits;
-/* Whether battlePrefetch saw an encounter last time, so that obj_battler carries it on,
- * and how many updates obj_battler has had so far. */
-static bool g_encounterOn;
+/* Whether battlePrefetch saw an encounter last time, whether it began with the
+ * "!", and how many updates obj_battler has had so far. */
+static bool g_encounterOn, g_encounterSeen;
 static int g_heartUpdates;
 
 static void forgetNativeVm(void) {
     speedVarsResolved = false;
     g_prefetchChecked = NULL;
-    g_encounterOn = false;
+    g_encounterOn = g_encounterSeen = false;
     g_heartUpdates = 0;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
@@ -356,7 +356,8 @@ static int speedSkipRun(Runner *runner) {
  * global.battlegroup set. About 19 updates later it hands over to obj_battler
  * (the black screen and the blinking heart, then obj_transheart, the heart
  * falling to the FIGHT button), and about 30 after that the game is in
- * room_battle. From the "!" until then, outside a battle room, the battle's
+ * room_battle. A story battle makes obj_battler itself, without the "!". From
+ * the "!" or obj_battler until then, outside a battle room, the battle's
  * entries are the ones the table gives: the items nearly every battle draws,
  * and that battlegroup's own, which take in its first enemy speech bubble's
  * sprite and font however late that bubble comes; the sounds nearly every
@@ -408,10 +409,12 @@ static bool instanceOf(const Runner *runner, int32_t object) {
  * updates from the "!"'s hand-over to room_battle). */
 #define UT_HEART_UPDATES 30
 
-/* An encounter starts with obj_battleblcon and goes on while it or the
- * obj_battler it hands over to is there. obj_battler alone (a scripted
- * battle's start) does not start one. Into left: -1 while the "!" is up,
- * then the updates obj_battler has left. */
+/* An encounter starts with obj_battleblcon, which hands over to obj_battler,
+ * or with obj_battler alone: a story battle's start (Toriel, Papyrus, the
+ * Snowdin dogs, Undyne, Mettaton, Asgore...; 36 objects of the game make it
+ * directly after setting global.battlegroup). It goes on while either is there;
+ * obj_battler destroys itself at the room's end. Into left: -1 while the "!"
+ * is up, then the updates obj_battler has left. */
 static bool encounterGoingOn(Runner *runner, int *left) {
     bool was = g_encounterOn;
     g_encounterOn = false;
@@ -420,9 +423,12 @@ static bool encounterGoingOn(Runner *runner, int *left) {
     if (ctx == NULL || ctx->globalScopeInstance == NULL) return false;
     resolveSpeedVars(runner);
     if (instanceOf(runner, g_encounterObject)) {
+        if (!was) g_encounterSeen = true;
         g_heartUpdates = 0;
         *left = -1;
-    } else if (was && instanceOf(runner, g_battlerObject)) {
+    } else if (instanceOf(runner, g_battlerObject)) {
+        if (!was) g_encounterSeen = false;
+        if (!was) g_heartUpdates = 0;
         *left = UT_HEART_UPDATES - g_heartUpdates++;
         if (*left < 1) *left = 1;
     } else {
@@ -462,11 +468,16 @@ static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle
         { g_prefetchCommonSounds, g_prefetchCommonSoundAt, 0, sizeof(g_prefetchCommonSounds), true },
         { g_prefetchSounds, g_prefetchSoundAt, 0, 0, true },
     };
+    bool known = false;
     for (size_t g = 0; g < sizeof(g_prefetchGroups) / sizeof(g_prefetchGroups[0]); ++g) {
         if (g_prefetchGroups[g].group != id) continue;
         lists[1].next = g_prefetchGroups[g].start;
         lists[1].count = g_prefetchGroups[g].start + g_prefetchGroups[g].count;
+        known = true;
     }
+    /* Without the "!", only a battle the table has: obj_battler with
+     * battlegroup 200 (Undyne by the echo flower) starts none. */
+    if (!known && !g_encounterSeen) return 0;
     for (size_t g = 0; g < sizeof(g_prefetchSoundGroups) / sizeof(g_prefetchSoundGroups[0]); ++g) {
         if (g_prefetchSoundGroups[g].group != id) continue;
         lists[3].next = g_prefetchSoundGroups[g].start;
