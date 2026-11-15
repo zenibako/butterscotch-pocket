@@ -794,6 +794,16 @@ static void idleHook(void) {
 
 /* ===[ Short-sound cache ]=== */
 
+/* The pack track of a sound in the data file, or -1. Streamed sounds are
+ * packed under their file name, embedded ones under the sound's own name. */
+static int32_t soundTrack(const OfAudioSystem *ut, const Sound *sound, bool *embedded) {
+    *embedded = (sound->flags & (AUDIO_ENTRY_FLAG_IS_EMBEDDED | AUDIO_ENTRY_FLAG_IS_COMPRESSED)) != 0;
+    int32_t track = findTrack(ut, *embedded ? sound->name : sound->file);
+    if (track < 0) track = findTrack(ut, *embedded ? sound->file : sound->name);
+    return track;
+}
+
+
 static bool soundInUse(const OfAudioSystem *ut, int32_t track) {
     for (int v = 0; v < OF_MAX_VOICES; v++) {
         if (ut->voices[v].active && ut->voices[v].streamSlot < 0 && ut->voices[v].track == track) return true;
@@ -837,6 +847,26 @@ static uint8_t *cachedSound(OfAudioSystem *ut, int32_t track) {
     if (ut->cachedSilentFrom) ut->cachedSilentFrom[track] = silentSuffix(data, bytes);
     ut->cachedBytes += bytes;
     return data;
+}
+
+/* Reads a short sound into the cache before it is first played (the battle
+ * prefetch), as its first play would. Returns 0 when it was read now, 1 when
+ * it was cached already, -1 when it is not a short sound in the pack, sound
+ * effects are muted (a play would not read it either) or the read failed. */
+static bool kindSkipped(const OfAudioSystem *ut, bool music);
+
+int ofAudioPreloadSound(int32_t soundIndex) {
+    OfAudioSystem *ut = g_audio;
+    if (g_snapshotLocked || ut == NULL || ut->file == NULL || ut->cachedSounds == NULL || arrlen(ut->base.audioGroups) == 0) return -1;
+    const DataWin *dw = ut->base.audioGroups[0];
+    if (dw == NULL || soundIndex < 0 || (uint32_t) soundIndex >= dw->sond.count) return -1;
+    bool embedded;
+    int32_t track = soundTrack(ut, &dw->sond.sounds[soundIndex], &embedded);
+    if (track < 0 || !embedded || kindSkipped(ut, false)) return -1;
+    uint32_t bytes = trackBytes(&ut->tracks[track]);
+    if (bytes == 0 || bytes > OF_MEMORY_SOUND_BYTES) return -1;
+    if (ut->cachedSounds[track] != NULL) return 1;
+    return cachedSound(ut, track) != NULL ? 0 : -1;
 }
 
 /* ===[ Hardware mixer ]===
@@ -1549,12 +1579,9 @@ static int32_t ofPlaySound(AudioSystem *audio, int32_t soundIndex, int32_t prior
         DataWin *dw = audio->audioGroups[0];
         if (soundIndex < 0 || (uint32_t) soundIndex >= dw->sond.count) return -1;
         const Sound *sound = &dw->sond.sounds[soundIndex];
-        /* Streamed sounds are packed under their file name, embedded ones
-         * under the sound's own name. */
-        bool embedded = (sound->flags & (AUDIO_ENTRY_FLAG_IS_EMBEDDED | AUDIO_ENTRY_FLAG_IS_COMPRESSED)) != 0;
+        bool embedded;
+        track = soundTrack(ut, sound, &embedded);
         music = !embedded;
-        track = findTrack(ut, embedded ? sound->name : sound->file);
-        if (track < 0) track = findTrack(ut, embedded ? sound->file : sound->name);
         gain = sound->volume;
         pitch = sound->pitch > 0.0f ? sound->pitch : 1.0f;
     }
@@ -1629,7 +1656,13 @@ static int32_t ofPlaySound(AudioSystem *audio, int32_t soundIndex, int32_t prior
 #ifdef OF_PC
     static int logAll = -1;
     if (logAll < 0) logAll = getenv("BS_AUDIO_LOG") != NULL;
-    if (logAll && !streamed) logInfo("Audio: sfx %s gain %.2f pitch %.2f\n", ut->tracks[track].name, (double) gain, (double) pitch);
+    if (logAll && !streamed) {
+        char source[160];
+        platformSoundSource(source, sizeof(source));
+        const char *soundName = soundIndex < OF_STREAM_INDEX_BASE ? audio->audioGroups[0]->sond.sounds[soundIndex].name : NULL;
+        logInfo("Audio: sfx %s gain %.2f pitch %.2f %s sound %s\n", ut->tracks[track].name, (double) gain, (double) pitch, source,
+                soundName != NULL ? soundName : "-");
+    }
 #endif
     if (streamed)
         logInfo("Audio: playing %s%s gain %.2f pitch %.2f\n", ut->tracks[track].name, loop ? " (loop)" : "",

@@ -552,9 +552,12 @@ In both modes, an Undertale battle's textures are read from the card while its
 encounter flashes ("!", the heart, about 1.5 s), instead of at their first draw
 in the battle: in each update's spare time and at least 25 ms of it, so an
 update of the still flash may run long. Its first frames
-then wait for few reads. The items each battle draws in its first 150 updates
-are in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
-tour over every `global.battlegroup`. Only free cache room is used, and nothing
+then wait for few reads. The items each battle draws in its first 150 updates,
+and the bubble sprite and font of its first enemy speech bubble however late
+that comes, are in `platform/game_undertale_prefetch.h`, recorded on desktop
+from the battle tour over every `global.battlegroup`. After them the same
+flash reads the sounds the battle's writers start from that bubble on (the
+voices) into the sound cache. Only free cache room is used, and nothing
 drawn changes. `--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The
 benchmark reports count the items loaded ahead and those still loaded at a
 draw in battle.
@@ -656,7 +659,8 @@ ordinary reads while one is. The comments in `platform/of_audio_system.c`
 have the sizes and the reasons.
 
 Desktop: `BS_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
-s16le) and `BS_AUDIO_LOG=1` logs every effect, for checking without speakers.
+s16le) and `BS_AUDIO_LOG=1` logs every effect, for checking without speakers,
+with the frame, room and object that started it.
 
 ## Saves
 
@@ -853,7 +857,8 @@ cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
 `BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
 `BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,
-`BS_ITEM_LOG=<file>` the texture items first drawn in each room visit,
+`BS_ITEM_LOG=<file>` the texture items first drawn in each room visit (with
+the sprite, font or background each belongs to),
 `BS_OBJECTS=<frame>` records live objects, `BS_DUMP_FRAME=<frame>` with
 `BS_DUMP_PATH=<file>` captures one image, and `BS_DUMP_EVERY=<n>` with
 `BS_DUMP_DIR=<directory>` captures periodically. `--draw-every 100000`

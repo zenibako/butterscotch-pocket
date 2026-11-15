@@ -349,10 +349,13 @@ static int speedSkipRun(Runner *runner) {
  * heart and the flash) with global.battlegroup set, and about 47 updates later
  * the game is in room_battle. While it is there, outside a battle room, the
  * battle's items are the ones the table gives: those nearly every battle draws,
- * then that battlegroup's own. The table holds TPAG indices of the data file it
- * was recorded from; where three of them are not the same items, nothing is
- * loaded ahead. */
+ * then that battlegroup's own, which take in its first enemy speech bubble's
+ * sprite and font however late that bubble comes. battleSounds gives the
+ * sounds that bubble plays (its voice), by name. The table holds TPAG indices
+ * of the data file it was recorded from; where three of them are not the same
+ * items, nothing is loaded ahead, sounds included. */
 #include "game_undertale_prefetch.h"
+static int32_t g_prefetchSoundIndex[sizeof(g_prefetchSoundNames) / sizeof(g_prefetchSoundNames[0])];
 
 static bool prefetchTableFits(const DataWin *dw) {
     if (g_prefetchChecked != dw) {
@@ -365,6 +368,17 @@ static bool prefetchTableFits(const DataWin *dw) {
                               item->sourceHeight == c[3];
         }
         if (!g_prefetchFits) logInfo("Prefetch: this data file's textures are not the ones its table was made for; none loaded ahead\n");
+        /* The table names its sounds; one this file does not have is left out. */
+        for (size_t i = 0; i < sizeof(g_prefetchSoundNames) / sizeof(g_prefetchSoundNames[0]); ++i) {
+            g_prefetchSoundIndex[i] = -1;
+            for (uint32_t s = 0; s < dw->sond.count && g_prefetchFits; ++s) {
+                const char *name = dw->sond.sounds[s].name;
+                if (name != NULL && strcmp(name, g_prefetchSoundNames[i]) == 0) {
+                    g_prefetchSoundIndex[i] = (int32_t) s;
+                    break;
+                }
+            }
+        }
     }
     return g_prefetchFits;
 }
@@ -392,6 +406,19 @@ static int battlePrefetch(Runner *runner, int16_t *items, int max, int *battle) 
         if (g_prefetchGroups[g].group != id) continue;
         for (unsigned i = 0; i < g_prefetchGroups[g].count && count < max; ++i)
             items[count++] = g_prefetchItems[g_prefetchGroups[g].start + i];
+    }
+    return count;
+}
+
+static int battleSounds(Runner *runner, int battle, int32_t *sounds, int max) {
+    if (runner->dataWin == NULL || !prefetchTableFits(runner->dataWin)) return 0;
+    int count = 0;
+    for (size_t g = 0; g < sizeof(g_prefetchSoundGroups) / sizeof(g_prefetchSoundGroups[0]); ++g) {
+        if (g_prefetchSoundGroups[g].group != battle) continue;
+        for (unsigned i = 0; i < g_prefetchSoundGroups[g].count && count < max; ++i) {
+            int32_t sound = g_prefetchSoundIndex[g_prefetchSounds[g_prefetchSoundGroups[g].start + i]];
+            if (sound >= 0) sounds[count++] = sound;
+        }
     }
     return count;
 }
@@ -472,6 +499,7 @@ const OfGame ofGame = {
     .speedHalfBattle = speedHalfBattle,
     .speedSkipRun = speedSkipRun,
     .battlePrefetch = battlePrefetch,
+    .battleSounds = battleSounds,
     .strings = g_strings,
     .stringCount = sizeof(g_strings) / sizeof(g_strings[0]),
     .patchCode = patchInstructions,

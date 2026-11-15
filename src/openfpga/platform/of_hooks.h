@@ -41,6 +41,13 @@ void platformTextureLoadTime(uint64_t nanos);
 /* Port-internal: a file stored in the audio pack (of_audio_system.c). */
 bool ofAudioReadPackFile(const char *path, uint8_t **outData, uint32_t *outSize);
 bool ofAudioHasPackFile(const char *path);
+/* Reads a short sound (a SOND index) into the sound cache ahead of its first play: 0 read now, 1 cached already,
+ * -1 not read (no such short sound, effects muted, or a failed read). */
+int ofAudioPreloadSound(int32_t soundIndex);
+#ifdef OF_PC
+/* BS_AUDIO_LOG: "at <frame> in <room> by <object>" for a sound being started (of_platform.c). */
+void platformSoundSource(char *out, size_t size);
+#endif
 
 /* What is heard (a debug setting): a muted sound runs its course unheard and costs almost nothing. Music is
  * what the game streams or keeps in a file of its own, a sound effect what is embedded in its data. */

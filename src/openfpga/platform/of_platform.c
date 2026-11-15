@@ -664,8 +664,36 @@ static int g_scriptFrame = 0; /* frames of scripted input so far (runInputScript
 #ifdef OF_PC
 /* BS_ITEM_LOG=<file> (desktop) writes a line for each texture item the first
  * time it is drawn in each visit to a room: frame, room, TPAG index, page,
- * width, height. tools/battle_prefetch_table.py makes the battle prefetch
- * table from it. */
+ * width, height, and the sprite, font or background the item belongs to ("-"
+ * for none). tools/battle_prefetch_table.py makes the battle prefetch table
+ * from it. */
+static const char *itemAsset(const DataWin *dw, int32_t item) {
+    static const DataWin *mapped;
+    static const char **names;
+    if (mapped != dw) {
+        mapped = dw;
+        free(names);
+        names = calloc(dw->tpag.count, sizeof(*names));
+        if (names == NULL) return "-";
+        for (uint32_t i = 0; i < dw->sprt.count; ++i) {
+            const Sprite *sprite = &dw->sprt.sprites[i];
+            for (uint32_t f = 0; sprite->tpagIndices != NULL && f < sprite->textureCount; ++f) {
+                int32_t t = sprite->tpagIndices[f];
+                if (t >= 0 && (uint32_t) t < dw->tpag.count && names[t] == NULL) names[t] = sprite->name;
+            }
+        }
+        for (uint32_t i = 0; i < dw->font.count; ++i) {
+            int32_t t = dw->font.fonts[i].tpagIndex;
+            if (t >= 0 && (uint32_t) t < dw->tpag.count && names[t] == NULL) names[t] = dw->font.fonts[i].name;
+        }
+        for (uint32_t i = 0; i < dw->bgnd.count; ++i) {
+            int32_t t = dw->bgnd.backgrounds[i].tpagIndex;
+            if (t >= 0 && (uint32_t) t < dw->tpag.count && names[t] == NULL) names[t] = dw->bgnd.backgrounds[i].name;
+        }
+    }
+    return names != NULL && item >= 0 && (uint32_t) item < dw->tpag.count && names[item] != NULL ? names[item] : "-";
+}
+
 void platformItemUsed(int32_t item, int page, int width, int height);
 void platformItemUsed(int32_t item, int page, int width, int height) {
     static FILE *out;
@@ -685,8 +713,24 @@ void platformItemUsed(int32_t item, int page, int width, int height) {
     }
     if (seen[item] == visit) return;
     seen[item] = visit;
-    fprintf(out, "%d %s %d %d %d %d\n", g_scriptFrame, room != NULL && room->name != NULL ? room->name : "?", (int) item,
-            page, width, height);
+    fprintf(out, "%d %s %d %d %d %d %s\n", g_scriptFrame, room != NULL && room->name != NULL ? room->name : "?", (int) item,
+            page, width, height, itemAsset(g_runner->dataWin, item));
+}
+
+/* For BS_AUDIO_LOG (desktop): where a sound effect was started, as "at
+ * <frame> in <room> by <object>", the object being the one whose code is
+ * running ("-" for none). tools/battle_prefetch_table.py reads it. */
+void platformSoundSource(char *out, size_t size) {
+    const char *roomName = "?", *object = "-";
+    if (g_runner != NULL) {
+        if (g_runner->currentRoom != NULL && g_runner->currentRoom->name != NULL) roomName = g_runner->currentRoom->name;
+        const VMContext *ctx = g_runner->vmContext;
+        const Instance *self = ctx != NULL && ctx->currentCallFrame != NULL ? ctx->currentCallFrame->self : NULL;
+        if (self != NULL && self->objectIndex >= 0 && (uint32_t) self->objectIndex < g_runner->dataWin->objt.count &&
+            g_runner->dataWin->objt.objects[self->objectIndex].name != NULL)
+            object = g_runner->dataWin->objt.objects[self->objectIndex].name;
+    }
+    snprintf(out, size, "at %d in %s by %s", g_scriptFrame, roomName, object);
 }
 #endif
 int ofPlatformScriptFrame(void) {
@@ -1031,17 +1075,21 @@ static void createObject(const char *name) {
  * may run long. That only delays a frame of a still flash. (Spare time alone
  * was too little on the Pocket: BsPre, 2026-11-13, loaded 1-2 items a battle.)
  * Whatever is not loaded when the battle starts is read at its first draw as
- * before. Nothing drawn
+ * before. After the items come the sounds the battle's first enemy speech
+ * bubble plays (battleSounds), read into the sound cache as their first play
+ * would. Nothing drawn
  * changes, only when the reads happen. --no-prefetch, or BS_PREFETCH=0 on
  * desktop, turns this off to compare. */
 #define OF_PREFETCH_MAX 128
+#define OF_PREFETCH_SOUNDS_MAX 16
 #define OF_PREFETCH_UPDATE_NANOS 25000000ull
 #define OF_PREFETCH_MARGIN_NANOS 2000000ull
 static int g_prefetchOn = -1; /* -1: not decided yet */
 static int16_t g_prefetchItems[OF_PREFETCH_MAX];
-static int g_prefetchCount, g_prefetchNext, g_prefetchBattle;
+static int32_t g_prefetchSounds[OF_PREFETCH_SOUNDS_MAX];
+static int g_prefetchCount, g_prefetchNext, g_prefetchBattle, g_prefetchSoundCount, g_prefetchSoundNext;
 static bool g_prefetchArmed = true;
-static struct { unsigned loaded, present, full, updates, reads; uint64_t nanos, readNanos; } g_burst;
+static struct { unsigned loaded, present, full, updates, reads, sounds, soundsThere; uint64_t nanos, readNanos; } g_burst;
 
 void ofPlatformSetPrefetch(bool on) {
     g_prefetchOn = on;
@@ -1062,14 +1110,19 @@ static void prefetchEnd(void) {
     logInfo("Prefetch: battle %d: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads, %u ms over %u updates\n",
             g_prefetchBattle, g_burst.loaded, (unsigned) g_prefetchCount, g_burst.present, g_burst.full, left,
             g_burst.reads, ms, g_burst.updates);
+    if (g_prefetchSoundCount != 0)
+        logInfo("Prefetch: battle %d: %u of %u sounds loaded (%u there, %u not reached)\n", g_prefetchBattle, g_burst.sounds,
+                (unsigned) g_prefetchSoundCount, g_burst.soundsThere, (unsigned) (g_prefetchSoundCount - g_prefetchSoundNext));
     ofBenchNotePrefetch(g_burst.loaded, g_burst.full, left, g_burst.updates, g_burst.reads, g_burst.readNanos, g_burst.nanos);
-    g_prefetchCount = g_prefetchNext = 0;
+    g_prefetchCount = g_prefetchNext = g_prefetchSoundCount = g_prefetchSoundNext = 0;
 }
 
-/* Tries the next items: at least one, then on while time is left before
- * `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of them with `all`). */
+/* Tries the next items, then the sounds: at least one, then on while time is
+ * left before `until` or within OF_PREFETCH_UPDATE_NANOS of starting (all of
+ * them with `all`). */
 static void prefetchRun(uint64_t until, bool all) {
-    if (g_prefetchNext >= g_prefetchCount || g_runner == NULL || g_runner->renderer == NULL) return;
+    if ((g_prefetchNext >= g_prefetchCount && g_prefetchSoundNext >= g_prefetchSoundCount) || g_runner == NULL ||
+        g_runner->renderer == NULL) return;
     SwrTexturePackReadTotals before, after;
     swrTexturePackGetReadTotals(&before);
     uint64_t start = nowNanos();
@@ -1084,6 +1137,13 @@ static void prefetchRun(uint64_t until, bool all) {
         if (result == 0) ++g_burst.loaded;
         else if (result == 1) ++g_burst.present;
         else if (result == 3) ++g_burst.full;
+    }
+    while (g_prefetchNext >= g_prefetchCount && g_prefetchSoundNext < g_prefetchSoundCount) {
+        if (!all && !first && nowNanos() >= budgetEnd) break;
+        first = false;
+        int result = ofAudioPreloadSound(g_prefetchSounds[g_prefetchSoundNext++]);
+        if (result == 0) ++g_burst.sounds;
+        else if (result == 1) ++g_burst.soundsThere;
     }
     swrTexturePackGetReadTotals(&after);
     g_burst.reads += (unsigned) ((after.directReads + after.stdioReads) - (before.directReads + before.stdioReads));
@@ -1114,6 +1174,9 @@ static void prefetchCheck(void) {
     g_prefetchCount = count;
     g_prefetchNext = 0;
     g_prefetchBattle = battleId;
+    g_prefetchSoundNext = 0;
+    g_prefetchSoundCount = ofGame.battleSounds != NULL
+        ? ofGame.battleSounds(g_runner, battleId, g_prefetchSounds, OF_PREFETCH_SOUNDS_MAX) : 0;
     /* Without a frame limit (desktop runs) there is no spare time to wait for. */
     if (g_uncapped) prefetchRun(0, true);
 }
