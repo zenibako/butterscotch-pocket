@@ -25,6 +25,8 @@ void ofPerfPhase(OfPhase phase) { (void)phase; }
 void ofLoadingTick(void) {}
 void platformSoundSource(char *out, size_t size) { if (size) out[0] = 0; }
 bool ofSavestateDeferFileReads(void) { return false; }
+/* No background read is ever in flight here. */
+void ofBgReadSettle(void) {}
 static int16_t submitted[512];
 static int submittedPairs;
 void of_audio_init(void) { submittedPairs = 0; }

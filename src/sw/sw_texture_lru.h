@@ -22,6 +22,11 @@ SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, i
 // there is left as it is. What is drawn does not change, only when items are read.
 typedef enum { SWR_PREFETCH_LOADED, SWR_PREFETCH_PRESENT, SWR_PREFETCH_SKIPPED, SWR_PREFETCH_FULL } SwrPrefetch;
 SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex);
+// The pack reads swrPrefetchItem would make for the item, to read them ahead
+// (see swrTexturePackPlanRect): how many, -1 when it would not load it now
+// (swrPrefetchItem says why), or -2 when they cannot be planned.
+struct SwrPackSpan;
+int swrPlanItem(SWRenderer* swr, int32_t tpagIndex, struct SwrPackSpan* spans, int max);
 
 // Items swrTextureForItem has loaded for a draw since the last call, and the
 // time they took; the count starts again from zero.

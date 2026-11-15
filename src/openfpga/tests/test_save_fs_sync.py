@@ -39,6 +39,7 @@ static int opens, closes, flushes, syncs, fail_open, fail_write, fail_flush, fai
 static unsigned char sd[262144];
 static size_t sd_size;
 static void logInfo(const char *fmt, ...) { (void)fmt; }
+static void ofBgReadSettle(void) {}
 static void logWarn(const char *fmt, ...) { (void)fmt; }
 static void *safeCalloc(size_t n, size_t size) { void *p=calloc(n,size); assert(p); return p; }
 static FILE *test_fopen(const char *name, const char *mode) {

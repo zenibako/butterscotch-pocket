@@ -83,6 +83,7 @@ void platformDrawCount(int kind) {
     if (++sinceTick >= 8) {
         sinceTick = 0;
         platformBusyTick();
+        ofPrefetchTick();
     }
 }
 
@@ -96,6 +97,7 @@ void platformDrawProfile(int kind, uint64_t nanos) {
     if (sinceTick >= OF_DRAW_TICK_NANOS) {
         sinceTick = 0;
         platformBusyTick();
+        ofPrefetchTick();
     }
 }
 

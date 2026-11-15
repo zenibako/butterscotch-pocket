@@ -345,6 +345,9 @@ static void openDirect(OfAudioSystem *ut) {
 
 /* Reads `want` bytes at `filePos` of the pack into `dest`; returns the count read. */
 static size_t readPack(OfAudioSystem *ut, uint32_t filePos, uint8_t *dest, uint32_t want, bool optional) {
+    /* A battle's loading may be reading in the background (ofBgReadStart):
+     * while it is, the OS refuses any other read. */
+    ofBgReadSettle();
 #ifndef OF_PC
     if (ut->directStage != NULL) {
         if (readDirect(ut, filePos, want)) {
@@ -826,6 +829,13 @@ static void evictSounds(OfAudioSystem *ut, uint32_t needed) {
     }
 }
 
+static void keepSound(OfAudioSystem *ut, int32_t track, uint8_t *data) {
+    uint32_t bytes = trackBytes(&ut->tracks[track]);
+    ut->cachedSounds[track] = data;
+    if (ut->cachedSilentFrom) ut->cachedSilentFrom[track] = silentSuffix(data, bytes);
+    ut->cachedBytes += bytes;
+}
+
 /* Returns the whole compressed sound, loading it on first use. */
 static uint8_t *cachedSound(OfAudioSystem *ut, int32_t track) {
     ut->cachedLastUse[track] = ++ut->useCounter;
@@ -838,14 +848,13 @@ static uint8_t *cachedSound(OfAudioSystem *ut, int32_t track) {
     uint8_t *data = malloc(bytes);
     if (data == NULL) return NULL;
     uint64_t start = nowNanos();
+    ofBgReadSettle();
     if (fseek(ut->file, (long) ut->tracks[track].offset, SEEK_SET) != 0 || fread(data, 1, bytes, ut->file) != bytes) {
         free(data);
         return NULL;
     }
     ofPerfAddLoad(OF_LOAD_SOUND, nowNanos() - start);
-    ut->cachedSounds[track] = data;
-    if (ut->cachedSilentFrom) ut->cachedSilentFrom[track] = silentSuffix(data, bytes);
-    ut->cachedBytes += bytes;
+    keepSound(ut, track, data);
     return data;
 }
 
@@ -855,8 +864,8 @@ static uint8_t *cachedSound(OfAudioSystem *ut, int32_t track) {
  * effects are muted (a play would not read it either) or the read failed. */
 static bool kindSkipped(const OfAudioSystem *ut, bool music);
 
-int ofAudioPreloadSound(int32_t soundIndex) {
-    OfAudioSystem *ut = g_audio;
+/* The pack track of a short sound that a first play would read whole, or -1. */
+static int32_t preloadTrack(OfAudioSystem *ut, int32_t soundIndex) {
     if (g_snapshotLocked || ut == NULL || ut->file == NULL || ut->cachedSounds == NULL || arrlen(ut->base.audioGroups) == 0) return -1;
     const DataWin *dw = ut->base.audioGroups[0];
     if (dw == NULL || soundIndex < 0 || (uint32_t) soundIndex >= dw->sond.count) return -1;
@@ -865,8 +874,43 @@ int ofAudioPreloadSound(int32_t soundIndex) {
     if (track < 0 || !embedded || kindSkipped(ut, false)) return -1;
     uint32_t bytes = trackBytes(&ut->tracks[track]);
     if (bytes == 0 || bytes > OF_MEMORY_SOUND_BYTES) return -1;
+    return track;
+}
+
+int ofAudioPreloadSound(int32_t soundIndex) {
+    OfAudioSystem *ut = g_audio;
+    int32_t track = preloadTrack(ut, soundIndex);
+    if (track < 0) return -1;
     if (ut->cachedSounds[track] != NULL) return 1;
     return cachedSound(ut, track) != NULL ? 0 : -1;
+}
+
+const char *ofAudioPackPath(void) {
+    return OF_MUSIC_PATH;
+}
+
+int ofAudioPlanSound(int32_t soundIndex, uint32_t *offset, uint32_t *bytes) {
+    OfAudioSystem *ut = g_audio;
+    int32_t track = preloadTrack(ut, soundIndex);
+    if (track < 0) return -1;
+    if (ut->cachedSounds[track] != NULL) return 1;
+    *offset = ut->tracks[track].offset;
+    *bytes = trackBytes(&ut->tracks[track]);
+    return 0;
+}
+
+int ofAudioAdoptSound(int32_t soundIndex, uint8_t *data) {
+    OfAudioSystem *ut = g_audio;
+    int32_t track = preloadTrack(ut, soundIndex);
+    if (track < 0 || ut->cachedSounds[track] != NULL) {
+        free(data);
+        return track < 0 ? -1 : 1;
+    }
+    /* As cachedSound would have, but with the sound read already. */
+    ut->cachedLastUse[track] = ++ut->useCounter;
+    evictSounds(ut, trackBytes(&ut->tracks[track]));
+    keepSound(ut, track, data);
+    return 0;
 }
 
 /* ===[ Hardware mixer ]===
@@ -2187,6 +2231,7 @@ void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t siz
                 p->sounds[v->track] = malloc(bytes ? bytes : 1);
                 if (!p->sounds[v->track]) goto bad;
                 bool locked = g_snapshotLocked; g_snapshotLocked = true;
+                ofBgReadSettle();
                 bool ok = fseek(ut->file, (long)ut->tracks[v->track].offset, SEEK_SET) == 0 &&
                     fread(p->sounds[v->track], 1, bytes, ut->file) == bytes;
                 g_snapshotLocked = locked;

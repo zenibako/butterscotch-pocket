@@ -103,7 +103,9 @@ typedef struct {
      * as OF_PREFETCH_SOUND(index), a sound (SOND index); and the battle's number
      * into battle; and into left, -1 while what is on screen should keep its pace
      * (load in spare time only), otherwise how many updates are left before the
-     * battle starts (at least 1). 0 when no battle is starting. NULL: none ahead. */
+     * battle starts (at least 1); the platform now reads in the background and
+     * keeps the pace either way, so it does not use left. 0 when no battle is
+     * starting. NULL: none ahead. */
     int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle, int *left);
 
     /* The built-in benchmark (see of_bench.h). */

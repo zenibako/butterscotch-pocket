@@ -551,13 +551,16 @@ strokes remain readable. Those screens cost about a quarter of the pixels.
 In both modes, an Undertale battle's textures and first sounds are read from
 the card during its encounter, from the "!" until the battle room starts (the
 "!", the blinking heart and its fall to the FIGHT button, 49 updates, about
-1.6 s), instead of at their first draw or play in the battle. While the "!" is
-up, only in each update's spare time, so it keeps its pace. Then, over the
-black screen and the heart's fall (30 updates), at least one entry and 50 ms an
-update, or what is left spread over the updates left, so an update there may
-run long. A story battle (Toriel, Papyrus, the Snowdin dogs, Undyne, Mettaton,
+1.6 s), instead of at their first draw or play in the battle. The reads are
+made in the background: the Pocket's host fetches each one while the game goes
+on, and a new one is started as soon as the last is in, at the start of an
+update, between draw calls and while the update waits for its time. What has
+been read is then decoded in an update's spare time, or at most 4 ms past it,
+so the encounter keeps its pace; whatever has been read by the time the battle
+room starts is decoded then, and the rest is read at its first draw or play as
+before. A story battle (Toriel, Papyrus, the Snowdin dogs, Undyne, Mettaton,
 Asgore...) has no "!": the game makes obj_battler itself, and the battle's
-entries are read over those 30 updates the same way. The items each battle
+entries are read over its 30 updates the same way. The items each battle
 draws in its first 150 updates, and the bubble
 sprite and font of its first enemy speech bubble however late that comes, are
 in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle

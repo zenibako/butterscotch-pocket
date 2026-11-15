@@ -28,6 +28,8 @@ static int deferAfterChecks = -1;
 bool ofSavestateDeferFileReads(void) {
     return stateRequestPending || (deferAfterChecks >= 0 && deferAfterChecks-- == 0);
 }
+/* No background read is ever in flight here. */
+void ofBgReadSettle(void) {}
 int of_audio_free(void) { return freePairs; }
 void of_audio_init(void) { submittedCount = 0; }
 void ofPcAudioSnapshotReset(void) { submittedCount = 0; }
