@@ -19,7 +19,11 @@ starts them (the menu, the slash, the hits), in order of first use; and after
 each battle's voices, the other sounds it starts in its first UPDATES updates
 (its monster's hurt sound) that are not common. The tour
 moves the menu cursor in only about half the battles, a player in nearly every
-one, so the share is lower than the items' 90%. The battle tour's layout
+one, so the share is lower than the items' 90%. Each entry has the update of its
+first use: the battle's own for its items and sounds, the median over the
+battles that use it for a common one, which every list is in order of. The game
+loads a battle's items and sounds in that order, merged, so that what the
+battle needs first is read first. The battle tour's layout
 (tourForList in platform/game_undertale.c): the first visit starts at update
 1000, each visit lasts 600.
 """
@@ -27,6 +31,7 @@ import argparse
 import collections
 import pathlib
 import re
+import statistics
 
 FIRST_VISIT, VISIT = 1000, 600
 SOUND_SHARE = 0.4
@@ -117,7 +122,8 @@ def main():
     for items in use.values():
         for item, offset in items.items():
             first[item].append(offset)
-    common = sorted((i for i, c in count.items() if c >= 0.9 * len(use)), key=lambda i: (min(first[i]), i))
+    common_at = {i: int(statistics.median(first[i])) for i, c in count.items() if c >= 0.9 * len(use)}
+    common = sorted(common_at, key=lambda i: (common_at[i], min(first[i]), i))
     # Three items of different sizes, the largest: a data file whose items
     # are these is taken to be the one the table was made from.
     check, sizes = [], set()
@@ -135,10 +141,12 @@ def main():
         f' * The texture items (TPAG indices) each Undertale battle draws in its first {args.updates} updates,',
         f' * and its first enemy speech bubble\'s sprites and fonts (drawn in the {args.bubble} updates from',
         f' * that bubble\'s first draw), recorded on desktop over {len(use)} battlegroups. g_prefetchCommon:',
-        " * those at least 90% of battles draw; each battle's own list leaves them out. Both in order of",
-        ' * first use. g_prefetchSounds: the sounds writers start from that bubble on (the voices), then',
-        f' * the other sounds the battle starts in its first {args.updates} updates that are not common, by name.',
-        f' * g_prefetchCommonSounds: those at least {round(SOUND_SHARE * 100)}% of battles start in room_battle, by anyone. */',
+        " * those at least 90% of battles draw; each battle's own list leaves them out. g_prefetchSounds:",
+        ' * the sounds writers start from that bubble on (the voices), and the other sounds the battle',
+        f' * starts in its first {args.updates} updates that are not common, by name. g_prefetchCommonSounds: those at',
+        f' * least {round(SOUND_SHARE * 100)}% of battles start in room_battle, by anyone. Each list is in order of first use,',
+        ' * and its *At list gives that update (from the battle\'s start; for a common entry, the median',
+        ' * over the battles that use it), so that the game can merge them. */',
         '',
         "/* Three of the table's items in the data file it was made from: TPAG index,",
         " * texture page, width, height. Another file's indices mean other items. */",
@@ -153,14 +161,21 @@ def main():
             lines.append('    ' + ', '.join(str(i) for i in items[k:k + 16]) + ',')
 
     rows(common)
+    lines += ['};', '', 'static const uint16_t g_prefetchCommonAt[] = {']
+    rows([common_at[i] for i in common])
     lines += ['};', '', 'static const int16_t g_prefetchItems[] = {']
-    starts, at = [], 0
+    starts, at, item_at = [], 0, []
     for group in sorted(use):
         own = sorted((i for i in use[group] if i not in common), key=lambda i: (use[group][i], i))
         starts.append((group, at, len(own)))
+        item_at.append((group, [use[group][i] for i in own]))
         lines.append(f'    /* battlegroup {group} */')
         rows(own)
         at += len(own)
+    lines += ['};', '', 'static const uint16_t g_prefetchItemAt[] = {']
+    for group, offsets in item_at:
+        lines.append(f'    /* battlegroup {group} */')
+        rows(offsets)
     lines += ['};', '', 'static const struct { int16_t group; uint16_t start, count; } g_prefetchGroups[] = {']
     for k in range(0, len(starts), 6):
         lines.append('    ' + ' '.join(f'{{ {g}, {s}, {c} }},' for g, s, c in starts[k:k + 6]))
@@ -170,14 +185,14 @@ def main():
     for heard in heard_in.values():
         for name, offset in heard.items():
             heard_first[name].append(offset)
-    common_sounds = sorted((n for n, c in heard_count.items() if c >= SOUND_SHARE * len(use)),
-                           key=lambda n: (min(heard_first[n]), n))
-    sounds = {}  # group -> its voices, then its other first sounds, in order of first use
+    common_sound_at = {n: int(statistics.median(heard_first[n])) for n, c in heard_count.items()
+                       if c >= SOUND_SHARE * len(use)}
+    common_sounds = sorted(common_sound_at, key=lambda n: (common_sound_at[n], min(heard_first[n]), n))
+    sounds = {}  # group -> {its voices and its other first sounds: update of first use}
     for group in sorted(set(voices) | set(heard_in)):
-        own = sorted(voices.get(group, {}), key=lambda n: (voices[group][n], n))
+        own = dict(voices.get(group, {}))
         heard = heard_in.get(group, {})
-        own += sorted((n for n in heard if heard[n] < args.updates and n not in common_sounds and n not in own),
-                      key=lambda n: (heard[n], n))
+        own.update({n: heard[n] for n in heard if heard[n] < args.updates and n not in common_sounds and n not in own})
         if own:
             sounds[group] = own
     names = sorted({name for own in sounds.values() for name in own} | set(common_sounds))
@@ -187,16 +202,23 @@ def main():
     for k in range(0, len(names), 6):
         lines.append('    ' + ' '.join(f'"{n}",' for n in names[k:k + 6]))
     lines += ['};', '', 'static const uint8_t g_prefetchSounds[] = {']
-    sound_starts, sound_at = [], 0
-    for group, own in sorted(sounds.items()):
+    sound_starts, sound_at, sound_offsets = [], 0, []
+    for group, heard in sorted(sounds.items()):
+        own = sorted(heard, key=lambda n: (heard[n], n))
         sound_starts.append((group, sound_at, len(own)))
+        sound_offsets.append((group, [heard[n] for n in own]))
         lines.append(f'    /* battlegroup {group} */ ' + ' '.join(f'{names.index(n)},' for n in own))
         sound_at += len(own)
+    lines += ['};', '', 'static const uint16_t g_prefetchSoundAt[] = {']
+    for group, offsets in sound_offsets:
+        lines.append(f'    /* battlegroup {group} */ ' + ' '.join(f'{o},' for o in offsets))
     lines += ['};', '', 'static const struct { int16_t group; uint16_t start, count; } g_prefetchSoundGroups[] = {']
     for k in range(0, len(sound_starts), 6):
         lines.append('    ' + ' '.join(f'{{ {g}, {s}, {c} }},' for g, s, c in sound_starts[k:k + 6]))
     lines += ['};', '', 'static const uint8_t g_prefetchCommonSounds[] = {',
-              '    ' + ' '.join(f'{names.index(n)}, /* {n} */' for n in common_sounds), '};', '']
+              '    ' + ' '.join(f'{names.index(n)}, /* {n} */' for n in common_sounds), '};', '',
+              'static const uint16_t g_prefetchCommonSoundAt[] = {',
+              '    ' + ' '.join(f'{common_sound_at[n]},' for n in common_sounds), '};', '']
     args.output.write_text('\n'.join(lines))
     print(f'{len(use)} battles, {len(common)} common items, {at} battle items ({late} for a first bubble after '
           f'update {args.updates}), {len(sounds)} battles with {sound_at} sounds ({len(names)} names), common sounds: '

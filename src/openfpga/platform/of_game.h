@@ -15,6 +15,10 @@
 #include "runner.h"
 #include "vm.h"
 
+/* A sound in battlePrefetch's entries, and back. */
+#define OF_PREFETCH_SOUND(index) (-1 - (int32_t) (index))
+#define OF_PREFETCH_SOUND_INDEX(entry) (-1 - (entry))
+
 /* A game string replaced as loaded (see of_strings.c). */
 typedef struct {
     const char *from;
@@ -93,16 +97,12 @@ typedef struct {
      * the game is in steady action that keeps its pace better that way (Flowey's
      * fight once its intro is over), otherwise 1. NULL: always 1. */
     int (*speedSkipRun)(Runner *runner);
-    /* The texture items a battle about to start will draw, for the platform to
-     * load while the encounter's flash leaves time to spare (see swrPrefetchItem):
-     * at most max of them into items, first needed first, and the battle's
-     * number into battle. 0 when no battle is starting. NULL: none ahead. */
-    int (*battlePrefetch)(Runner *runner, int16_t *items, int max, int *battle);
-    /* The sounds (SOND indices) the first enemy speech bubble of that battle
-     * plays, its voice, and the battle's own first sounds, then those nearly
-     * every battle plays in its first turns, for the platform to read into the sound cache after the items:
-     * at most max of them into sounds. NULL: none ahead. */
-    int (*battleSounds)(Runner *runner, int battle, int32_t *sounds, int max);
+    /* What a battle about to start will draw and play first, for the platform to
+     * load during its encounter (see swrPrefetchItem and ofAudioPreloadSound): at
+     * most max entries, first needed first, each a texture item (TPAG index) or,
+     * as OF_PREFETCH_SOUND(index), a sound (SOND index); and the battle's number
+     * into battle. 0 when no battle is starting. NULL: none ahead. */
+    int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle);
 
     /* The built-in benchmark (see of_bench.h). */
     const char *benchTitle;

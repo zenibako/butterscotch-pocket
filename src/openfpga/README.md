@@ -548,22 +548,24 @@ verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
 
-In both modes, an Undertale battle's textures are read from the card while its
-encounter flashes ("!", the heart, about 1.5 s), instead of at their first draw
-in the battle: in each update's spare time and at least 25 ms of it, so an
-update of the still flash may run long. Its first frames
-then wait for few reads. The items each battle draws in its first 150 updates,
-and the bubble sprite and font of its first enemy speech bubble however late
-that comes, are in `platform/game_undertale_prefetch.h`, recorded on desktop
-from the battle tour over every `global.battlegroup`. After them the same
-flash reads the sounds the battle's writers start from that bubble on (the
-voices) and the battle's other sounds of its first 150 updates (its monster's
-hurt sound) into the sound cache, and then the sounds nearly every battle plays in
-its first turns (the menu's select and squeak, the slash, the hits, the most
-common text sounds), recorded over the same tour. Only free cache room is used, and nothing
-drawn changes. `--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The
-benchmark reports count the items loaded ahead and those still loaded at a
-draw in battle.
+In both modes, an Undertale battle's textures and first sounds are read from
+the card during its encounter, from the "!" until the battle room starts (the
+"!", the blinking heart and its fall to the FIGHT button, 49 updates, about
+1.6 s), instead of at their first draw or play in the battle: in each update's
+spare time and at least 50 ms of it, so an update of the encounter may run
+long. The items each battle draws in its first 150 updates, and the bubble
+sprite and font of its first enemy speech bubble however late that comes, are
+in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
+tour over every `global.battlegroup`, with the sounds: those nearly every
+battle plays in its first turns (the text sound, the menu's select and squeak,
+the slash, the hits), the battle's own first sounds (its monster's hurt sound)
+and its first bubble's voice. They are read in the order the battle first uses
+them, each with the update it was first used in, so that its first frame's
+textures come first, then the menu sounds, the first attack's, and the bubble
+and its voice. Only free cache room is used, and nothing drawn changes.
+`--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The benchmark
+reports count the items loaded ahead and those still loaded at a draw in
+battle.
 
 `make font-sampling-fixture` builds `./<game>_pc_font_sampling_fixture` without
 game assets. It checks either pixel phase, clipping, tint, alpha, cache reuse

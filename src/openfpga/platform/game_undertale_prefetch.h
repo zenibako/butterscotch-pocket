@@ -4,18 +4,25 @@
  * The texture items (TPAG indices) each Undertale battle draws in its first 150 updates,
  * and its first enemy speech bubble's sprites and fonts (drawn in the 60 updates from
  * that bubble's first draw), recorded on desktop over 112 battlegroups. g_prefetchCommon:
- * those at least 90% of battles draw; each battle's own list leaves them out. Both in order of
- * first use. g_prefetchSounds: the sounds writers start from that bubble on (the voices), then
- * the other sounds the battle starts in its first 150 updates that are not common, by name.
- * g_prefetchCommonSounds: those at least 40% of battles start in room_battle, by anyone. */
+ * those at least 90% of battles draw; each battle's own list leaves them out. g_prefetchSounds:
+ * the sounds writers start from that bubble on (the voices), and the other sounds the battle
+ * starts in its first 150 updates that are not common, by name. g_prefetchCommonSounds: those at
+ * least 40% of battles start in room_battle, by anyone. Each list is in order of first use,
+ * and its *At list gives that update (from the battle's start; for a common entry, the median
+ * over the battles that use it), so that the game can merge them. */
 
 /* Three of the table's items in the data file it was made from: TPAG index,
  * texture page, width, height. Another file's indices mean other items. */
 static const int16_t g_prefetchCheck[][4] = { { 6531, 19, 256, 1024 }, { 1814, 2, 546, 115 }, { 6537, 18, 256, 128 } };
 
 static const int16_t g_prefetchCommon[] = {
-    2, 8, 12, 25, 32, 34, 43, 105, 2631, 6531, 6537, 1814, 2071, 1833, 1838, 1844,
+    8, 12, 25, 32, 34, 43, 105, 2631, 6531, 6537, 2, 1814, 2071, 1833, 1838, 1844,
     1847, 1853, 1860,
+};
+
+static const uint16_t g_prefetchCommonAt[] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 53, 53, 59, 93, 97, 100,
+    103, 107, 110,
 };
 
 static const int16_t g_prefetchItems[] = {
@@ -294,6 +301,282 @@ static const int16_t g_prefetchItems[] = {
     5699, 6162, 6163, 6177, 5567, 5706, 6165, 6179, 6168, 141, 6534,
 };
 
+static const uint16_t g_prefetchItemAt[] = {
+    /* battlegroup 1 */
+    0, 0, 0, 0, 24, 50, 94, 115, 115, 115, 147, 147,
+    /* battlegroup 2 */
+    0, 0, 96, 115, 115, 115, 145, 146, 147, 148, 149,
+    /* battlegroup 3 */
+    0, 0, 0, 0, 24, 50, 95, 115, 115, 115, 147,
+    /* battlegroup 4 */
+    0, 0, 0, 0, 24, 50, 98, 118, 118, 150, 150,
+    /* battlegroup 5 */
+    0, 0, 9, 95, 115, 115, 115, 145, 146, 147, 148, 149,
+    /* battlegroup 6 */
+    0, 0, 0, 0, 0, 9, 24, 50, 95, 115, 115, 115, 145, 146, 146, 146,
+    147, 148, 149,
+    /* battlegroup 7 */
+    0, 0, 96, 117, 117, 117, 149, 149,
+    /* battlegroup 8 */
+    0, 0, 94, 114, 114, 114, 146, 146,
+    /* battlegroup 9 */
+    0, 0, 0, 0, 24, 50, 97, 117, 117, 117, 149, 149,
+    /* battlegroup 10 */
+    0, 0, 96, 116, 116, 116, 148, 148,
+    /* battlegroup 11 */
+    0, 0, 0, 58, 98, 118, 118, 149, 149,
+    /* battlegroup 12 */
+    0, 0, 0, 9, 19, 30, 58, 98, 119, 119, 119, 151, 151,
+    /* battlegroup 13 */
+    0, 0, 31, 33, 35, 37, 95, 114, 114, 114, 146, 146,
+    /* battlegroup 14 */
+    0, 0, 0, 9, 19, 30, 31, 33, 35, 37, 95, 115, 115, 115, 146, 146,
+    /* battlegroup 15 */
+    0, 0, 0, 0, 9, 19, 30, 31, 33, 35, 37, 58, 94, 114, 114, 145,
+    145,
+    /* battlegroup 16 */
+    0, 0, 9, 19, 30, 94, 113, 113, 113, 145, 145,
+    /* battlegroup 17 */
+    0, 0, 31, 33, 35, 37, 97, 117, 117, 117, 149, 149,
+    /* battlegroup 18 */
+    0, 0, 9, 19, 30, 98, 118, 118, 118, 150, 150,
+    /* battlegroup 19 */
+    0, 1,
+    /* battlegroup 20 */
+    0, 0, 4, 98, 119, 119, 135, 135,
+    /* battlegroup 21 */
+    0, 0, 31, 33, 35, 37, 96, 117, 117, 117, 149, 149,
+    /* battlegroup 22 */
+    0, 0, 94, 114, 114, 114,
+    /* battlegroup 23 */
+    0, 0, 0, 0, 0, 0, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29,
+    32, 35, 98, 119, 119, 119, 151, 151,
+    /* battlegroup 24 */
+    0, 0, 0, 0, 9, 96, 116, 116, 116, 148, 148,
+    /* battlegroup 25 */
+    0, 0, 0, 0, 0, 0, 0, 7, 7, 15, 15, 23, 23, 31, 31, 39,
+    39, 47, 47, 55, 55, 63, 63, 71, 71, 79, 79, 97, 117, 117, 149, 149,
+    151,
+    /* battlegroup 26 */
+    0, 0, 0, 9, 96, 117, 117, 117,
+    /* battlegroup 27 */
+    0, 0, 96, 116, 116, 116, 149, 150,
+    /* battlegroup 28 */
+    0, 0, 0, 0, 0, 1, 1, 1, 19, 22, 25, 28, 53, 55, 97, 117,
+    117, 117, 149, 149,
+    /* battlegroup 30 */
+    0, 0, 0, 0, 0, 9, 19, 30, 40, 50, 60, 70, 80, 90, 94, 99,
+    109, 114, 114, 114, 146, 146,
+    /* battlegroup 31 */
+    0, 0, 0, 0, 0, 0, 9, 19, 30, 40, 50, 60, 70, 80, 90, 97,
+    99, 109, 118, 118, 118, 119, 129, 139, 149, 150, 150,
+    /* battlegroup 32 */
+    0, 0, 9, 19, 30, 94, 115, 115, 115, 147, 147,
+    /* battlegroup 33 */
+    0, 0, 0, 0, 0, 0, 9, 9, 19, 19, 30, 30, 40, 50, 60, 70,
+    80, 90, 95, 99, 109, 115, 115, 115, 147, 147,
+    /* battlegroup 34 */
+    0, 0, 9, 19, 30, 40, 50, 60, 70, 80, 90, 97, 117, 117, 149, 149,
+    /* battlegroup 35 */
+    0, 0, 0, 9, 9, 19, 19, 30, 30, 40, 50, 60, 70, 80, 90, 97,
+    117, 117, 149, 149, 149,
+    /* battlegroup 36 */
+    0, 0, 0, 0, 0, 0, 0, 9, 9, 9, 19, 19, 19, 30, 30, 30,
+    40, 40, 50, 50, 60, 60, 70, 70, 80, 80, 90, 90, 97, 99, 109, 118,
+    118, 118, 150, 150, 150,
+    /* battlegroup 40 */
+    0, 0, 0, 94, 114, 114, 114, 146, 146,
+    /* battlegroup 41 */
+    0, 0, 0, 0, 95, 116, 116, 116, 146, 147, 148, 149,
+    /* battlegroup 42 */
+    0, 0, 9, 96, 115, 115, 145, 147, 147, 147,
+    /* battlegroup 43 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 9, 14, 19, 25, 30, 35,
+    40, 45, 98, 117, 117, 117, 149, 149, 149, 149,
+    /* battlegroup 44 */
+    0, 0, 0, 0, 97, 117, 117, 117, 149, 149,
+    /* battlegroup 45 */
+    0, 0, 0, 0, 0, 98, 199, 199,
+    /* battlegroup 46 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 9, 14, 19, 25,
+    30, 35, 40, 45, 79, 79, 124, 125,
+    /* battlegroup 47 */
+    0, 0, 0, 0, 0, 0, 0, 0, 3, 7, 11, 40, 40, 41, 60, 61,
+    99,
+    /* battlegroup 48 */
+    0, 0, 0, 6, 96, 116, 148, 151,
+    /* battlegroup 49 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 95, 115, 115, 147, 147, 147,
+    /* battlegroup 50 */
+    0, 0, 0, 0, 9, 14, 97, 118, 150, 150,
+    /* battlegroup 51 */
+    0, 0, 0, 0, 0, 0, 7, 9, 14, 15, 23, 96, 116, 116, 116, 146,
+    146, 147, 148, 149,
+    /* battlegroup 52 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 96, 117, 117, 117, 149,
+    149,
+    /* battlegroup 53 */
+    0, 0, 94, 114, 114, 114, 146, 146,
+    /* battlegroup 54 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 9, 14, 19, 25,
+    30, 35, 40, 45, 94, 115, 115, 115, 147, 147, 147, 147,
+    /* battlegroup 55 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 9, 9, 14, 19,
+    25, 30, 35, 40, 45, 97, 117, 117, 117, 149, 149, 149, 149,
+    /* battlegroup 56 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4,
+    6, 7, 9, 11, 12, 14, 16, 16, 94, 114, 114, 114, 114, 114, 146, 146,
+    /* battlegroup 57 */
+    0, 0, 6, 94, 114, 146, 149,
+    /* battlegroup 58 */
+    0, 0, 0, 0, 0, 0, 0, 0, 4, 9, 14, 20, 21,
+    /* battlegroup 59 */
+    0, 0, 0, 0, 0, 0, 0, 3, 3, 6, 9, 12, 15, 18, 21, 24,
+    27, 95, 115, 115, 115, 115, 147, 147,
+    /* battlegroup 60 */
+    0, 0, 0, 0, 0, 0, 0, 4, 9, 14, 32, 35, 38, 41, 44, 47,
+    50, 53, 53, 56, 57, 61, 97, 118, 118, 118, 118,
+    /* battlegroup 61 */
+    0, 0, 0, 94, 114, 114, 114, 146, 146,
+    /* battlegroup 62 */
+    0, 0, 0, 0, 98, 119, 119, 151, 151,
+    /* battlegroup 63 */
+    0, 0, 0, 0, 9, 14, 17, 19, 29, 29, 44, 59, 74, 89, 94, 114,
+    114, 114, 146, 146,
+    /* battlegroup 64 */
+    0, 0, 0, 0, 0, 0, 9, 14, 17, 19, 29, 29, 44, 59, 74, 89,
+    95, 114, 114, 114, 145, 145,
+    /* battlegroup 65 */
+    0, 0, 0, 0, 0, 0, 0, 9, 14, 17, 19, 29, 29, 44, 59, 74,
+    89, 95, 116, 116, 147, 147,
+    /* battlegroup 66 */
+    0, 0, 0, 0, 0, 0, 98, 118, 118, 150, 150,
+    /* battlegroup 67 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 14, 17, 19, 29, 29, 44,
+    59, 74, 89, 95, 115, 115, 115, 142, 145, 147, 147, 148,
+    /* battlegroup 68 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 4,
+    6, 9, 9, 12, 14, 15, 18, 21, 24, 27, 32, 35, 38, 41, 44, 47,
+    50, 53, 53, 56, 57, 61, 94, 115, 115, 115, 115, 147, 147,
+    /* battlegroup 69 */
+    0, 0, 0, 9, 94, 116,
+    /* battlegroup 70 */
+    0, 0, 0, 9, 98, 98,
+    /* battlegroup 71 */
+    0, 0, 0, 94, 94,
+    /* battlegroup 72 */
+    0, 0, 0, 9, 97, 97,
+    /* battlegroup 73 */
+    0, 0, 0, 9, 95, 95,
+    /* battlegroup 74 */
+    0, 0, 0, 9, 94, 115,
+    /* battlegroup 75 */
+    0, 0, 0, 9, 94, 94,
+    /* battlegroup 76 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 96, 116, 147, 147, 148,
+    /* battlegroup 77 */
+    0, 0, 0, 0, 0, 0, 0, 0, 7, 9, 9, 14, 14, 15, 23, 95,
+    116, 116, 146, 146, 147, 148, 148, 148, 149,
+    /* battlegroup 78 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 98, 118, 118, 118, 150,
+    150,
+    /* battlegroup 79 */
+    0, 0, 0, 0, 0, 0, 7, 9, 14, 15, 23, 97, 117, 117, 117, 147,
+    147, 148, 149, 149, 149,
+    /* battlegroup 80 */
+    0, 0, 0, 6, 98, 119, 151, 154,
+    /* battlegroup 81 */
+    0, 0, 0, 0, 0, 0, 0, 1, 97, 118, 118, 119, 150, 150,
+    /* battlegroup 82 */
+    0, 0, 0, 9, 19, 29, 94, 146, 146,
+    /* battlegroup 83 */
+    0, 0, 0, 61, 63, 65, 67, 69, 71, 97, 149, 149,
+    /* battlegroup 84 */
+    0, 0, 9, 19, 59, 97, 149, 149,
+    /* battlegroup 85 */
+    0, 0, 0, 7, 15, 23, 95, 147,
+    /* battlegroup 86 */
+    0, 0, 0, 97,
+    /* battlegroup 87 */
+    0, 0, 0, 0, 0, 4, 9, 14, 94, 114, 146, 146,
+    /* battlegroup 88 */
+    0, 0, 0, 0, 0, 0, 97, 117, 149, 149, 149, 149,
+    /* battlegroup 89 */
+    0, 0, 0, 0, 0, 94, 114, 146, 146,
+    /* battlegroup 90 */
+    0, 0, 0, 0, 0, 0, 96, 117, 149, 149, 149,
+    /* battlegroup 91 */
+    0, 95, 95, 97, 300, 301,
+    /* battlegroup 92 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 97, 118, 118, 118, 118,
+    /* battlegroup 93 */
+    0, 0, 98, 119, 119, 119, 149,
+    /* battlegroup 94 */
+    0, 0, 0, 0, 0, 0, 0, 95, 116, 116, 116, 116, 116, 116, 211, 214,
+    /* battlegroup 95 */
+    0, 0, 0, 29, 31,
+    /* battlegroup 100 */
+    0, 0, 0, 0, 0, 0, 1,
+    /* battlegroup 101 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 3,
+    6, 6, 6, 9, 10, 97, 118,
+    /* battlegroup 120 */
+    0, 0, 0, 0, 0, 0, 94, 115, 115, 147, 147,
+    /* battlegroup 121 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 41, 94, 114, 114, 114, 114, 146,
+    146,
+    /* battlegroup 122 */
+    0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 4, 5, 5, 8, 9, 10,
+    10, 11, 11, 14, 15, 15, 15, 17, 23, 35, 94, 114, 114, 114, 146, 146,
+    /* battlegroup 123 */
+    0, 0, 0, 0, 0, 0, 0, 0, 97, 118, 118, 118, 119, 148, 150, 150,
+    /* battlegroup 124 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 98, 118, 118, 118, 119, 148,
+    148, 150, 150,
+    /* battlegroup 125 */
+    0, 0, 0, 0, 0, 0, 9, 14, 17, 19, 29, 29, 44, 59, 74, 89,
+    94, 114, 114, 114, 146, 146,
+    /* battlegroup 126 */
+    0, 0, 0, 95, 115, 115, 115, 147, 147,
+    /* battlegroup 127 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 4, 5, 5,
+    8, 9, 9, 10, 10, 11, 11, 14, 14, 15, 15, 15, 17, 17, 19, 23,
+    29, 29, 35, 44, 59, 74, 89, 97, 117, 117, 117, 149, 149,
+    /* battlegroup 128 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 41, 95, 115, 115,
+    115, 115, 146, 146,
+    /* battlegroup 129 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3,
+    4, 5, 5, 8, 9, 10, 10, 11, 11, 14, 15, 15, 15, 17, 23, 35,
+    41, 96, 117, 117, 117, 117, 148, 148,
+    /* battlegroup 130 */
+    0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 4, 5, 5, 8, 9, 10,
+    10, 11, 11, 14, 15, 15, 15, 17, 23, 35, 98, 119, 119, 151, 151,
+    /* battlegroup 131 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 4, 5, 5,
+    8, 9, 10, 10, 11, 11, 14, 15, 15, 15, 17, 23, 35, 97, 118, 118,
+    149, 149,
+    /* battlegroup 132 */
+    0, 0, 0, 0, 94, 115, 115, 142, 145, 147, 147, 148,
+    /* battlegroup 133 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 41,
+    97, 116, 116, 119, 142, 145, 146, 146, 146, 148, 148, 148,
+    /* battlegroup 134 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    3, 3, 4, 5, 5, 8, 9, 9, 10, 10, 11, 11, 14, 14, 15, 15,
+    15, 17, 17, 19, 23, 29, 29, 35, 44, 59, 74, 89, 94, 115, 115, 115,
+    119, 145, 145, 147, 147,
+    /* battlegroup 135 */
+    0, 0, 0, 0, 0, 96, 117, 117, 117, 149, 149,
+    /* battlegroup 140 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 98, 119, 119, 151, 152,
+    /* battlegroup 255 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 97, 117,
+    /* battlegroup 256 */
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 11,
+    11, 11, 11, 11, 17, 17, 17, 17, 23, 136, 136,
+};
+
 static const struct { int16_t group; uint16_t start, count; } g_prefetchGroups[] = {
     { 1, 0, 12 }, { 2, 12, 11 }, { 3, 23, 11 }, { 4, 34, 11 }, { 5, 45, 12 }, { 6, 57, 19 },
     { 7, 76, 8 }, { 8, 84, 8 }, { 9, 92, 12 }, { 10, 104, 8 }, { 11, 112, 9 }, { 12, 121, 13 },
@@ -327,15 +610,15 @@ static const char *const g_prefetchSoundNames[] = {
 };
 
 static const uint8_t g_prefetchSounds[] = {
-    /* battlegroup 1 */ 0, 1, 8,
+    /* battlegroup 1 */ 8, 0, 1,
     /* battlegroup 2 */ 37,
     /* battlegroup 3 */ 8,
-    /* battlegroup 4 */ 0, 1, 8,
+    /* battlegroup 4 */ 8, 0, 1,
     /* battlegroup 5 */ 37,
-    /* battlegroup 6 */ 0, 1, 37,
+    /* battlegroup 6 */ 37, 0, 1,
     /* battlegroup 7 */ 0, 1,
     /* battlegroup 8 */ 0, 1,
-    /* battlegroup 9 */ 0, 1, 8,
+    /* battlegroup 9 */ 8, 0, 1,
     /* battlegroup 10 */ 0, 1,
     /* battlegroup 11 */ 0, 1,
     /* battlegroup 12 */ 0, 1,
@@ -347,62 +630,62 @@ static const uint8_t g_prefetchSounds[] = {
     /* battlegroup 18 */ 0, 1,
     /* battlegroup 20 */ 0, 1,
     /* battlegroup 21 */ 0, 1,
-    /* battlegroup 23 */ 0, 1, 7,
-    /* battlegroup 24 */ 0, 1, 7,
-    /* battlegroup 25 */ 0, 1, 8,
+    /* battlegroup 23 */ 7, 0, 1,
+    /* battlegroup 24 */ 7, 0, 1,
+    /* battlegroup 25 */ 8, 0, 1,
     /* battlegroup 27 */ 33,
-    /* battlegroup 28 */ 0, 1, 8,
-    /* battlegroup 30 */ 0, 1, 13,
-    /* battlegroup 31 */ 0, 1, 13,
+    /* battlegroup 28 */ 8, 0, 1,
+    /* battlegroup 30 */ 13, 0, 1,
+    /* battlegroup 31 */ 13, 0, 1,
     /* battlegroup 32 */ 0, 1,
-    /* battlegroup 33 */ 0, 1, 13,
+    /* battlegroup 33 */ 13, 0, 1,
     /* battlegroup 34 */ 0, 1,
     /* battlegroup 35 */ 0, 1,
-    /* battlegroup 36 */ 0, 1, 13,
-    /* battlegroup 40 */ 0, 1, 12,
+    /* battlegroup 36 */ 13, 0, 1,
+    /* battlegroup 40 */ 12, 0, 1,
     /* battlegroup 41 */ 8, 37, 17,
     /* battlegroup 42 */ 0, 1,
-    /* battlegroup 43 */ 0, 1, 8,
-    /* battlegroup 44 */ 0, 1, 2,
+    /* battlegroup 43 */ 8, 0, 1,
+    /* battlegroup 44 */ 2, 0, 1,
     /* battlegroup 45 */ 0,
     /* battlegroup 46 */ 0,
     /* battlegroup 47 */ 36, 1,
     /* battlegroup 48 */ 20, 24, 23, 18, 21, 19, 25, 22, 26,
-    /* battlegroup 49 */ 0, 1, 8,
-    /* battlegroup 50 */ 0, 1, 8,
+    /* battlegroup 49 */ 8, 0, 1,
+    /* battlegroup 50 */ 8, 0, 1,
     /* battlegroup 51 */ 38, 37, 17,
-    /* battlegroup 52 */ 0, 1, 8,
+    /* battlegroup 52 */ 8, 0, 1,
     /* battlegroup 53 */ 0, 1,
-    /* battlegroup 54 */ 0, 1, 12,
+    /* battlegroup 54 */ 12, 0, 1,
     /* battlegroup 55 */ 0, 1,
-    /* battlegroup 56 */ 0, 14,
+    /* battlegroup 56 */ 14, 0,
     /* battlegroup 57 */ 21, 19, 22, 23, 24, 25, 18, 26, 20, 30,
     /* battlegroup 58 */ 36,
-    /* battlegroup 59 */ 0, 1, 15,
+    /* battlegroup 59 */ 15, 0, 1,
     /* battlegroup 60 */ 11,
-    /* battlegroup 61 */ 0, 1, 8,
-    /* battlegroup 62 */ 0, 1, 14,
-    /* battlegroup 63 */ 0, 1, 27,
-    /* battlegroup 64 */ 0, 1, 8,
-    /* battlegroup 65 */ 0, 1, 14,
-    /* battlegroup 66 */ 0, 1, 14,
-    /* battlegroup 67 */ 0, 1, 27,
-    /* battlegroup 68 */ 0, 1, 15,
+    /* battlegroup 61 */ 8, 0, 1,
+    /* battlegroup 62 */ 14, 0, 1,
+    /* battlegroup 63 */ 27, 0, 1,
+    /* battlegroup 64 */ 8, 0, 1,
+    /* battlegroup 65 */ 14, 0, 1,
+    /* battlegroup 66 */ 14, 0, 1,
+    /* battlegroup 67 */ 27, 0, 1,
+    /* battlegroup 68 */ 15, 0, 1,
     /* battlegroup 70 */ 0, 1,
     /* battlegroup 71 */ 0, 1,
     /* battlegroup 72 */ 0, 1,
     /* battlegroup 73 */ 0, 1,
     /* battlegroup 75 */ 0, 1,
-    /* battlegroup 76 */ 0, 1, 8,
-    /* battlegroup 77 */ 0, 1, 38, 37,
-    /* battlegroup 78 */ 0, 1, 8,
-    /* battlegroup 79 */ 0, 1, 38, 37,
+    /* battlegroup 76 */ 8, 0, 1,
+    /* battlegroup 77 */ 38, 37, 0, 1,
+    /* battlegroup 78 */ 8, 0, 1,
+    /* battlegroup 79 */ 38, 37, 0, 1,
     /* battlegroup 80 */ 22, 18, 26, 23, 25, 24, 21, 20, 19,
-    /* battlegroup 81 */ 25, 23, 24, 19, 21, 18, 22, 26, 20, 1, 39,
-    /* battlegroup 82 */ 0, 1, 14,
-    /* battlegroup 83 */ 0, 1, 38,
-    /* battlegroup 84 */ 0, 1, 38,
-    /* battlegroup 85 */ 0, 1, 3, 4, 5,
+    /* battlegroup 81 */ 39, 25, 23, 24, 19, 21, 18, 22, 26, 20, 1,
+    /* battlegroup 82 */ 14, 0, 1,
+    /* battlegroup 83 */ 38, 0, 1,
+    /* battlegroup 84 */ 38, 0, 1,
+    /* battlegroup 85 */ 3, 4, 5, 0, 1,
     /* battlegroup 86 */ 27,
     /* battlegroup 87 */ 36, 1,
     /* battlegroup 88 */ 0, 33, 1,
@@ -410,28 +693,136 @@ static const uint8_t g_prefetchSounds[] = {
     /* battlegroup 90 */ 35, 31, 1,
     /* battlegroup 91 */ 0,
     /* battlegroup 93 */ 37,
-    /* battlegroup 94 */ 20, 21, 24, 22, 23, 25, 19, 18, 26, 27,
+    /* battlegroup 94 */ 27, 20, 21, 24, 22, 23, 25, 19, 18, 26,
     /* battlegroup 95 */ 34, 27,
     /* battlegroup 100 */ 27,
     /* battlegroup 101 */ 27,
-    /* battlegroup 120 */ 0, 1, 14,
-    /* battlegroup 121 */ 0, 1, 8,
-    /* battlegroup 122 */ 0, 1, 27,
-    /* battlegroup 123 */ 0, 1, 27,
-    /* battlegroup 124 */ 0, 1, 27,
-    /* battlegroup 125 */ 0, 1, 27,
-    /* battlegroup 126 */ 0, 1, 8,
-    /* battlegroup 127 */ 0, 1, 27,
-    /* battlegroup 128 */ 0, 1, 8,
-    /* battlegroup 129 */ 0, 1, 8,
-    /* battlegroup 130 */ 0, 1, 27,
-    /* battlegroup 131 */ 0, 1, 14,
-    /* battlegroup 132 */ 0, 1, 14,
-    /* battlegroup 133 */ 0, 1, 27,
-    /* battlegroup 134 */ 0, 1, 27,
-    /* battlegroup 135 */ 0, 1, 10,
-    /* battlegroup 140 */ 0, 27,
+    /* battlegroup 120 */ 14, 0, 1,
+    /* battlegroup 121 */ 8, 0, 1,
+    /* battlegroup 122 */ 27, 0, 1,
+    /* battlegroup 123 */ 27, 0, 1,
+    /* battlegroup 124 */ 27, 0, 1,
+    /* battlegroup 125 */ 27, 0, 1,
+    /* battlegroup 126 */ 8, 0, 1,
+    /* battlegroup 127 */ 27, 0, 1,
+    /* battlegroup 128 */ 8, 0, 1,
+    /* battlegroup 129 */ 8, 0, 1,
+    /* battlegroup 130 */ 27, 0, 1,
+    /* battlegroup 131 */ 14, 0, 1,
+    /* battlegroup 132 */ 14, 0, 1,
+    /* battlegroup 133 */ 27, 0, 1,
+    /* battlegroup 134 */ 27, 0, 1,
+    /* battlegroup 135 */ 10, 0, 1,
+    /* battlegroup 140 */ 27, 0,
     /* battlegroup 256 */ 32, 1,
+};
+
+static const uint16_t g_prefetchSoundAt[] = {
+    /* battlegroup 1 */ 125, 149, 289,
+    /* battlegroup 2 */ 145,
+    /* battlegroup 3 */ 125,
+    /* battlegroup 4 */ 128, 152, 293,
+    /* battlegroup 5 */ 145,
+    /* battlegroup 6 */ 145, 148, 290,
+    /* battlegroup 7 */ 151, 311,
+    /* battlegroup 8 */ 148, 309,
+    /* battlegroup 9 */ 127, 151, 292,
+    /* battlegroup 10 */ 150, 311,
+    /* battlegroup 11 */ 151, 313,
+    /* battlegroup 12 */ 153, 303,
+    /* battlegroup 13 */ 148, 299,
+    /* battlegroup 14 */ 148, 300,
+    /* battlegroup 15 */ 147, 299,
+    /* battlegroup 16 */ 147, 299,
+    /* battlegroup 17 */ 151, 301,
+    /* battlegroup 18 */ 152, 303,
+    /* battlegroup 20 */ 137, 333,
+    /* battlegroup 21 */ 151, 300,
+    /* battlegroup 23 */ 129, 153, 287,
+    /* battlegroup 24 */ 126, 150, 299,
+    /* battlegroup 25 */ 127, 151, 384,
+    /* battlegroup 27 */ 151,
+    /* battlegroup 28 */ 127, 151, 311,
+    /* battlegroup 30 */ 124, 148, 308,
+    /* battlegroup 31 */ 128, 152, 321,
+    /* battlegroup 32 */ 149, 289,
+    /* battlegroup 33 */ 125, 149, 319,
+    /* battlegroup 34 */ 151, 192,
+    /* battlegroup 35 */ 151, 402,
+    /* battlegroup 36 */ 128, 152, 381,
+    /* battlegroup 40 */ 124, 148, 348,
+    /* battlegroup 41 */ 126, 146, 147,
+    /* battlegroup 42 */ 149, 371,
+    /* battlegroup 43 */ 127, 151, 350,
+    /* battlegroup 44 */ 127, 151, 315,
+    /* battlegroup 45 */ 200,
+    /* battlegroup 46 */ 125,
+    /* battlegroup 47 */ 61, 94,
+    /* battlegroup 48 */ 151, 154, 160, 163, 166, 169, 178, 356, 374,
+    /* battlegroup 49 */ 125, 149, 372,
+    /* battlegroup 50 */ 128, 152, 347,
+    /* battlegroup 51 */ 126, 146, 147,
+    /* battlegroup 52 */ 127, 151, 370,
+    /* battlegroup 53 */ 148, 309,
+    /* battlegroup 54 */ 125, 149, 346,
+    /* battlegroup 55 */ 151, 371,
+    /* battlegroup 56 */ 124, 147,
+    /* battlegroup 57 */ 149, 152, 155, 164, 167, 170, 176, 288, 309, 333,
+    /* battlegroup 58 */ 21,
+    /* battlegroup 59 */ 125, 149, 345,
+    /* battlegroup 60 */ 128,
+    /* battlegroup 61 */ 124, 148, 339,
+    /* battlegroup 62 */ 129, 153, 343,
+    /* battlegroup 63 */ 124, 148, 339,
+    /* battlegroup 64 */ 124, 147, 340,
+    /* battlegroup 65 */ 126, 149, 340,
+    /* battlegroup 66 */ 128, 152, 343,
+    /* battlegroup 67 */ 125, 149, 340,
+    /* battlegroup 68 */ 125, 149, 334,
+    /* battlegroup 70 */ 100, 169,
+    /* battlegroup 71 */ 96, 165,
+    /* battlegroup 72 */ 99, 168,
+    /* battlegroup 73 */ 97, 166,
+    /* battlegroup 75 */ 96, 165,
+    /* battlegroup 76 */ 126, 149, 373,
+    /* battlegroup 77 */ 126, 146, 150, 345,
+    /* battlegroup 78 */ 128, 152, 372,
+    /* battlegroup 79 */ 127, 147, 151, 347,
+    /* battlegroup 80 */ 154, 163, 166, 172, 175, 178, 196, 230, 307,
+    /* battlegroup 81 */ 128, 153, 156, 159, 162, 168, 360, 363, 375, 378, 392,
+    /* battlegroup 82 */ 124, 148, 391,
+    /* battlegroup 83 */ 127, 151, 439,
+    /* battlegroup 84 */ 127, 151, 287,
+    /* battlegroup 85 */ 147, 147, 147, 354, 387,
+    /* battlegroup 86 */ 128,
+    /* battlegroup 87 */ 147, 327,
+    /* battlegroup 88 */ 151, 151, 427,
+    /* battlegroup 89 */ 147,
+    /* battlegroup 90 */ 150, 151, 369,
+    /* battlegroup 91 */ 301,
+    /* battlegroup 93 */ 149,
+    /* battlegroup 94 */ 126, 214, 217, 220, 229, 232, 241, 253, 344, 388,
+    /* battlegroup 95 */ 31, 376,
+    /* battlegroup 100 */ 2,
+    /* battlegroup 101 */ 128,
+    /* battlegroup 120 */ 125, 149, 339,
+    /* battlegroup 121 */ 124, 148, 339,
+    /* battlegroup 122 */ 124, 148, 339,
+    /* battlegroup 123 */ 128, 152, 342,
+    /* battlegroup 124 */ 128, 152, 343,
+    /* battlegroup 125 */ 124, 148, 339,
+    /* battlegroup 126 */ 125, 149, 340,
+    /* battlegroup 127 */ 127, 151, 342,
+    /* battlegroup 128 */ 125, 148, 340,
+    /* battlegroup 129 */ 127, 150, 341,
+    /* battlegroup 130 */ 129, 153, 343,
+    /* battlegroup 131 */ 128, 151, 342,
+    /* battlegroup 132 */ 125, 149, 339,
+    /* battlegroup 133 */ 126, 150, 342,
+    /* battlegroup 134 */ 125, 149, 339,
+    /* battlegroup 135 */ 127, 151, 370,
+    /* battlegroup 140 */ 129, 152,
+    /* battlegroup 256 */ 137, 360,
 };
 
 static const struct { int16_t group; uint16_t start, count; } g_prefetchSoundGroups[] = {
@@ -456,5 +847,9 @@ static const struct { int16_t group; uint16_t start, count; } g_prefetchSoundGro
 };
 
 static const uint8_t g_prefetchCommonSounds[] = {
-    1, /* SND_TXT2 */ 0, /* SND_TXT1 */ 28, /* snd_select */ 29, /* snd_squeak */ 16, /* snd_laz */ 6, /* snd_damage */ 9, /* snd_hurt1 */
+    1, /* SND_TXT2 */ 28, /* snd_select */ 29, /* snd_squeak */ 16, /* snd_laz */ 6, /* snd_damage */ 0, /* SND_TXT1 */ 9, /* snd_hurt1 */
+};
+
+static const uint16_t g_prefetchCommonSoundAt[] = {
+    0, 13, 21, 93, 116, 150, 215,
 };
