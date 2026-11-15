@@ -1783,8 +1783,6 @@ static void swrDrawSpriteInternal(
         uint32_t lastPixel = 0xFFFFFFFF;
         uint32_t srcRedBlue = 0, srcGreen = 0;
         uintpixel_t lastTinted = 0;
-        uint32_t lastUnder = 0xFFFFFFFF; // no 16-bit pixel: nothing kept yet
-        uintpixel_t lastResult = 0;
         SWR_PROBE_PATH(4);
         
         fixedp_t ys2 = iys2;
@@ -1809,9 +1807,6 @@ static void swrDrawSpriteInternal(
                 if (to > dw) to = dw;
                 xs2 += (fixedp_t) from * oxs2;
             }
-            // The blend depends only on the pixel under it and the source
-            // colour, and a fade usually goes over long stretches of one
-            // colour: the last result is kept and used again while both repeat.
             if (alpha == 128 && swrFavorSpeed) {
                 for (int x = from; x < to; x++, xs2 += oxs2) {
                     uintpixel_t pixel = srcline[(int)(xs2 >> fp_prec)];
@@ -1819,14 +1814,8 @@ static void swrDrawSpriteInternal(
                     if (pixel != lastPixel) {
                         lastTinted = tint(tintColor, pixel);
                         lastPixel = pixel;
-                        lastUnder = 0xFFFFFFFF;
                     }
-                    uintpixel_t under = dstline[x];
-                    if (under != lastUnder) {
-                        lastResult = swrBlendHalf(under, lastTinted);
-                        lastUnder = under;
-                    }
-                    dstline[x] = lastResult;
+                    dstline[x] = swrBlendHalf(dstline[x], lastTinted);
                 }
                 continue;
             }
@@ -1841,14 +1830,8 @@ static void swrDrawSpriteInternal(
                     srcRedBlue = swrSpreadRedBlue(tinted) * alpha;
                     srcGreen = swrGreen(tinted) * alpha;
                     lastPixel = pixel;
-                    lastUnder = 0xFFFFFFFF;
                 }
-                uintpixel_t under = dstline[x];
-                if (under != lastUnder) {
-                    lastResult = swrBlendPremultiplied(under, srcRedBlue, srcGreen, dstalpha);
-                    lastUnder = under;
-                }
-                dstline[x] = lastResult;
+                dstline[x] = swrBlendPremultiplied(dstline[x], srcRedBlue, srcGreen, dstalpha);
             }
         }
         return;
