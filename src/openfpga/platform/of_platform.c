@@ -1076,12 +1076,12 @@ static void createObject(const char *name) {
  * was too little on the Pocket: BsPre, 2026-11-13, loaded 1-2 items a battle.)
  * Whatever is not loaded when the battle starts is read at its first draw as
  * before. After the items come the sounds the battle's first enemy speech
- * bubble plays (battleSounds), read into the sound cache as their first play
- * would. Nothing drawn
+ * bubble plays, the battle's own first sounds and those nearly every battle
+ * plays in its first turns (battleSounds), read into the sound cache as their first play would. Nothing drawn
  * changes, only when the reads happen. --no-prefetch, or BS_PREFETCH=0 on
  * desktop, turns this off to compare. */
 #define OF_PREFETCH_MAX 128
-#define OF_PREFETCH_SOUNDS_MAX 16
+#define OF_PREFETCH_SOUNDS_MAX 32
 #define OF_PREFETCH_UPDATE_NANOS 25000000ull
 #define OF_PREFETCH_MARGIN_NANOS 2000000ull
 static int g_prefetchOn = -1; /* -1: not decided yet */

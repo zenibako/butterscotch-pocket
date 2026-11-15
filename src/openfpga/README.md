@@ -557,7 +557,10 @@ and the bubble sprite and font of its first enemy speech bubble however late
 that comes, are in `platform/game_undertale_prefetch.h`, recorded on desktop
 from the battle tour over every `global.battlegroup`. After them the same
 flash reads the sounds the battle's writers start from that bubble on (the
-voices) into the sound cache. Only free cache room is used, and nothing
+voices) and the battle's other sounds of its first 150 updates (its monster's
+hurt sound) into the sound cache, and then the sounds nearly every battle plays in
+its first turns (the menu's select and squeak, the slash, the hits, the most
+common text sounds), recorded over the same tour. Only free cache room is used, and nothing
 drawn changes. `--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The
 benchmark reports count the items loaded ahead and those still loaded at a
 draw in battle.

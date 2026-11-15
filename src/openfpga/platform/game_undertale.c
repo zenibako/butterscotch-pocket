@@ -351,7 +351,9 @@ static int speedSkipRun(Runner *runner) {
  * battle's items are the ones the table gives: those nearly every battle draws,
  * then that battlegroup's own, which take in its first enemy speech bubble's
  * sprite and font however late that bubble comes. battleSounds gives the
- * sounds that bubble plays (its voice), by name. The table holds TPAG indices
+ * sounds that bubble plays (its voice) and the battle's own first sounds (its
+ * monster's hurt sound), then those nearly every battle plays in its first
+ * turns (menu, slash, hits), by name. The table holds TPAG indices
  * of the data file it was recorded from; where three of them are not the same
  * items, nothing is loaded ahead, sounds included. */
 #include "game_undertale_prefetch.h"
@@ -419,6 +421,14 @@ static int battleSounds(Runner *runner, int battle, int32_t *sounds, int max) {
             int32_t sound = g_prefetchSoundIndex[g_prefetchSounds[g_prefetchSoundGroups[g].start + i]];
             if (sound >= 0) sounds[count++] = sound;
         }
+    }
+    /* Then those nearly every battle plays in its first turns, where the
+     * voices did not already give them. */
+    for (size_t c = 0; c < sizeof(g_prefetchCommonSounds) && count < max; ++c) {
+        int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[c]];
+        bool listed = sound < 0;
+        for (int k = 0; k < count && !listed; ++k) listed = sounds[k] == sound;
+        if (!listed) sounds[count++] = sound;
     }
     return count;
 }

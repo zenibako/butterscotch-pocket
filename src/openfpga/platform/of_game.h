@@ -99,8 +99,9 @@ typedef struct {
      * number into battle. 0 when no battle is starting. NULL: none ahead. */
     int (*battlePrefetch)(Runner *runner, int16_t *items, int max, int *battle);
     /* The sounds (SOND indices) the first enemy speech bubble of that battle
-     * plays, its voice, for the platform to read into the sound cache after
-     * the items: at most max of them into sounds. NULL: none ahead. */
+     * plays, its voice, and the battle's own first sounds, then those nearly
+     * every battle plays in its first turns, for the platform to read into the sound cache after the items:
+     * at most max of them into sounds. NULL: none ahead. */
     int (*battleSounds)(Runner *runner, int battle, int32_t *sounds, int max);
 
     /* The built-in benchmark (see of_bench.h). */

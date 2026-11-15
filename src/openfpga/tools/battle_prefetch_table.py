@@ -13,9 +13,15 @@ listed once, as common; each battle's own list leaves them out. Both are in
 order of first use. Then, for each battlegroup, the sounds writer objects
 start from that bubble on (the voices; some speakers pick one at random for
 each letter, so the rest of the visit is taken too), by name, from the
-BS_AUDIO_LOG lines in each run's output. The battle tour's layout (tourForList in
-platform/game_undertale.c): the first visit starts at update 1000, each visit
-lasts 600.
+BS_AUDIO_LOG lines in each run's output. Last, the common battle sounds: those
+at least SOUND_SHARE of battles start in room_battle in the visit, whoever
+starts them (the menu, the slash, the hits), in order of first use; and after
+each battle's voices, the other sounds it starts in its first UPDATES updates
+(its monster's hurt sound) that are not common. The tour
+moves the menu cursor in only about half the battles, a player in nearly every
+one, so the share is lower than the items' 90%. The battle tour's layout
+(tourForList in platform/game_undertale.c): the first visit starts at update
+1000, each visit lasts 600.
 """
 import argparse
 import collections
@@ -23,6 +29,7 @@ import pathlib
 import re
 
 FIRST_VISIT, VISIT = 1000, 600
+SOUND_SHARE = 0.4
 SOUND = re.compile(r'Audio: sfx \S+ gain \S+ pitch \S+ at (\d+) in (\S+) by (\S+) sound (\S+)$')
 
 
@@ -34,6 +41,7 @@ def read_runs(log_dir, updates, bubble):
     use = {}   # group -> {item: offset of first use}
     shape = {}  # item -> (page, width, height)
     voices = {}  # group -> {sound name: offset of first start}
+    heard_in = {}  # group -> {sound name: offset of first start}, any object
     late = 0  # items taken in for a bubble after the first `updates`
     for listing in sorted(log_dir.glob('run*.list'), key=lambda p: int(p.stem[3:])):
         run = listing.stem
@@ -77,14 +85,19 @@ def read_runs(log_dir, updates, bubble):
                 continue
             frame, room, by, name = int(m[1]), m[2], m[3], m[4]
             v = (frame - FIRST_VISIT) // VISIT
-            if frame < FIRST_VISIT or v >= len(groups) or room != 'room_battle' or v not in first or starts[v] is None:
+            if frame < FIRST_VISIT or v >= len(groups) or room != 'room_battle' or starts[v] is None:
                 continue
             offset = frame - starts[v]
+            if offset >= 0:
+                any_heard = heard_in.setdefault(groups[v], {})
+                any_heard[name] = min(offset, any_heard.get(name, offset))
+            if v not in first:
+                continue
             if 'writer' not in by.lower() or offset < first[v]:
                 continue
             heard = voices.setdefault(groups[v], {})
             heard[name] = min(offset, heard.get(name, offset))
-    return use, shape, voices, late
+    return use, shape, voices, heard_in, late
 
 
 def main():
@@ -94,7 +107,7 @@ def main():
     parser.add_argument('--updates', type=int, default=150)
     parser.add_argument('--bubble', type=int, default=60)
     args = parser.parse_args()
-    use, shape, voices, late = read_runs(args.log_dir, args.updates, args.bubble)
+    use, shape, voices, heard_in, late = read_runs(args.log_dir, args.updates, args.bubble)
     if not use:
         raise SystemExit('no battles found in ' + str(args.log_dir))
     if not voices:
@@ -123,7 +136,9 @@ def main():
         f' * and its first enemy speech bubble\'s sprites and fonts (drawn in the {args.bubble} updates from',
         f' * that bubble\'s first draw), recorded on desktop over {len(use)} battlegroups. g_prefetchCommon:',
         " * those at least 90% of battles draw; each battle's own list leaves them out. Both in order of",
-        ' * first use. g_prefetchSounds: the sounds writers start from that bubble on (the voices), by name. */',
+        ' * first use. g_prefetchSounds: the sounds writers start from that bubble on (the voices), then',
+        f' * the other sounds the battle starts in its first {args.updates} updates that are not common, by name.',
+        f' * g_prefetchCommonSounds: those at least {round(SOUND_SHARE * 100)}% of battles start in room_battle, by anyone. */',
         '',
         "/* Three of the table's items in the data file it was made from: TPAG index,",
         " * texture page, width, height. Another file's indices mean other items. */",
@@ -150,7 +165,22 @@ def main():
     for k in range(0, len(starts), 6):
         lines.append('    ' + ' '.join(f'{{ {g}, {s}, {c} }},' for g, s, c in starts[k:k + 6]))
     lines += ['};', '']
-    names = sorted({name for heard in voices.values() for name in heard})
+    heard_count = collections.Counter(name for heard in heard_in.values() for name in heard)
+    heard_first = collections.defaultdict(list)
+    for heard in heard_in.values():
+        for name, offset in heard.items():
+            heard_first[name].append(offset)
+    common_sounds = sorted((n for n, c in heard_count.items() if c >= SOUND_SHARE * len(use)),
+                           key=lambda n: (min(heard_first[n]), n))
+    sounds = {}  # group -> its voices, then its other first sounds, in order of first use
+    for group in sorted(set(voices) | set(heard_in)):
+        own = sorted(voices.get(group, {}), key=lambda n: (voices[group][n], n))
+        heard = heard_in.get(group, {})
+        own += sorted((n for n in heard if heard[n] < args.updates and n not in common_sounds and n not in own),
+                      key=lambda n: (heard[n], n))
+        if own:
+            sounds[group] = own
+    names = sorted({name for own in sounds.values() for name in own} | set(common_sounds))
     if len(names) > 256:
         raise SystemExit('more bubble sounds than g_prefetchSounds can index')
     lines += ['static const char *const g_prefetchSoundNames[] = {']
@@ -158,18 +188,19 @@ def main():
         lines.append('    ' + ' '.join(f'"{n}",' for n in names[k:k + 6]))
     lines += ['};', '', 'static const uint8_t g_prefetchSounds[] = {']
     sound_starts, sound_at = [], 0
-    for group in sorted(voices):
-        own = sorted(voices[group], key=lambda n: (voices[group][n], n))
+    for group, own in sorted(sounds.items()):
         sound_starts.append((group, sound_at, len(own)))
         lines.append(f'    /* battlegroup {group} */ ' + ' '.join(f'{names.index(n)},' for n in own))
         sound_at += len(own)
     lines += ['};', '', 'static const struct { int16_t group; uint16_t start, count; } g_prefetchSoundGroups[] = {']
     for k in range(0, len(sound_starts), 6):
         lines.append('    ' + ' '.join(f'{{ {g}, {s}, {c} }},' for g, s, c in sound_starts[k:k + 6]))
-    lines += ['};', '']
+    lines += ['};', '', 'static const uint8_t g_prefetchCommonSounds[] = {',
+              '    ' + ' '.join(f'{names.index(n)}, /* {n} */' for n in common_sounds), '};', '']
     args.output.write_text('\n'.join(lines))
     print(f'{len(use)} battles, {len(common)} common items, {at} battle items ({late} for a first bubble after '
-          f'update {args.updates}), {len(voices)} battles with {sound_at} bubble sounds ({len(names)} names)')
+          f'update {args.updates}), {len(sounds)} battles with {sound_at} sounds ({len(names)} names), common sounds: '
+          f'{" ".join(common_sounds)}')
 
 
 if __name__ == '__main__':
