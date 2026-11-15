@@ -225,24 +225,29 @@ void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]) {
 
 /* ===[ Background reads ]===
  *
- * A read the game does not wait for: it runs on the Pocket's host, which
- * writes it into the CRAM0 staging memory the OS gives the app, while the CPU
- * (running from SDRAM) goes on with the game. The OS finishes it from its
+ * A read the game does not wait for: it runs on the Pocket's host while the
+ * CPU (running from SDRAM) goes on with the game. The OS finishes it from its
  * interrupt or its 1 kHz tick, or from of_file_async_poll; here it is noticed
- * by polling, and copied out to where it was asked for then. Its staging
- * memory is its own, apart from the texture and music readers', which wait
- * for it (ofBgReadSettle) before reading. */
+ * by polling. The texture and music readers wait for it (ofBgReadSettle)
+ * before reading.
+ *
+ * The read goes straight to where it was asked for (SDRAM), never to app
+ * staging memory in CRAM0: the host fills the OS's own CRAM0 bounce window and
+ * the OS copies it out before it reports the read finished. A finished read
+ * cannot be copied out of CRAM0 by the app later, as rc.52 did: once the read
+ * is over, the OS hands CRAM0 to the bridge at the next frame boundary
+ * (of_savestate_poll parks it for savestates) or at any save-file close, and a
+ * CPU load from CRAM0 then is a load access fault (rc.52's trap in bgFinish's
+ * memcpy). The texture and music readers copy out of their staging at once,
+ * inside the same call, so they are not exposed to this. */
 
-#define OF_BG_STAGE_BYTES (32u * 1024u)
-#define OF_BG_STAGE_MIN (8u * 1024u)
+#define OF_BG_PIECE_BYTES (32u * 1024u)
+#define OF_BG_PIECE_MIN (8u * 1024u)
 
 static bool g_bgProbed, g_bgOff, g_bgActive;
-static uint8_t *g_bgStage;
 static uint32_t g_bgPiece;
 static volatile int g_bgDone;
 static volatile int g_bgResult;
-static void *g_bgDest;
-static uint32_t g_bgSize;
 static uint64_t g_bgStart;
 static int g_bgOutcome = OF_BG_IDLE;
 static uint32_t g_bgReads;
@@ -260,14 +265,11 @@ uint32_t ofBgReadMax(void) {
     if (!g_bgProbed) {
         g_bgProbed = true;
         uint32_t maxRead = of_file_async_max_read();
-        uint32_t size = OF_BG_STAGE_BYTES < maxRead ? OF_BG_STAGE_BYTES : maxRead;
-        for (; size >= OF_BG_STAGE_MIN && g_bgStage == NULL; size /= 2) {
-            g_bgStage = of_file_dma_stage_alloc(size, 4096);
-            if (g_bgStage != NULL) g_bgPiece = size;
-        }
-        if (g_bgStage != NULL) logInfo("Prefetch: reads in the background, up to %u KB at a time.\n", (unsigned) (g_bgPiece / 1024u));
+        uint32_t size = OF_BG_PIECE_BYTES < maxRead ? OF_BG_PIECE_BYTES : maxRead;
+        if (size >= OF_BG_PIECE_MIN) g_bgPiece = size;
+        if (g_bgPiece != 0) logInfo("Prefetch: reads in the background, up to %u KB at a time.\n", (unsigned) (g_bgPiece / 1024u));
     }
-    return g_bgOff || g_bgStage == NULL ? 0 : g_bgPiece;
+    return g_bgOff ? 0 : g_bgPiece;
 }
 
 static bool bgSlot(const char *path, uint32_t *slot) {
@@ -294,18 +296,17 @@ bool ofBgReadStart(const char *path, uint32_t offset, uint32_t size, void *dest)
         !bgSlot(path, &slot)) return false;
     g_bgDone = 0;
     g_bgResult = 0;
-    /* Refused while the host is busy with something else: tried again at the next poll. */
-    if (of_file_read_async((int) slot, offset, g_bgStage, size, bgCallback) < 0) return false;
+    /* Refused while the host is busy with something else: tried again at the next poll.
+     * `dest` is SDRAM: the OS copies the read there from its bounce window before
+     * the callback, so the app never loads from CRAM0 (see above). */
+    if (of_file_read_async((int) slot, offset, dest, size, bgCallback) < 0) return false;
     g_bgActive = true;
-    g_bgDest = dest;
-    g_bgSize = size;
     g_bgStart = nowNanos();
     return true;
 }
 
 static void bgFinish(void) {
     bool ok = g_bgResult >= 0;
-    if (ok) memcpy(g_bgDest, g_bgStage, g_bgSize);
     g_bgActive = false;
     g_bgOutcome = ok ? OF_BG_DONE : OF_BG_FAILED;
     g_bgReads++;
