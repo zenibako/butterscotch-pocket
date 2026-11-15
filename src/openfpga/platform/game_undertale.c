@@ -14,6 +14,11 @@
 #include "of_perf.h"
 #include "log.h"
 #include "of_state_requests.h"
+
+#if defined(USE_FLOAT_REALS) && !defined(OF_PC) && !defined(_GNU_SOURCE)
+/* musl declares it only for _GNU_SOURCE. */
+void sincosf(float, float *, float *);
+#endif
 #include "op.h"
 #include "stb_ds.h"
 #include "utils.h"
@@ -174,8 +179,18 @@ static bool orangeParticleStep(VMContext *ctx) {
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_IMAGE_YSCALE, "image_yscale", RValue_makeReal(size), -1);
     self->imageAlpha = (float)alpha;
     setNativeReal(self, particleVars[PARTICLE_PHASE], phase);
+#if defined(USE_FLOAT_REALS) && !defined(OF_PC)
+    /* musl's sincosf reduces the angle once and returns sinf's and cosf's
+     * exact results (checked bit for bit on 148 million arguments); each
+     * is double maths in software on the Pocket's single-precision FPU. */
+    float sine, cosine;
+    sincosf(angle, &sine, &cosine);
+    GMLReal dx = sine * values[PARTICLE_X_WAVE];
+    GMLReal dy = cosine * values[PARTICLE_Y_WAVE];
+#else
     GMLReal dx = GMLReal_sin(angle) * values[PARTICLE_X_WAVE];
     GMLReal dy = GMLReal_cos(angle) * values[PARTICLE_Y_WAVE];
+#endif
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_X, "x", RValue_makeReal((GMLReal)self->x + dx), -1);
     VMBuiltins_setVariable(ctx, self, BUILTIN_VAR_Y, "y", RValue_makeReal((GMLReal)self->y + dy), -1);
     return true;

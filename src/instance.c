@@ -218,24 +218,31 @@ void Instance_computeComponentsFromSpeed(Instance* inst) {
 }
 
 #if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
-void Instance_computeFrictionComponents(Instance* inst, Runner* runner) {
-    GMLReal cosine, sine;
-    // Friction changes speed every update while most projectiles hold their
-    // direction. Cache the exact clamped unit vector, independent of speed.
+// The clamped unit vector of a direction in degrees, as the step computes it.
+// Friction changes speed every update while most projectiles hold their
+// direction, and gravity keeps one direction for good, so the exact results
+// are cached by the angle's bits (sinf and cosf are double maths in software
+// on the Pocket's single-precision FPU).
+void Instance_motionUnit(Runner* runner, float degrees, GMLReal* cosine, GMLReal* sine) {
     uint32_t bits;
-    memcpy(&bits, &inst->direction, sizeof(bits));
+    memcpy(&bits, &degrees, sizeof(bits));
     uint32_t key = bits + 1u; // zero-initialized entries have no finite angle
     uint32_t hash = (bits ^ (bits >> 16)) * 0x9e3779b9u;
     MotionRotation* cached = &runner->motionRotations[hash >> 25];
     if (key != 0 && cached->key == key) {
-        cosine = cached->cosine;
-        sine = cached->sine;
-    } else {
-        GMLReal radians = inst->direction * (M_PI / 180.0);
-        cosine = clampFloat(GMLReal_cos(radians));
-        sine = clampFloat(GMLReal_sin(radians));
-        if (isfinite(inst->direction)) *cached = (MotionRotation) { key, cosine, sine };
+        *cosine = cached->cosine;
+        *sine = cached->sine;
+        return;
     }
+    GMLReal radians = degrees * (M_PI / 180.0);
+    *cosine = clampFloat(GMLReal_cos(radians));
+    *sine = clampFloat(GMLReal_sin(radians));
+    if (isfinite(degrees)) *cached = (MotionRotation) { key, *cosine, *sine };
+}
+
+void Instance_computeFrictionComponents(Instance* inst, Runner* runner) {
+    GMLReal cosine, sine;
+    Instance_motionUnit(runner, inst->direction, &cosine, &sine);
     inst->hspeed = (float) (inst->speed * cosine);
     inst->vspeed = (float) (-inst->speed * sine);
 
