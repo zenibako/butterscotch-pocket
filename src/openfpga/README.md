@@ -868,8 +868,9 @@ is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
 rebooting; any button switches to a QR code of the log's end (see "The log as a QR code").
 
-A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`)
-logs three lines, kept short enough to fit the log overlay:
+A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`, or
+`--slow-frame-ms <n>` in `ARGS=`) logs three lines, kept short enough to fit
+the log overlay:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
