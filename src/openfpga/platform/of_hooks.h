@@ -44,7 +44,7 @@ uint32_t ofBgReadMax(void);
 bool ofBgReadStart(const char *path, uint32_t offset, uint32_t size, void *dest);
 int ofBgReadPoll(void);
 void ofBgReadSettle(void);
-void platformBeforeRoomFileRead(void);
+void platformBeforeDataFileRead(void);
 /* Between draw calls: a battle's loading takes a finished background read
  * and starts the next, so the card is kept busy while the frame is drawn. */
 void ofPrefetchTick(void);

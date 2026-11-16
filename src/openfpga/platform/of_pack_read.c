@@ -466,7 +466,7 @@ void ofBgReadTotals(uint32_t *reads, uint64_t *readNanos, uint64_t *settleNanos)
 
 #endif
 
-/* Common runner hook: lazy room payloads share the OS file service with assets. */
-void platformBeforeRoomFileRead(void) {
+/* Common runner hook: lazy room and texture payloads share the OS file service with assets. */
+void platformBeforeDataFileRead(void) {
     ofBgReadSettle();
 }

@@ -66,8 +66,8 @@ done
 "$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" \
     "$repo/tests/sw_button_cache_test.c" "$repo/src/log.c" -lm -o "$out/button-cache"
 "$out/button-cache"
-"$cc" "${flags[@]}" -DPLATFORM_ROOM_LOAD_BEGIN \
-    "$repo/tests/data_win_lazy_io_test.c" "$repo/src/data_win.c" \
+"$cc" "${flags[@]}" -DPLATFORM_DATA_FILE_READ_BEGIN \
+    "$repo/tests/data_win_lazy_io_test.c" \
     "$repo/src/log.c" "$repo/src/stb_ds.c" -lm -o "$out/lazy-room-io"
 "$out/lazy-room-io"
 "$cc" "${flags[@]}" "$repo/tests/data_win_room_cache_test.c" \
