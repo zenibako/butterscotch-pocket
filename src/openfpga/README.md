@@ -538,8 +538,8 @@ with small fonts, so those rooms are rendered at 640x480 and the display
 mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
 everything stays at 320x240.
 
-Speed mode draws rooms at 320x240, with the renderer averaging each 2x2
-block of texels when it shrinks a 640x480 screen.
+Speed mode draws rooms at 320x240. The rendering implementation is in
+[`../sw/sw_drawing.c`](../sw/sw_drawing.c).
 Undertale's battles are the exception: Speed draws them at 640x480, except
 the heaviest, which stay at 320x240. Those are the `global.battlegroup` values
 in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Flowey's own battle
