@@ -16,6 +16,7 @@
 #include "platform/of_hooks.h"
 #include "platform/of_loading.h"
 #include "platform/of_perf.h"
+#include "platform/of_args.h"
 #include "platform/of_state_requests.h"
 #include "stb_ds.h"
 
@@ -172,7 +173,11 @@ int main(int argc, char **argv) {
         /* --no-prefetch: a battle's textures are read at their first draw, not during its encounter's flash. */
         if (strcmp(argv[i], "--no-prefetch") == 0) ofPlatformSetPrefetch(false);
         /* --slow-frame-ms <n>: log frames from n ms of work up as slow, not from OF_PERF_SLOW_FRAME_MS. */
-        if (strcmp(argv[i], "--slow-frame-ms") == 0 && i + 1 < argc) ofPerfSetSlowFrameMs((unsigned) atoi(argv[++i]));
+        if (strcmp(argv[i], "--slow-frame-ms") == 0) {
+            unsigned ms;
+            if (ofParseSlowFrameArg(argc, argv, &i, &ms)) ofPerfSetSlowFrameMs(ms);
+            else logWarn("--slow-frame-ms needs a positive integer threshold; option ignored.\n");
+        }
         /* --read-log: every direct read of the texture pack and the music in the log, with what came before it. */
         if (strcmp(argv[i], "--read-log") == 0) ofReadLogSetVerbose(true);
         if (strcmp(argv[i], "--debug") == 0) ofPlatformSetDebugMode(true);

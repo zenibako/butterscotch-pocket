@@ -548,34 +548,18 @@ verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
 
-In both modes, Undertale warms the common battle UI textures and sounds in
-spare overworld time (`Prefetch: common` in the log). A battle's remaining
-textures and first sounds are read from the card during its encounter, from the "!" until the battle room starts (the
-"!", the blinking heart and its fall to the FIGHT button, 49 updates, about
-1.6 s), instead of at their first draw or play in the battle. The reads are
-made in the background: the Pocket's host fetches each one while the game goes
-on, and a new one is started as soon as the last is in, at the start of an
-update, between draw calls and while the update waits for its time. What has
-been read is then decoded one tile at a time in an update's spare time, with
-a small allowance past it during the encounter. The scheduler yields between
-tiles; partial textures become visible to the cache only when complete. At
-battle entry any unfinished work is discarded, without an unbounded decode
-batch; those assets load at their first draw or play as before. A story battle (Toriel, Papyrus, the Snowdin dogs, Undyne, Mettaton,
-Asgore...) has no "!": the game makes obj_battler itself, and the battle's
-entries are read over its 30 updates the same way. The items each battle
-draws in its first 150 updates, and the bubble
-sprite and font of its first enemy speech bubble however late that comes, are
-in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
-tour over every `global.battlegroup`, with the sounds: those nearly every
-battle plays in its first turns (the text sound, the menu's select and squeak,
-the slash, the hits), the battle's own first sounds (its monster's hurt sound)
-and its first bubble's voice. They are read in the order the battle first uses
-them, each with the update it was first used in, so that its first frame's
-textures come first, then the menu sounds, the first attack's, and the bubble
-and its voice. Only free cache room is used, and nothing drawn changes.
-`--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The benchmark
-reports count the items loaded ahead and those still loaded at a draw in
-battle.
+In both modes, Undertale loads common battle UI assets and sounds in spare
+overworld time, then preloads the upcoming encounter's dialogue and battle
+assets during its transition. This also covers story battles that start
+without the "!". Prefetching uses free cache room and leaves game output
+unchanged. Unfinished assets load normally when first needed.
+
+The `Prefetch: common` and `Prefetch: battle` log lines report assets loaded,
+already present, or not reached, along with background-read and loading work.
+`--no-prefetch` (desktop: `BS_PREFETCH=0`) disables it for comparisons. The
+benchmark also counts assets still loaded during battle. Scheduling and table
+format are described in `platform/of_platform.c` and
+`platform/game_undertale_prefetch.h`.
 
 `make font-sampling-fixture` builds `./<game>_pc_font_sampling_fixture` without
 game assets. It checks either pixel phase, clipping, tint, alpha, cache reuse
@@ -669,9 +653,10 @@ queue leaves a gap in the music. The read-ahead is refilled a piece per
 frame, and a track that starts is first read on the following frame, so
 room changes do not also pay for music start-up. On the Pocket the pieces
 are read with `of_file_read_async` and waited for, which is much quicker
-there than `fread`; a read is never left in flight, because the OS fails
-ordinary reads while one is. The comments in `platform/of_audio_system.c`
-have the sizes and the reasons.
+there than `fread`. The music reader waits for each piece to finish before
+returning. Battle prefetch can leave a background read in flight between
+frames; file readers settle it before using the OS file service. The comments
+in `platform/of_audio_system.c` describe the audio reader.
 
 Desktop: `BS_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
 s16le) and `BS_AUDIO_LOG=1` logs every effect, for checking without speakers,
@@ -890,7 +875,8 @@ rebooting; any button switches to a QR code of the log's end (see "The log as a 
 
 A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`, or
 `--slow-frame-ms <n>` in `ARGS=`) logs three lines, kept short enough to fit
-the log overlay:
+the log overlay. The threshold must be a positive integer; missing or invalid
+values produce a warning and leave a following option available:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10

@@ -1,12 +1,39 @@
 /* A large first texture must yield, rather than poisoning the estimate for
  * every later texture and blocking the bounded read-ahead queue. */
 #define OF_PC 1
+#include <stdint.h>
+#include <unistd.h>
+static int fixtureUsleep(useconds_t micros);
+#define usleep fixtureUsleep
 #include "../src/openfpga/platform/of_platform.c"
+#undef usleep
 #include <assert.h>
 #include <stdarg.h>
+/* ELF/ASan retains the menu's function-pointer table even when this fixture
+ * only calls the prefetch scheduler. These dependencies must link, and must
+ * never be reached by a scheduling test. Mach-O dead stripping hid this. */
+void Profiler_setEnabled(Profiler** slot, bool enabled) { (void)slot; (void)enabled; abort(); }
+void ofPerfShowLog(void) { abort(); }
+void ofAudioSetMode(OfAudioMode mode) { (void)mode; abort(); }
+uint8_t* of_video_surface(void) { abort(); }
+void of_video_flip(void) { abort(); }
+void platformBusyTick(void) { abort(); }
+void ofSavestateMenuPoll(void) { abort(); }
+bool ofLogDump(void) { abort(); }
+const char* ofSavestateReason(Runner* runner) { (void)runner; abort(); }
+OfAudioMode ofAudioMode(void) { abort(); }
+bool ofPerfOverlayOn(void) { abort(); }
+void ofPerfToggle(void) { abort(); }
+bool ofPerfLogOn(void) { abort(); }
+void ofPerfToggleLog(void) { abort(); }
 static uint64_t clockNanos;
 static unsigned tiles, wholeLoads, cancelCount;
-uint64_t nowNanos(void) { return clockNanos; }
+static bool tickClock;
+static uint64_t reportedSleep;
+static int fixtureUsleep(useconds_t micros) { clockNanos+=(uint64_t)micros*1000; return 0; }
+uint64_t nowNanos(void) { uint64_t now=clockNanos; if(tickClock)clockNanos+=1000; return now; }
+void ofPerfAddSleep(uint64_t nanos) { reportedSleep+=nanos; }
+void ofBenchPacedFrame(Runner*r,int frame,uint64_t start,uint64_t end) { (void)r;(void)frame;(void)start;(void)end; }
 static int nextBattle, pollResult;
 static int candidate(Runner *r,int32_t *entries,int max,int *battle,int *left) {
     (void)r; (void)max; entries[0]=7; *battle=nextBattle; *left=30; return 1;
@@ -84,5 +111,16 @@ int main(void) {
     /* Uncapped overworld warmup has no work: only actual encounters use prefetchAll. */
     g_prefetchArmed=true; g_uncapped=true; nextBattle=OF_PREFETCH_WARMUP;
     prefetchCheck(); assert(g_prefetchCount==0);
+    /* Pacing includes real waits, but must not hide the tile decode work. */
+    g_uncapped=false; g_smoothLowres=false; g_prefetchBattle=24; g_prefetchCount=1;
+    g_prefetchNext=0; g_readEntry=1; g_prefetchEntries[0]=1;
+    g_slots[0].state=PF_READY; g_slots[0].plan=0; g_lateUsed=0;
+    clockNanos=0; tickClock=true; reportedSleep=0;
+    platformSleepUntil(10000000);
+    tickClock=false;
+    assert(g_prefetchNext==1);
+    assert(reportedSleep<=clockNanos-1000000);
+    assert(reportedSleep>=clockNanos-1100000);
+    prefetchEnd();
     puts("bounded prefetch scheduling: passed"); return 0;
 }

@@ -1432,16 +1432,20 @@ static void prefetchAll(void) {
 
 /* While an update waits for its time: loads what has been read, keeps the card
  * busy, and counts how far loading ran past the update's time. */
-static void prefetchWait(uint64_t until) {
-    if (g_prefetchCount == 0 || g_runner == NULL || g_runner->renderer == NULL) return;
-    uint64_t start = nowNanos();
+static uint64_t prefetchWait(uint64_t until) {
+    if (g_prefetchCount == 0 || g_runner == NULL || g_runner->renderer == NULL) return 0;
+    uint64_t start = nowNanos(), workStart = start;
+    uint64_t active = 0;
     ++g_burst.updates;
     prefetchPumpReads();
     prefetchLoadReady(until);
+    active += nowNanos() - workStart;
     uint64_t waitEnd = until > OF_PREFETCH_MARGIN_NANOS ? until - OF_PREFETCH_MARGIN_NANOS : 0;
     while (g_prefetchNext < g_prefetchCount && nowNanos() + 1000000u < waitEnd) {
+        workStart = nowNanos();
         prefetchPumpReads();
         prefetchLoadReady(until);
+        active += nowNanos() - workStart;
         usleep(250);
     }
     uint64_t end = nowNanos();
@@ -1450,6 +1454,7 @@ static void prefetchWait(uint64_t until) {
         g_burst.lateNanos += end - from;
         ++g_burst.lateUpdates;
     }
+    return active;
 }
 
 /* Once an update, before it runs: starts a burst as an encounter begins, ends
@@ -1930,7 +1935,7 @@ void platformSleepUntil(uint64_t time) {
         g_debtNanos -= paid;
     }
     /* Up to the time it is to sleep until, less any catching up. */
-    prefetchWait(time);
+    uint64_t prefetchNanos = prefetchWait(time);
     int64_t remaining = (int64_t) time - (int64_t) nowNanos();
     if (remaining > OF_SLEEP_MARGIN_NANOS + 1000000)
         usleep((useconds_t) ((remaining - OF_SLEEP_MARGIN_NANOS) / 1000));
@@ -1942,7 +1947,8 @@ void platformSleepUntil(uint64_t time) {
         g_debtNanos += end - time;
         if (g_debtNanos > g_debtCap) g_debtNanos = g_debtCap;
     }
-    ofPerfAddSleep(end - start);
+    uint64_t elapsed = end - start;
+    ofPerfAddSleep(elapsed > prefetchNanos ? elapsed - prefetchNanos : 0);
     ofBenchPacedFrame(g_runner, g_scriptFrame, start, end);
 }
 

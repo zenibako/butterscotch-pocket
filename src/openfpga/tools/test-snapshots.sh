@@ -14,6 +14,8 @@ if [ "$(uname -s)" = Darwin ]; then
     export DYLD_FALLBACK_LIBRARY_PATH="${DYLD_FALLBACK_LIBRARY_PATH:-/opt/homebrew/lib}"
 else flags+=(-D_GNU_SOURCE -Wl,--gc-sections); fi
 export ASAN_OPTIONS=detect_leaks=0
+"$cc" "${flags[@]}" "$repo/tests/of_args_test.c" -o "$out/args"
+"$out/args"
 "$cc" "${flags[@]}" -fno-sanitize-recover=undefined \
     "$repo/tests/opword_test.c" -o "$out/opword"
 "$out/opword"
@@ -64,6 +66,10 @@ done
 "$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" \
     "$repo/tests/sw_button_cache_test.c" "$repo/src/log.c" -lm -o "$out/button-cache"
 "$out/button-cache"
+"$cc" "${flags[@]}" -DPLATFORM_ROOM_LOAD_BEGIN \
+    "$repo/tests/data_win_lazy_io_test.c" "$repo/src/data_win.c" \
+    "$repo/src/log.c" "$repo/src/stb_ds.c" -lm -o "$out/lazy-room-io"
+"$out/lazy-room-io"
 "$cc" "${flags[@]}" "$repo/tests/data_win_room_cache_test.c" \
     "$repo/src/data_win.c" "$repo/src/binary_reader.c" \
     "$repo/src/log.c" "$repo/src/stb_ds.c" -lm -o "$out/room-cache"
@@ -89,7 +95,7 @@ done
     "$repo/tests/of_pc_audio_snapshot_test.c" $(pkg-config --libs sdl2) -lm -o "$out/pc-audio"
 "$out/pc-audio"
 export SDK_ROOT
-for test in test_runtime_packaging test_game_fingerprint test_state_identity test_focus_build_cache test_snapshot_notice test_save_fs_native_close test_save_fs_sync \
+for test in test_battle_prefetch_table test_runtime_packaging test_game_fingerprint test_state_identity test_focus_build_cache test_snapshot_notice test_save_fs_native_close test_save_fs_sync \
     test_snapshot_completion test_restore_commit test_state_coverage test_state_probe; do
     python3 "$port/tests/$test.py"
 done

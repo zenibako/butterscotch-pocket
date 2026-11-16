@@ -105,6 +105,17 @@ def read_runs(log_dir, updates, bubble):
     return use, shape, voices, heard_in, late
 
 
+def select_sounds(voices, heard, common, updates):
+    """Keep the original selection, with the earliest use of every selected sound."""
+    own = dict(voices)
+    for name, offset in heard.items():
+        if name in own:
+            own[name] = min(own[name], offset)
+        elif offset < updates and name not in common:
+            own[name] = offset
+    return own
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('log_dir', type=pathlib.Path)
@@ -190,9 +201,7 @@ def main():
     common_sounds = sorted(common_sound_at, key=lambda n: (common_sound_at[n], min(heard_first[n]), n))
     sounds = {}  # group -> {its voices and its other first sounds: update of first use}
     for group in sorted(set(voices) | set(heard_in)):
-        own = dict(voices.get(group, {}))
-        heard = heard_in.get(group, {})
-        own.update({n: heard[n] for n in heard if heard[n] < args.updates and n not in common_sounds and n not in own})
+        own = select_sounds(voices.get(group, {}), heard_in.get(group, {}), common_sounds, args.updates)
         if own:
             sounds[group] = own
     names = sorted({name for own in sounds.values() for name in own} | set(common_sounds))
