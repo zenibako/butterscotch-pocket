@@ -95,7 +95,7 @@ footer explains the selected item instead of showing timings. The log shows the 
 the debug buttons on. The log overlay itself
 costs a lot of frame time, so read the numbers with it off.
 
-**L, speed or accuracy.** Always ask which the user was in; numbers from
+**Performance Mode, Speed or Accuracy.** Always ask which the user was in; numbers from
 the two are not comparable. Speed does three things: 640x480 rooms at
 320x240 smoothed, faint mirrored blend layers left out
 (`swrMirrorFaintAlpha` 8, against 0 in accuracy), and frame skipping. With

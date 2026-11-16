@@ -52,7 +52,8 @@ changes your computer installation or writes saves. Ordinary game progress lives
 ## Controls and current limits
 
 D-pad moves; A confirms; B cancels; X/Y opens the game menu; Start maps to Enter.
-Select opens the Butterscotch menu, and L toggles speed/accuracy. See the
+Select opens the Butterscotch menu; its Performance Mode setting selects
+Speed or Accuracy. L is unused. See the
 [platform guide](../README.md)
 for detailed controls, debugging and scene-specific save-state support.
 

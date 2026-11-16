@@ -24,11 +24,13 @@ bool ofButtonPixel(uint16_t ch, int x, int y) {
                circle(x, y, 6, 2, icon == 2) || circle(x, y, 2, 6, icon == 3);
     }
     if (icon == 4 || icon == 5) {
-        /* The two small buttons below the screen; right is Start. */
-        int cx = x < 6 ? 2 : 10;
-        bool filled = (icon == 4 && cx == 10) || (icon == 5 && cx == 2);
-        int dx = abs(x - cx), dy = abs(y - 7);
-        return dx <= 2 && dy <= 1 && (filled || dx == 2 || dy == 1);
+        /* Three small circular buttons below the screen: Select, Pocket
+         * menu, Start. Only the active outer button is filled. The middle
+         * button is positional context, not an app input. */
+        int cx = x < 4 ? 1 : x < 9 ? 6 : 11;
+        bool filled = (icon == 4 && cx == 11) || (icon == 5 && cx == 1);
+        int distance = abs(x - cx) + abs(y - 7);
+        return distance == 1 || (distance == 0 && filled);
     }
     if (icon == 6 || icon == 7) {
         /* Shoulder pair, seen from above. */
