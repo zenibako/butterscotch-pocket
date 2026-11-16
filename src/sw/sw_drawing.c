@@ -4168,6 +4168,47 @@ static bool swrTiledHeldRepeats(const SWRenderer* swr, int count, int* step)
     return true;
 }
 
+// Which of the pass's texel rows lands on row y of the buffer, or -1 for none:
+// the only thing about y that swrTiledPassPattern's result depends on.
+// swrTiledRowIds then names texel rows that put down the same pixels alike.
+FORCE_INLINE int swrTiledPassSourceRow(const SWTiledPass* pass, int y)
+{
+    int fromOrigin = y - pass->originY;
+    if (y < pass->minY || y >= pass->maxY || fromOrigin < 0) return -1;
+    int copyY = fromOrigin / pass->stepY, row = fromOrigin - copyY * pass->stepY;
+    if (copyY >= pass->countY || row >= pass->height) return -1;
+    return row;
+}
+
+// For each texel row of the pass, the first row that puts down exactly the
+// same pixels: the same opaque bounds, texels and coverage between them.
+// A grid's tile is mostly the same row of a vertical line over and over.
+static void swrTiledRowIds(const SWTiledPass* pass, uint8_t* ids)
+{
+    uint32_t hashes[SWR_TILED_OWN_SIDE];
+    for (int r = 0; r < pass->height; r++) {
+        int from = (int) pass->bounds[r * 2], to = (int) pass->bounds[r * 2 + 1];
+        uint32_t h = (uint32_t) from * 0x9e3779b9u ^ (uint32_t) to;
+        int lo = from - pass->boundsBase < 0 ? 0 : from - pass->boundsBase;
+        int hi = to - pass->boundsBase > pass->width ? pass->width : to - pass->boundsBase;
+        for (int c = lo; c < hi; c++) {
+            h = (h ^ pass->texels[r * pass->pitch + c]) * 16777619u;
+            if (pass->coverage != NULL) h = (h ^ pass->coverage[r * pass->pitch + c]) * 16777619u;
+        }
+        hashes[r] = h;
+        ids[r] = (uint8_t) r;
+        for (int e = 0; e < r; e++) {
+            if (ids[e] != e || hashes[e] != h || pass->bounds[e * 2] != pass->bounds[r * 2] ||
+                pass->bounds[e * 2 + 1] != pass->bounds[r * 2 + 1]) continue;
+            bool same = hi <= lo || memcmp(&pass->texels[e * pass->pitch + lo], &pass->texels[r * pass->pitch + lo],
+                                            (size_t) (hi - lo) * sizeof(uintpixel_t)) == 0;
+            if (same && pass->coverage != NULL && hi > lo)
+                same = memcmp(&pass->coverage[e * pass->pitch + lo], &pass->coverage[r * pass->pitch + lo], (size_t) (hi - lo)) == 0;
+            if (same) { ids[r] = (uint8_t) e; break; }
+        }
+    }
+}
+
 // What the pass puts on row y, into one stretch of the row: `pattern[i]`
 // stands for every pixel x of the row with x % period == i. The same pixels
 // as swrTiledPassRow, from one copy instead of every copy across the row.
@@ -4224,7 +4265,30 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
         SWFilledMemo filledMemo = { 0 };
         int width = swr->mainWidth, first = period < width ? period : width;
         bool laid = false; // row[] holds a row laid out from the stretch now in row[0..first)
+        // A row's stretch depends only on which texel row each pass puts on
+        // it (the colour and fills are the same for every row): when those are
+        // the previous row's, so is the stretch, and row[] is already laid.
+        static int noMemo = -1;
+        if (noMemo < 0) noMemo = getenv("BS_NO_BG_REUSE") != NULL;
+        int lastSource[SWR_TILED_HELD_MAX];
+        uint8_t rowIds[SWR_TILED_HELD_MAX][SWR_TILED_OWN_SIDE];
+        bool idsKnown = !noMemo;
+        for (int p = 0; p < count && idsKnown; p++) {
+            if (swrTiledHeld[p].height > SWR_TILED_OWN_SIDE) idsKnown = false;
+            else swrTiledRowIds(&swrTiledHeld[p], rowIds[p]);
+        }
         for (int y = 0; y < swr->mainHeight; y++) {
+            bool same = laid && idsKnown;
+            for (int p = 0; p < count; p++) {
+                int source = swrTiledPassSourceRow(&swrTiledHeld[p], y);
+                if (source >= 0 && idsKnown) source = rowIds[p][source];
+                if (!laid || source != lastSource[p]) same = false;
+                lastSource[p] = source;
+            }
+            if (same) {
+                memcpy(&swr->mainFb[y * width], row, (size_t) width * sizeof(uintpixel_t));
+                continue;
+            }
             swrFillPixels(pattern, (size_t) period, color);
             for (int p = 0; p < count; p++) swrTiledPassPattern(&swrTiledHeld[p], y, pattern, period, &memos[p]);
             if (fills > 0)
