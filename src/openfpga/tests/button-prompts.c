@@ -23,17 +23,16 @@ int main(void) {
     assert(strcmp(strings[4], "Z") == 0);
     assert(strcmp(strings[5], OF_ICON_SELECT) == 0);
     assert(strcmp(strings[6], "Butterscotch menu") == 0);
-    /* Three small circular controls: Select left, Start right. Centers are
-     * five pixels apart, leaving two empty columns between the circles. */
+    /* Canonical three-circle rasters: Start right, Select left. The
+     * outlined middle circle is positional context, not another input. */
+    static const char *const smallButtons[2][3] = {
+        { ".#....#....#.", "#.#..#.#..###", ".#....#....#." },
+        { ".#....#....#.", "###..#.#..#.#", ".#....#....#." },
+    };
     for (int icon = 4; icon <= 5; icon++) {
         for (int y = 0; y < OF_ICON_SIZE; y++) {
             for (int x = 0; x < OF_ICON_SIZE; x++) {
-                bool expected = false;
-                for (int button = 0; button < 3; button++) {
-                    int distance = abs(x - (1 + 5 * button)) + abs(y - 7);
-                    bool active = button == (icon == 5 ? 0 : 2);
-                    if (distance == 1 || (distance == 0 && active)) expected = true;
-                }
+                bool expected = y >= 6 && y <= 8 && smallButtons[icon - 4][y - 6][x] == '#';
                 assert(ofButtonPixel((uint16_t)(OF_ICON_FIRST + icon), x, y) == expected);
             }
         }
