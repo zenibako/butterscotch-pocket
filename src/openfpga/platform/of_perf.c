@@ -83,6 +83,7 @@ void platformDrawCount(int kind) {
     if (++sinceTick >= 8) {
         sinceTick = 0;
         platformBusyTick();
+        ofPrefetchTick();
     }
 }
 
@@ -96,6 +97,7 @@ void platformDrawProfile(int kind, uint64_t nanos) {
     if (sinceTick >= OF_DRAW_TICK_NANOS) {
         sinceTick = 0;
         platformBusyTick();
+        ofPrefetchTick();
     }
 }
 
@@ -106,8 +108,14 @@ void ofPerfPhase(OfPhase phase) {
     g_phaseStart = now;
 }
 
+static unsigned g_slowFrameMs = OF_PERF_SLOW_FRAME_MS;
+
+void ofPerfSetSlowFrameMs(unsigned ms) {
+    if (ms > 0) g_slowFrameMs = ms;
+}
+
 static void reportSlowFrame(unsigned workMs) {
-    if (workMs >= OF_PERF_SLOW_FRAME_MS) {
+    if (workMs >= g_slowFrameMs) {
         unsigned load[OF_LOAD_KINDS], phase[OF_PHASES];
         for (int i = 0; i < OF_LOAD_KINDS; i++) load[i] = (unsigned) (g_loadNanos[i] / 1000000u);
         for (int i = 0; i < OF_PHASES; i++) phase[i] = (unsigned) (g_phaseNanos[i] / 1000000u);

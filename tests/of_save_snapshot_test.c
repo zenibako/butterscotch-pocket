@@ -31,6 +31,8 @@ bool ofAudioHasPackFile(const char *path) {
 bool ofAudioReadPackFile(const char *path, uint8_t **data, uint32_t *size) {
     (void)path; (void)data; (void)size; assert(false); return false;
 }
+/* No background read is ever in flight here. */
+void ofBgReadSettle(void) {}
 
 int main(void) {
     OfSaveFs fs = {0};

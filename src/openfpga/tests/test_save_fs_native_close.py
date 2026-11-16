@@ -42,6 +42,7 @@ static int fail_close, closes, lookups;
 static size_t written_bytes;
 static uint64_t nowNanos(void) { static uint64_t n; return ++n; }
 static void logInfo(const char *fmt, ...) { (void)fmt; }
+static void ofBgReadSettle(void) {}
 static int of_file_slot_find(const char *name, uint32_t *slot) {
     assert(strcmp(name, OF_SAVE_SLOT_FILE) == 0);
     lookups++; *slot = 10; return 0;

@@ -11,6 +11,7 @@ bool ofPerfDetail = false;
 void ofPerfAddLoad(OfLoadKind kind, uint64_t value) { (void)kind; (void)value; }
 void ofPerfPhase(OfPhase phase) { (void)phase; }
 void ofLoadingTick(void) {}
+void platformSoundSource(char *out, size_t size) { if (size) out[0] = 0; }
 #include <stdarg.h>
 static char lastInfo[512];
 void logInfo(const char *fmt, ...) {
@@ -27,6 +28,8 @@ static int deferAfterChecks = -1;
 bool ofSavestateDeferFileReads(void) {
     return stateRequestPending || (deferAfterChecks >= 0 && deferAfterChecks-- == 0);
 }
+/* No background read is ever in flight here. */
+void ofBgReadSettle(void) {}
 int of_audio_free(void) { return freePairs; }
 void of_audio_init(void) { submittedCount = 0; }
 void ofPcAudioSnapshotReset(void) { submittedCount = 0; }

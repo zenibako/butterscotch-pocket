@@ -7,6 +7,7 @@
 #include "image/image_decoder.h"
 
 #include "sw_renderer_private.h"
+#include "sw_texture_pack.h"
 #include "gettime.h"
 #include "vm_builtins.h"
 
@@ -3647,6 +3648,33 @@ int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex)
 {
     if (renderer == NULL || renderer->vtable != &swrVtable) return SWR_PREFETCH_SKIPPED;
     return (int) swrPrefetchItem((SWRenderer*) renderer, tpagIndex);
+}
+
+int SWRenderer_prefetchItemStep(Renderer* renderer, int32_t tpagIndex, void** state)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable) {
+        swrPrefetchCancel(state);
+        return SWR_PREFETCH_SKIPPED;
+    }
+    return (int) swrPrefetchItemStep((SWRenderer*) renderer, tpagIndex, state);
+}
+
+void SWRenderer_prefetchCancel(void** state)
+{
+    swrPrefetchCancel(state);
+}
+
+int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)[2], int max)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable || max <= 0) return -1;
+    SwrPackSpan planned[16];
+    if (max > 16) max = 16;
+    int count = swrPlanItem((SWRenderer*) renderer, tpagIndex, planned, max);
+    for (int i = 0; i < count; ++i) {
+        spans[i][0] = planned[i].start;
+        spans[i][1] = planned[i].size;
+    }
+    return count;
 }
 
 void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos)

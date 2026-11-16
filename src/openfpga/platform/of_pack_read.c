@@ -18,9 +18,11 @@
 #include "log.h"
 #include "of_hooks.h"
 #include "of_bench.h"
+#include "of_state_requests.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifndef OF_PC
@@ -149,6 +151,7 @@ static bool packReadPiece(uint32_t offset, uint32_t size) {
 }
 
 bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *dest) {
+    ofBgReadSettle();
     if (!g_packProbed) packProbe(path);
     if (!g_packDirect) return false;
     uint8_t *out = dest;
@@ -219,6 +222,142 @@ void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]) {
         if (counted[kind] != 0) tenths[kind] = (unsigned) (total[kind] / counted[kind] / 100000u);
 }
 
+
+/* ===[ Background reads ]===
+ *
+ * A read the game does not wait for: it runs on the Pocket's host while the
+ * CPU (running from SDRAM) goes on with the game. The OS finishes it from its
+ * interrupt or its 1 kHz tick, or from of_file_async_poll; here it is noticed
+ * by polling. The texture and music readers wait for it (ofBgReadSettle)
+ * before reading.
+ *
+ * The read goes straight to where it was asked for (SDRAM), never to app
+ * staging memory in CRAM0: the host fills the OS's own CRAM0 bounce window and
+ * the OS copies it out before it reports the read finished. A finished read
+ * cannot be copied out of CRAM0 by the app later, as rc.52 did: once the read
+ * is over, the OS hands CRAM0 to the bridge at the next frame boundary
+ * (of_savestate_poll parks it for savestates) or at any save-file close, and a
+ * CPU load from CRAM0 then is a load access fault (rc.52's trap in bgFinish's
+ * memcpy). The texture and music readers copy out of their staging at once,
+ * inside the same call, so they are not exposed to this. */
+
+#define OF_BG_PIECE_BYTES (32u * 1024u)
+#define OF_BG_PIECE_MIN (8u * 1024u)
+
+static bool g_bgProbed, g_bgOff, g_bgActive;
+static uint32_t g_bgPiece;
+static volatile int g_bgDone;
+static volatile int g_bgResult;
+static uint64_t g_bgStart;
+static int g_bgOutcome = OF_BG_IDLE;
+static uint32_t g_bgReads;
+static uint64_t g_bgReadNanos, g_bgSettleNanos;
+static struct { const char *path; uint32_t slot; } g_bgFiles[2];
+
+/* Runs from the read-completion interrupt. */
+static void bgCallback(int token, int result) {
+    (void) token;
+    g_bgResult = result;
+    g_bgDone = 1;
+}
+
+uint32_t ofBgReadMax(void) {
+    if (!g_bgProbed) {
+        g_bgProbed = true;
+        uint32_t maxRead = of_file_async_max_read();
+        uint32_t size = OF_BG_PIECE_BYTES < maxRead ? OF_BG_PIECE_BYTES : maxRead;
+        if (size >= OF_BG_PIECE_MIN) g_bgPiece = size;
+        if (g_bgPiece != 0) logInfo("Prefetch: reads in the background, up to %u KB at a time.\n", (unsigned) (g_bgPiece / 1024u));
+    }
+    return g_bgOff ? 0 : g_bgPiece;
+}
+
+static bool bgSlot(const char *path, uint32_t *slot) {
+    for (int i = 0; i < 2; i++) {
+        if (g_bgFiles[i].path != NULL && strcmp(g_bgFiles[i].path, path) == 0) {
+            *slot = g_bgFiles[i].slot;
+            return true;
+        }
+    }
+    if (of_file_slot_find(path, slot) != 0) return false;
+    for (int i = 0; i < 2; i++) {
+        if (g_bgFiles[i].path == NULL) {
+            g_bgFiles[i].path = path;
+            g_bgFiles[i].slot = *slot;
+            break;
+        }
+    }
+    return true;
+}
+
+bool ofBgReadStart(const char *path, uint32_t offset, uint32_t size, void *dest) {
+    uint32_t slot = 0;
+    if (g_bgActive || g_bgOutcome != OF_BG_IDLE || size == 0 || size > ofBgReadMax() || ofSavestateDeferFileReads() ||
+        !bgSlot(path, &slot)) return false;
+    g_bgDone = 0;
+    g_bgResult = 0;
+    /* Refused while the host is busy with something else: tried again at the next poll.
+     * `dest` is SDRAM: the OS copies the read there from its bounce window before
+     * the callback, so the app never loads from CRAM0 (see above). */
+    if (of_file_read_async((int) slot, offset, dest, size, bgCallback) < 0) return false;
+    g_bgActive = true;
+    g_bgStart = nowNanos();
+    return true;
+}
+
+static void bgFinish(void) {
+    bool ok = g_bgResult >= 0;
+    g_bgActive = false;
+    g_bgOutcome = ok ? OF_BG_DONE : OF_BG_FAILED;
+    g_bgReads++;
+    g_bgReadNanos += nowNanos() - g_bgStart;
+}
+
+/* As the texture and music readers do: a read that has not finished in 3 s
+ * (the host saving a screenshot) is given up, and background reads with it. */
+static bool bgTimedOut(void) {
+    if (nowNanos() - g_bgStart <= OF_PACK_TIMEOUT_NANOS) return false;
+    uint64_t gaveUp = nowNanos();
+    while (of_file_async_busy() == 1 && nowNanos() - gaveUp < OF_PACK_SETTLE_NANOS) of_file_async_poll();
+    logWarn("Prefetch: a background read timed out; none from here on.\n");
+    g_bgOff = true;
+    g_bgActive = false;
+    g_bgOutcome = OF_BG_FAILED;
+    return true;
+}
+
+int ofBgReadPoll(void) {
+    if (g_bgActive) {
+        if (!g_bgDone) of_file_async_poll(); /* the OS's fallback for a lost interrupt */
+        if (g_bgDone) bgFinish();
+        else if (!bgTimedOut()) return OF_BG_BUSY;
+    }
+    int outcome = g_bgOutcome;
+    g_bgOutcome = OF_BG_IDLE;
+    return outcome;
+}
+
+void ofBgReadSettle(void) {
+    if (!g_bgActive) return;
+    uint64_t start = nowNanos();
+    while (!g_bgDone && of_file_async_poll() != 1) {
+        if (bgTimedOut()) break;
+    }
+    if (g_bgActive && g_bgDone) bgFinish();
+    g_bgSettleNanos += nowNanos() - start;
+}
+
+void ofBgReadReset(void) {
+    g_bgActive = false;
+    g_bgOutcome = OF_BG_IDLE;
+}
+
+void ofBgReadTotals(uint32_t *reads, uint64_t *readNanos, uint64_t *settleNanos) {
+    *reads = g_bgReads;
+    *readNanos = g_bgReadNanos;
+    *settleNanos = g_bgSettleNanos;
+}
+
 #else
 
 void ofPlatformReadCosts(unsigned tenths[OF_READ_COSTS]) {
@@ -245,4 +384,89 @@ bool platformPackRead(const char *path, uint32_t offset, uint32_t size, void *de
     return false;
 }
 
+
+/* Background reads on the desktop: the read is made at once, and reported
+ * finished at the next poll. */
+static bool g_bgActive;
+static int g_bgOutcome = OF_BG_IDLE;
+static uint64_t g_bgStart, g_bgReadyAt;
+static uint32_t g_bgReads;
+static uint64_t g_bgReadNanos, g_bgSettleNanos;
+static struct { const char *path; FILE *file; } g_bgFiles[2];
+
+#define OF_BG_PC_PIECE (32u * 1024u)
+
+uint32_t ofBgReadMax(void) {
+    return OF_BG_PC_PIECE;
+}
+
+static FILE *bgFile(const char *path) {
+    for (int i = 0; i < 2; i++)
+        if (g_bgFiles[i].path != NULL && strcmp(g_bgFiles[i].path, path) == 0) return g_bgFiles[i].file;
+    for (int i = 0; i < 2; i++) {
+        if (g_bgFiles[i].path == NULL) {
+            FILE *file = fopen(path, "rb");
+            if (file == NULL) return NULL;
+            g_bgFiles[i].path = path;
+            g_bgFiles[i].file = file;
+            return file;
+        }
+    }
+    return NULL;
+}
+
+/* How long a read takes to finish: nothing here. */
+static uint64_t bgLatency(uint32_t size) {
+    (void) size;
+    return 0;
+}
+
+bool ofBgReadStart(const char *path, uint32_t offset, uint32_t size, void *dest) {
+    if (g_bgActive || g_bgOutcome != OF_BG_IDLE || size == 0 || size > OF_BG_PC_PIECE) return false;
+    FILE *file = bgFile(path);
+    if (file == NULL) return false;
+    bool ok = fseek(file, (long) offset, SEEK_SET) == 0 && fread(dest, 1, size, file) == size;
+    g_bgStart = nowNanos();
+    g_bgReadyAt = g_bgStart + (ok ? bgLatency(size) : 0);
+    g_bgActive = true;
+    g_bgOutcome = ok ? OF_BG_DONE : OF_BG_FAILED;
+    return true;
+}
+
+int ofBgReadPoll(void) {
+    if (g_bgActive) {
+        if (nowNanos() < g_bgReadyAt) return OF_BG_BUSY;
+        g_bgActive = false;
+        g_bgReads++;
+        g_bgReadNanos += nowNanos() - g_bgStart;
+    }
+    int outcome = g_bgOutcome;
+    g_bgOutcome = OF_BG_IDLE;
+    return outcome;
+}
+
+void ofBgReadSettle(void) {
+    if (!g_bgActive) return;
+    uint64_t start = nowNanos();
+    while (nowNanos() < g_bgReadyAt) {
+    }
+    g_bgSettleNanos += nowNanos() - start;
+}
+
+void ofBgReadReset(void) {
+    g_bgActive = false;
+    g_bgOutcome = OF_BG_IDLE;
+}
+
+void ofBgReadTotals(uint32_t *reads, uint64_t *readNanos, uint64_t *settleNanos) {
+    *reads = g_bgReads;
+    *readNanos = g_bgReadNanos;
+    *settleNanos = g_bgSettleNanos;
+}
+
 #endif
+
+/* Common runner hook: lazy room payloads share the OS file service with assets. */
+void platformBeforeRoomFileRead(void) {
+    ofBgReadSettle();
+}

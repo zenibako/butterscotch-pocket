@@ -3762,6 +3762,14 @@ void DataWin_loadRoomPayload(DataWin* dw, int32_t roomIndex) {
     requireMessage(dw->roomChunkBuffer != nullptr || dw->lazyLoadFile != nullptr,
                    "DataWin_loadRoomPayload called without a ROOM cache or lazy-load FILE*");
 
+#ifdef PLATFORM_ROOM_LOAD_BEGIN
+    // A platform may have asynchronous asset I/O in flight. Handoff only for
+    // file-backed loads; this also covers room_get_info, not just transitions.
+    if (dw->roomChunkBuffer == nullptr) {
+        extern void platformBeforeRoomFileRead(void);
+        platformBeforeRoomFileRead();
+    }
+#endif
     // A cached ROOM payload must never fall back to file I/O during a state load.
     BinaryReader lazyReader = BinaryReader_create(
         dw->roomChunkBuffer != nullptr ? nullptr : dw->lazyLoadFile, dw->fileSize);

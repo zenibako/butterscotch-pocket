@@ -102,6 +102,8 @@ typedef enum { OF_LOAD_ROOM, OF_LOAD_TEXTURE, OF_LOAD_SOUND, OF_LOAD_MIX, OF_LOA
                OF_LOAD_KINDS } OfLoadKind;
 typedef enum { OF_PHASE_OTHER, OF_PHASE_STEP, OF_PHASE_AUDIO, OF_PHASE_DRAW, OF_PHASE_OUT, OF_PHASES } OfPhase;
 #define OF_PERF_SLOW_FRAME_MS 150
+/* The slow-frame threshold in ms (--slow-frame-ms); OF_PERF_SLOW_FRAME_MS unless set. */
+void ofPerfSetSlowFrameMs(unsigned ms);
 void ofPerfAddLoad(OfLoadKind kind, uint64_t nanos);
 /* Includes loads on a room transition that has yet to reach a swap. */
 uint64_t ofPerfTextureLoadNanos(void);

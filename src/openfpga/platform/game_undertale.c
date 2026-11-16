@@ -108,10 +108,16 @@ static bool speedVarsResolved;
  * forgotten with each VM, since a new data file may be loaded at the same address. */
 static const DataWin *g_prefetchChecked;
 static bool g_prefetchFits;
+/* Whether battlePrefetch saw an encounter last time, whether it began with the
+ * "!", and how many updates obj_battler has had so far. */
+static bool g_encounterOn, g_encounterSeen;
+static int g_heartUpdates;
 
 static void forgetNativeVm(void) {
     speedVarsResolved = false;
     g_prefetchChecked = NULL;
+    g_encounterOn = g_encounterSeen = false;
+    g_heartUpdates = 0;
     particleVarsResolved = false;
     floweyStepVarsResolved = false;
     pipeVarsResolved = false;
@@ -295,7 +301,7 @@ static const int16_t g_speedHalfBattles[] = {
 };
 
 /* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
-static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject, g_encounterObject;
+static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject, g_encounterObject, g_battlerObject, g_prefetchCharaObject;
 static const void *g_speedObjectsOf;
 
 static void resolveSpeedVars(Runner *runner) {
@@ -307,11 +313,13 @@ static void resolveSpeedVars(Runner *runner) {
         speedVarsResolved = true;
     }
     if (g_speedObjectsOf != runner->dataWin) {
-        g_speedMasterObject = g_encounterObject = -1;
+        g_speedMasterObject = g_encounterObject = g_battlerObject = g_prefetchCharaObject = -1;
         for (uint32_t i = 0; i < runner->dataWin->objt.count; i++) {
             const char *name = runner->dataWin->objt.objects[i].name;
             if (name != NULL && strcmp(name, "obj_flowey_master") == 0) g_speedMasterObject = (int32_t) i;
             if (name != NULL && strcmp(name, "obj_battleblcon") == 0) g_encounterObject = (int32_t) i;
+            if (name != NULL && strcmp(name, "obj_battler") == 0) g_battlerObject = (int32_t) i;
+            if (name != NULL && strcmp(name, "obj_mainchara") == 0) g_prefetchCharaObject = (int32_t) i;
         }
         g_speedObjectsOf = runner->dataWin;
     }
@@ -360,14 +368,22 @@ static int speedSkipRun(Runner *runner) {
     return 1;
 }
 
-/* battlePrefetch: an overworld encounter makes obj_battleblcon (the "!", the
- * heart and the flash) with global.battlegroup set, and about 47 updates later
- * the game is in room_battle. While it is there, outside a battle room, the
- * battle's items are the ones the table gives: those nearly every battle draws,
- * then that battlegroup's own. The table holds TPAG indices of the data file it
- * was recorded from; where three of them are not the same items, nothing is
- * loaded ahead. */
+/* battlePrefetch: an overworld encounter makes obj_battleblcon (the "!") with
+ * global.battlegroup set. About 19 updates later it hands over to obj_battler
+ * (the black screen and the blinking heart, then obj_transheart, the heart
+ * falling to the FIGHT button), and about 30 after that the game is in
+ * room_battle. A story battle makes obj_battler itself, without the "!". From
+ * the "!" or obj_battler until then, outside a battle room, the battle's
+ * entries are the ones the table gives: the items nearly every battle draws,
+ * and that battlegroup's own, which take in its first enemy speech bubble's
+ * sprite and font however late that bubble comes; the sounds nearly every
+ * battle plays in its first turns (menu, slash, hits), and the battle's own
+ * first sounds (its monster's hurt sound) and that bubble's (its voice), by
+ * name. All in order of first use. The table holds TPAG indices
+ * of the data file it was recorded from; where three of them are not the same
+ * items, nothing is loaded ahead, sounds included. */
 #include "game_undertale_prefetch.h"
+static int32_t g_prefetchSoundIndex[sizeof(g_prefetchSoundNames) / sizeof(g_prefetchSoundNames[0])];
 
 static bool prefetchTableFits(const DataWin *dw) {
     if (g_prefetchChecked != dw) {
@@ -380,33 +396,142 @@ static bool prefetchTableFits(const DataWin *dw) {
                               item->sourceHeight == c[3];
         }
         if (!g_prefetchFits) logInfo("Prefetch: this data file's textures are not the ones its table was made for; none loaded ahead\n");
+        /* The table names its sounds; one this file does not have is left out. */
+        for (size_t i = 0; i < sizeof(g_prefetchSoundNames) / sizeof(g_prefetchSoundNames[0]); ++i) {
+            g_prefetchSoundIndex[i] = -1;
+            for (uint32_t s = 0; s < dw->sond.count && g_prefetchFits; ++s) {
+                const char *name = dw->sond.sounds[s].name;
+                if (name != NULL && strcmp(name, g_prefetchSoundNames[i]) == 0) {
+                    g_prefetchSoundIndex[i] = (int32_t) s;
+                    break;
+                }
+            }
+        }
     }
     return g_prefetchFits;
 }
 
-static int battlePrefetch(Runner *runner, int16_t *items, int max, int *battle) {
-    if (runner->dataWin == NULL || battleUiActive(runner) || !prefetchTableFits(runner->dataWin)) return 0;
-    VMContext *ctx = runner->vmContext;
-    if (ctx == NULL || ctx->globalScopeInstance == NULL) return 0;
-    resolveSpeedVars(runner);
-    if (g_encounterObject < 0) return 0;
-    bool encounter = false;
-    for (ptrdiff_t i = 0; i < arrlen(runner->instances) && !encounter; ++i) {
+static bool instanceOf(const Runner *runner, int32_t object) {
+    for (ptrdiff_t i = 0; object >= 0 && i < arrlen(runner->instances); ++i) {
         const Instance *instance = runner->instances[i];
-        encounter = instance != NULL && instance->active && !instance->destroyed && instance->objectIndex == g_encounterObject;
+        if (instance != NULL && instance->active && !instance->destroyed && instance->objectIndex == object) return true;
     }
-    if (!encounter) return 0;
+    return false;
+}
+
+/* obj_battler's updates before room_battle: the black screen and the blinking
+ * heart, then obj_transheart's fall. Its alarm 2 is set to 30 as it is made,
+ * then 2 more to room_goto (desktop, room 57 and the Ruins, 2026-11-15: 30
+ * updates from the "!"'s hand-over to room_battle). */
+#define UT_HEART_UPDATES 30
+
+/* An encounter starts with obj_battleblcon, which hands over to obj_battler,
+ * or with obj_battler alone: a story battle's start (Toriel, Papyrus, the
+ * Snowdin dogs, Undyne, Mettaton, Asgore...; 36 objects of the game make it
+ * directly after setting global.battlegroup). It goes on while either is there;
+ * obj_battler destroys itself at the room's end. Into left: -1 while the "!"
+ * is up, then the updates obj_battler has left. */
+static bool encounterGoingOn(Runner *runner, int *left) {
+    bool was = g_encounterOn;
+    g_encounterOn = false;
+    if (runner->dataWin == NULL || battleUiActive(runner)) return false;
+    VMContext *ctx = runner->vmContext;
+    if (ctx == NULL || ctx->globalScopeInstance == NULL) return false;
+    resolveSpeedVars(runner);
+    if (instanceOf(runner, g_encounterObject)) {
+        if (!was) g_encounterSeen = true;
+        g_heartUpdates = 0;
+        *left = -1;
+    } else if (instanceOf(runner, g_battlerObject)) {
+        if (!was) g_encounterSeen = false;
+        if (!was) g_heartUpdates = 0;
+        *left = UT_HEART_UPDATES - g_heartUpdates++;
+        if (*left < 1) *left = 1;
+    } else {
+        return false;
+    }
+    g_encounterOn = true;
+    return true;
+}
+
+/* One of the table's lists for a merge: entries[i] at at[i], in order of at. */
+typedef struct {
+    const void *entries;
+    const uint16_t *at;
+    unsigned next, count;
+    bool sounds;
+} PrefetchList;
+
+static int32_t prefetchListEntry(const PrefetchList *list) {
+    if (!list->sounds) return ((const int16_t *) list->entries)[list->next];
+    int32_t sound = g_prefetchSoundIndex[((const uint8_t *) list->entries)[list->next]];
+    return sound < 0 ? 0 : OF_PREFETCH_SOUND(sound);
+}
+
+static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
+    bool encounter = encounterGoingOn(runner, left);
+    if (!runner->dataWin || !runner->vmContext || !runner->vmContext->globalScopeInstance ||
+        !prefetchTableFits(runner->dataWin)) return 0;
+    if (!encounter) {
+        // The common UI and sounds need no battlegroup prediction. Warm them
+        // while the player is in the overworld, strictly in spare frame time.
+        // Short story encounters then have their whole window for their own assets.
+        if (battleUiActive(runner)) return 0;
+        resolveSpeedVars(runner);
+        if (!instanceOf(runner, g_prefetchCharaObject)) return 0;
+        *battle = OF_PREFETCH_WARMUP;
+        *left = -1;
+        int count = 0;
+        for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
+            entries[count++] = g_prefetchCommon[i];
+        for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
+            int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
+            if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
+        }
+        return count;
+    }
+    VMContext *ctx = runner->vmContext;
     RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
     if (!numeric(group)) return 0;
     int id = (int) RValue_toReal(group);
     *battle = id;
-    int count = 0;
-    for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
-        items[count++] = g_prefetchCommon[i];
+    /* The common items, the battle's own, the common sounds and the battle's
+     * own sounds, merged by the update each is first used in; on a tie, items
+     * first, as a battle's first frame draws them all. */
+    PrefetchList lists[4] = {
+        { g_prefetchCommon, g_prefetchCommonAt, 0, sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]), false },
+        { g_prefetchItems, g_prefetchItemAt, 0, 0, false },
+        { g_prefetchCommonSounds, g_prefetchCommonSoundAt, 0, sizeof(g_prefetchCommonSounds), true },
+        { g_prefetchSounds, g_prefetchSoundAt, 0, 0, true },
+    };
+    bool known = false;
     for (size_t g = 0; g < sizeof(g_prefetchGroups) / sizeof(g_prefetchGroups[0]); ++g) {
         if (g_prefetchGroups[g].group != id) continue;
-        for (unsigned i = 0; i < g_prefetchGroups[g].count && count < max; ++i)
-            items[count++] = g_prefetchItems[g_prefetchGroups[g].start + i];
+        lists[1].next = g_prefetchGroups[g].start;
+        lists[1].count = g_prefetchGroups[g].start + g_prefetchGroups[g].count;
+        known = true;
+    }
+    /* Without the "!", only a battle the table has: obj_battler with
+     * battlegroup 200 (Undyne by the echo flower) starts none. */
+    if (!known && !g_encounterSeen) return 0;
+    for (size_t g = 0; g < sizeof(g_prefetchSoundGroups) / sizeof(g_prefetchSoundGroups[0]); ++g) {
+        if (g_prefetchSoundGroups[g].group != id) continue;
+        lists[3].next = g_prefetchSoundGroups[g].start;
+        lists[3].count = g_prefetchSoundGroups[g].start + g_prefetchSoundGroups[g].count;
+    }
+    int count = 0;
+    while (count < max) {
+        PrefetchList *pick = NULL;
+        for (int l = 0; l < 4; ++l)
+            if (lists[l].next < lists[l].count && (pick == NULL || lists[l].at[lists[l].next] < pick->at[pick->next])) pick = &lists[l];
+        if (pick == NULL) break;
+        int32_t entry = prefetchListEntry(pick);
+        ++pick->next;
+        /* A sound this data file does not have, or one already listed (a voice
+         * that is also common), is left out. */
+        bool skip = pick->sounds && entry >= 0;
+        for (int k = 0; k < count && !skip && entry < 0; ++k) skip = entries[k] == entry;
+        if (!skip) entries[count++] = entry;
     }
     return count;
 }

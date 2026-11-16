@@ -548,16 +548,18 @@ verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
 
-In both modes, an Undertale battle's textures are read from the card while its
-encounter flashes ("!", the heart, about 1.5 s), instead of at their first draw
-in the battle: in each update's spare time and at least 25 ms of it, so an
-update of the still flash may run long. Its first frames
-then wait for few reads. The items each battle draws in its first 150 updates
-are in `platform/game_undertale_prefetch.h`, recorded on desktop from the battle
-tour over every `global.battlegroup`. Only free cache room is used, and nothing
-drawn changes. `--no-prefetch` (desktop: `BS_PREFETCH=0`) turns this off. The
-benchmark reports count the items loaded ahead and those still loaded at a
-draw in battle.
+In both modes, Undertale loads common battle UI assets and sounds in spare
+overworld time, then preloads the upcoming encounter's dialogue and battle
+assets during its transition. This also covers story battles that start
+without the "!". Prefetching uses free cache room and leaves game output
+unchanged. Unfinished assets load normally when first needed.
+
+The `Prefetch: common` and `Prefetch: battle` log lines report assets loaded,
+already present, or not reached, along with background-read and loading work.
+`--no-prefetch` (desktop: `BS_PREFETCH=0`) disables it for comparisons. The
+benchmark also counts assets still loaded during battle. Scheduling and table
+format are described in `platform/of_platform.c` and
+`platform/game_undertale_prefetch.h`.
 
 `make font-sampling-fixture` builds `./<game>_pc_font_sampling_fixture` without
 game assets. It checks either pixel phase, clipping, tint, alpha, cache reuse
@@ -651,12 +653,14 @@ queue leaves a gap in the music. The read-ahead is refilled a piece per
 frame, and a track that starts is first read on the following frame, so
 room changes do not also pay for music start-up. On the Pocket the pieces
 are read with `of_file_read_async` and waited for, which is much quicker
-there than `fread`; a read is never left in flight, because the OS fails
-ordinary reads while one is. The comments in `platform/of_audio_system.c`
-have the sizes and the reasons.
+there than `fread`. The music reader waits for each piece to finish before
+returning. Battle prefetch can leave a background read in flight between
+frames; file readers settle it before using the OS file service. The comments
+in `platform/of_audio_system.c` describe the audio reader.
 
 Desktop: `BS_AUDIO_DUMP=out.raw` captures the mixed output (48 kHz stereo
-s16le) and `BS_AUDIO_LOG=1` logs every effect, for checking without speakers.
+s16le) and `BS_AUDIO_LOG=1` logs every effect, for checking without speakers,
+with the frame, room and object that started it.
 
 ## Saves
 
@@ -853,7 +857,8 @@ cache path. See [the benchmark guide](docs/BENCHMARKING.md) for the counters.
 On desktop, run the binary from `games/undertale/`. `BS_NOFLIP=1`,
 `BS_UNCAPPED=1` and `BS_SEED=7` select the repeatable uncapped route;
 `BS_FRAME_LOG=<file>` records per-frame rooms and draw counts,
-`BS_ITEM_LOG=<file>` the texture items first drawn in each room visit,
+`BS_ITEM_LOG=<file>` the texture items first drawn in each room visit (with
+the sprite, font or background each belongs to),
 `BS_OBJECTS=<frame>` records live objects, `BS_DUMP_FRAME=<frame>` with
 `BS_DUMP_PATH=<file>` captures one image, and `BS_DUMP_EVERY=<n>` with
 `BS_DUMP_DIR=<directory>` captures periodically. `--draw-every 100000`
@@ -868,8 +873,10 @@ is prefixed with seconds since start, so load stages can be timed by eye.
 If the app exits or aborts it halts with the log visible instead of
 rebooting; any button switches to a QR code of the log's end (see "The log as a QR code").
 
-A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`)
-logs three lines, kept short enough to fit the log overlay:
+A frame that takes much longer than it should (`OF_PERF_SLOW_FRAME_MS`, or
+`--slow-frame-ms <n>` in `ARGS=`) logs three lines, kept short enough to fit
+the log overlay. The threshold must be a positive integer; missing or invalid
+values produce a warning and leave a following option available:
 
 ```
 slow 555: step 300 draw 200 out 20 snd 10
