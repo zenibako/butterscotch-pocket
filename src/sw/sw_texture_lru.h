@@ -20,8 +20,11 @@ SWTexture* swrLoadPackedFloweyStalk(SWRenderer* swr, unsigned pose, int width, i
 // ahead of it (a battle's items while its encounter flashes). Only into free
 // room: it evicts nothing and leaves the heap's reserve, and an item already
 // there is left as it is. What is drawn does not change, only when items are read.
-typedef enum { SWR_PREFETCH_LOADED, SWR_PREFETCH_PRESENT, SWR_PREFETCH_SKIPPED, SWR_PREFETCH_FULL } SwrPrefetch;
+typedef enum { SWR_PREFETCH_LOADED, SWR_PREFETCH_PRESENT, SWR_PREFETCH_SKIPPED, SWR_PREFETCH_FULL, SWR_PREFETCH_PENDING } SwrPrefetch;
 SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex);
+// One staged tile per call; state owns private partial pixels until completion.
+SwrPrefetch swrPrefetchItemStep(SWRenderer* swr, int32_t tpagIndex, void** state);
+void swrPrefetchCancel(void** state);
 // The pack reads swrPrefetchItem would make for the item, to read them ahead
 // (see swrTexturePackPlanRect): how many, -1 when it would not load it now
 // (swrPrefetchItem says why), or -2 when they cannot be planned.

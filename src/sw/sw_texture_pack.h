@@ -64,6 +64,11 @@ bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer);
 // `buffer`. The rectangle must lie within the page.
 bool swrTexturePackDecodeRect(uint32_t pageId, int x, int y, int w, int h, uintpixel_t* buffer);
 
+// Decodes one intersecting tile. next starts at zero; 1 complete, 0 pending, -1 failed.
+// With stagedOnly, missing compressed data fails instead of reading the file.
+int swrTexturePackDecodeRectStep(uint32_t pageId, int x, int y, int w, int h,
+                                 uintpixel_t* buffer, unsigned* next, bool stagedOnly);
+
 // Where the time of the decodes since the last call went, for the log line
 // of a slow load: the reads, how long they waited for the platform to accept
 // them, the platform's busy work between reads (audio) and the decoding.
@@ -111,9 +116,11 @@ void swrTexturePackPlanReset(void);
 int swrTexturePackPlanRect(uint32_t pageId, int x, int y, int w, int h, SwrPackSpan* spans, int max);
 // Hands over `data`, `size` bytes read at pack offset `start` (malloc'd; the
 // pack frees it), under `tag`. Returns false, having freed it, if no room.
+bool swrTexturePackHasStaged(uint32_t start, uint32_t size, int tag);
 bool swrTexturePackStage(uint32_t start, uint32_t size, uint16_t* data, int tag);
 // Frees the staged data of tags up to `tag` (all of it with INT32_MAX).
-void swrTexturePackUnstage(int tag);
+// Returns the bytes actually freed (shared windows may outlive the item).
+uint32_t swrTexturePackUnstage(int tag);
 // Reads served from staged data so far.
 uint32_t swrTexturePackStagedReads(void);
 

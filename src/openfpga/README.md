@@ -548,17 +548,19 @@ verified to contain doubled pixels use sharp sampling at exact half size,
 keeping dialogue and menu text crisp. Smaller fonts retain averaging so thin
 strokes remain readable. Those screens cost about a quarter of the pixels.
 
-In both modes, an Undertale battle's textures and first sounds are read from
-the card during its encounter, from the "!" until the battle room starts (the
+In both modes, Undertale warms the common battle UI textures and sounds in
+spare overworld time (`Prefetch: common` in the log). A battle's remaining
+textures and first sounds are read from the card during its encounter, from the "!" until the battle room starts (the
 "!", the blinking heart and its fall to the FIGHT button, 49 updates, about
 1.6 s), instead of at their first draw or play in the battle. The reads are
 made in the background: the Pocket's host fetches each one while the game goes
 on, and a new one is started as soon as the last is in, at the start of an
 update, between draw calls and while the update waits for its time. What has
-been read is then decoded in an update's spare time, or at most 4 ms past it,
-so the encounter keeps its pace; whatever has been read by the time the battle
-room starts is decoded then, and the rest is read at its first draw or play as
-before. A story battle (Toriel, Papyrus, the Snowdin dogs, Undyne, Mettaton,
+been read is then decoded one tile at a time in an update's spare time, with
+a small allowance past it during the encounter. The scheduler yields between
+tiles; partial textures become visible to the cache only when complete. At
+battle entry any unfinished work is discarded, without an unbounded decode
+batch; those assets load at their first draw or play as before. A story battle (Toriel, Papyrus, the Snowdin dogs, Undyne, Mettaton,
 Asgore...) has no "!": the game makes obj_battler itself, and the battle's
 entries are read over its 30 updates the same way. The items each battle
 draws in its first 150 updates, and the bubble

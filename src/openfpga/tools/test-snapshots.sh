@@ -55,6 +55,13 @@ for wad in 16 17; do
     echo "runner snapshot (WAD $wad, software renderer): passed"
 done
 "$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" \
+    "$repo/tests/sw_prefetch_pack_test.c" "$repo/src/log.c" -o "$out/prefetch-pack"
+"$out/prefetch-pack"
+"$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" -I"$repo/vendor/qrcodegen" \
+    -I"${SDK_ROOT:?Set SDK_ROOT}/src/sdk/include" -isystem "$SDK_ROOT/src/sdk/pc" \
+    "$repo/tests/of_prefetch_schedule_test.c" "$repo/src/log.c" -o "$out/prefetch-schedule"
+"$out/prefetch-schedule"
+"$cc" "${flags[@]}" -DPIXEL_SIZE=16 -I"$repo/src/sw" \
     "$repo/tests/sw_button_cache_test.c" "$repo/src/log.c" -lm -o "$out/button-cache"
 "$out/button-cache"
 "$cc" "${flags[@]}" "$repo/tests/data_win_room_cache_test.c" \

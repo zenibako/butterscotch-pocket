@@ -286,7 +286,7 @@ static const int16_t g_speedHalfBattles[] = {
 };
 
 /* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
-static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject, g_encounterObject, g_battlerObject;
+static int32_t g_speedGroupVar, g_speedIntroVar, g_speedHpVar, g_speedMasterObject, g_encounterObject, g_battlerObject, g_prefetchCharaObject;
 static const void *g_speedObjectsOf;
 
 static void resolveSpeedVars(Runner *runner) {
@@ -298,12 +298,13 @@ static void resolveSpeedVars(Runner *runner) {
         speedVarsResolved = true;
     }
     if (g_speedObjectsOf != runner->dataWin) {
-        g_speedMasterObject = g_encounterObject = g_battlerObject = -1;
+        g_speedMasterObject = g_encounterObject = g_battlerObject = g_prefetchCharaObject = -1;
         for (uint32_t i = 0; i < runner->dataWin->objt.count; i++) {
             const char *name = runner->dataWin->objt.objects[i].name;
             if (name != NULL && strcmp(name, "obj_flowey_master") == 0) g_speedMasterObject = (int32_t) i;
             if (name != NULL && strcmp(name, "obj_battleblcon") == 0) g_encounterObject = (int32_t) i;
             if (name != NULL && strcmp(name, "obj_battler") == 0) g_battlerObject = (int32_t) i;
+            if (name != NULL && strcmp(name, "obj_mainchara") == 0) g_prefetchCharaObject = (int32_t) i;
         }
         g_speedObjectsOf = runner->dataWin;
     }
@@ -453,7 +454,27 @@ static int32_t prefetchListEntry(const PrefetchList *list) {
 }
 
 static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
-    if (!encounterGoingOn(runner, left) || !prefetchTableFits(runner->dataWin)) return 0;
+    bool encounter = encounterGoingOn(runner, left);
+    if (!runner->dataWin || !runner->vmContext || !runner->vmContext->globalScopeInstance ||
+        !prefetchTableFits(runner->dataWin)) return 0;
+    if (!encounter) {
+        // The common UI and sounds need no battlegroup prediction. Warm them
+        // while the player is in the overworld, strictly in spare frame time.
+        // Short story encounters then have their whole window for their own assets.
+        if (battleUiActive(runner)) return 0;
+        resolveSpeedVars(runner);
+        if (!instanceOf(runner, g_prefetchCharaObject)) return 0;
+        *battle = OF_PREFETCH_WARMUP;
+        *left = -1;
+        int count = 0;
+        for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
+            entries[count++] = g_prefetchCommon[i];
+        for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
+            int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
+            if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
+        }
+        return count;
+    }
     VMContext *ctx = runner->vmContext;
     RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
     if (!numeric(group)) return 0;

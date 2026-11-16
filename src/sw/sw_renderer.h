@@ -44,6 +44,9 @@ void SWRenderer_drawFloweyStalkEyePipes(Renderer* renderer);
  * swrPrefetchItem. Returns its SwrPrefetch result: 0 loaded, 1 already there,
  * 2 not one loaded on its own (or it failed), 3 no free room. */
 int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex);
+/* One staged tile at a time; 4 means pending. Cancel before destroying the renderer. */
+int SWRenderer_prefetchItemStep(Renderer* renderer, int32_t tpagIndex, void** state);
+void SWRenderer_prefetchCancel(void** state);
 /* The texture-pack reads SWRenderer_prefetchItem would make for the item (see swrPlanItem), as
  * { start, size } pairs in pack offsets: how many, -1 when it would not load it now, -2 when they cannot be
  * planned (more than `max`, at most 16). */

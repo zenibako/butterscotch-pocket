@@ -3650,6 +3650,20 @@ int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex)
     return (int) swrPrefetchItem((SWRenderer*) renderer, tpagIndex);
 }
 
+int SWRenderer_prefetchItemStep(Renderer* renderer, int32_t tpagIndex, void** state)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable) {
+        swrPrefetchCancel(state);
+        return SWR_PREFETCH_SKIPPED;
+    }
+    return (int) swrPrefetchItemStep((SWRenderer*) renderer, tpagIndex, state);
+}
+
+void SWRenderer_prefetchCancel(void** state)
+{
+    swrPrefetchCancel(state);
+}
+
 int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)[2], int max)
 {
     if (renderer == NULL || renderer->vtable != &swrVtable || max <= 0) return -1;

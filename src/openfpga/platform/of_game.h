@@ -15,6 +15,8 @@
 #include "runner.h"
 #include "vm.h"
 
+#define OF_PREFETCH_WARMUP (-1) /* common assets in overworld spare time */
+
 /* A sound in battlePrefetch's entries, and back. */
 #define OF_PREFETCH_SOUND(index) (-1 - (int32_t) (index))
 #define OF_PREFETCH_SOUND_INDEX(entry) (-1 - (entry))
@@ -105,7 +107,8 @@ typedef struct {
      * (load in spare time only), otherwise how many updates are left before the
      * battle starts (at least 1); the platform now reads in the background and
      * keeps the pace either way, so it does not use left. 0 when no battle is
-     * starting. NULL: none ahead. */
+     * starting. OF_PREFETCH_WARMUP in battle requests common assets in spare
+     * time before an encounter. NULL: none ahead. */
     int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle, int *left);
 
     /* The built-in benchmark (see of_bench.h). */
