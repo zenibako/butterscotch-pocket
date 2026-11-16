@@ -73,7 +73,8 @@ interpreting the cost. Use the shared collector for formats it recognizes.
 
 ## Speed and accuracy
 
-L switches between two settings, and the core starts in **speed** (the
+Select → Performance Mode switches between two settings; the core starts
+in **speed** (the
 desktop build starts in accuracy, because frame comparisons are made against
 what the game asks for; `BS_SMOOTH=1` gives it speed). The user's rule,
 2026-10-09: accuracy is the target. A shortcut that changes the picture or
