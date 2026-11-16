@@ -33,7 +33,7 @@ device):
 | `BS_SCRIPT="30:Z,700:R*400"` | press keys on given frames; `*N` holds for N frames. Keys: U D L R, Z X C, E (Enter) |
 | `BS_SEED=n` | fix the game's random seed |
 | `BS_UNCAPPED=1` | no frame pacing (runs as fast as the display flip allows) |
-| `BS_SMOOTH=1` | speed mode, as L sets it: 640x480 rooms at 320x240 with 2x2 averaging, faint mirrored layers left out. (Frame skipping needs frame pacing, so it never happens with `BS_UNCAPPED`.) |
+| `BS_SMOOTH=1` | Speed mode, as selected in the menu: 640x480 rooms shrink to 320x240 with 2x2 averaging except eligible Undertale battles; faint mirrored layers are left out. (Frame skipping needs frame pacing, so it never happens with `BS_UNCAPPED`.) |
 | `BS_SKIP=n` | draw only every nth frame, whatever the mode. A frame captured this way must be identical to one from a run without it: a difference means something drawn on a skipped frame mattered to a later one |
 | `BS_MIRROR_FAINT=a`, `BS_NO_MIRROR=1` | fix the faint-layer threshold (of 256) whatever the mode; draw mirrored layers the ordinary way |
 | `BS_OVERLAY=1` | turn on the frame-time and log overlays |

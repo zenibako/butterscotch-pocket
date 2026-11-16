@@ -19,8 +19,9 @@ Controls
   B        Cancel
   X or Y   Game menu
   Select   Butterscotch menu
-  L        Toggle speed/accuracy
-           (starts in speed)
+  L        Unused
+Select > Performance Mode:
+  Speed (default) or Accuracy
 
 Select > Debug:
   Save log to SD card comes first.

@@ -15,7 +15,7 @@ DR: deltarune.win, dr_textures.bin,
 D-pad: Move; A/Start: Confirm
 B: Cancel; X/Y: Game menu
 Select: Butterscotch menu
-L: Toggle speed/accuracy
+Select > Performance Mode: Speed/Accuracy
 
 Save states / sleep depend on scene.
 Select > Debug > Save-state status

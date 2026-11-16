@@ -9,7 +9,6 @@
                     { "id": 1,  "name": "Cancel",  "key": "pad_btn_b" },
                     { "id": 2,  "name": "Game menu",  "key": "pad_btn_x" },
                     { "id": 3,  "name": "Game menu",  "key": "pad_btn_y" },
-                    { "id": 10, "name": "Toggle speed/accuracy",  "key": "pad_trig_l" },
                     { "id": 11, "name": "Log (debug only)",  "key": "pad_trig_r" },
                     { "id": 20, "name": "Confirm",  "key": "pad_btn_start" },
                     { "id": 21, "name": "Butterscotch menu",  "key": "pad_btn_select" }

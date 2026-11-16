@@ -11,15 +11,33 @@ const OfGame ofGame = {0};
 int main(void) {
     char confirm[] = "[Z]", cancel[] = "[X]", menu[] = "[C]";
     char name[] = "\\[C]", ordinary[] = "Z";
-    const char *strings[] = { confirm, cancel, menu, name, ordinary };
+    char fullscreenKey[] = "[F4]", fullscreen[] = "Fullscreen";
+    const char *strings[] = { confirm, cancel, menu, name, ordinary, fullscreenKey, fullscreen };
     DataWin dw = {0};
-    dw.strg.count = 5; dw.strg.strings = strings;
+    dw.strg.count = sizeof(strings) / sizeof(strings[0]); dw.strg.strings = strings;
     ofPatchStrings(&dw);
     assert(strcmp(strings[0], "\xee\x80\x80 ") == 0);
     assert(strcmp(strings[1], "\xee\x80\x81 ") == 0);
     assert(strcmp(strings[2], "\xee\x80\x82 ") == 0);
     assert(strcmp(strings[3], "\\[C]") == 0);
     assert(strcmp(strings[4], "Z") == 0);
+    assert(strcmp(strings[5], OF_ICON_SELECT) == 0);
+    assert(strcmp(strings[6], "Butterscotch menu") == 0);
+    /* Three small circular controls: Select left, Start right. Centers are
+     * five pixels apart, leaving two empty columns between the circles. */
+    for (int icon = 4; icon <= 5; icon++) {
+        for (int y = 0; y < OF_ICON_SIZE; y++) {
+            for (int x = 0; x < OF_ICON_SIZE; x++) {
+                bool expected = false;
+                for (int button = 0; button < 3; button++) {
+                    int distance = abs(x - (1 + 5 * button)) + abs(y - 7);
+                    bool active = button == (icon == 5 ? 0 : 2);
+                    if (distance == 1 || (distance == 0 && active)) expected = true;
+                }
+                assert(ofButtonPixel((uint16_t)(OF_ICON_FIRST + icon), x, y) == expected);
+            }
+        }
+    }
     Font font = {0};
     font.present = true; font.maxGlyphHeight = 16; font.glyphCount = 1;
     font.glyphs = calloc(1, sizeof(FontGlyph));
@@ -66,6 +84,12 @@ int main(void) {
     assert(pixels[6 * 20 + 10] != 0);
     assert(pixels[10 * 20 + 6] == 0);
     memset(pixels, 0, sizeof(pixels));
+    /* Select's three circles must also reach the real text renderer. */
+    swrDrawText(&renderer, OF_ICON_SELECT, 0, 0, 1, 1, 0, 0xffffff, 1, -1);
+    assert(pixels[7 * 20 + 1] != 0);
+    assert(pixels[7 * 20 + 6] == 0 && pixels[7 * 20 + 11] == 0);
+    assert(pixels[6 * 20 + 6] != 0 && pixels[6 * 20 + 11] != 0);
+    memset(pixels, 0, sizeof(pixels));
     /* Right alignment uses the 14px advance, including the one-pixel gap. */
     renderer.base.drawHalign = 2;
     swrDrawText(&renderer, OF_ICON_A, 20, 0, 1, 1, 0, 0xffffff, 1, -1);
@@ -85,6 +109,11 @@ int main(void) {
     swrDrawText(&renderer, OF_ICON_A, 0, 0, 1, 1, 0, 0xffffff, 1, -1);
     assert(large[12 * 40 + 20] != 0);
     assert(large[20 * 40 + 12] == 0);
+    memset(large, 0, sizeof(large));
+    swrDrawText(&renderer, OF_ICON_SELECT, 0, 0, 1, 1, 0, 0xffffff, 1, -1);
+    assert(large[14 * 40 + 2] != 0);
+    assert(large[14 * 40 + 12] == 0 && large[14 * 40 + 22] == 0);
+    assert(large[12 * 40 + 12] != 0 && large[12 * 40 + 22] != 0);
     /* Adding external icons must not change atlas-only sampling decisions.
      * The atlas has doubled A strokes and unrelated single-pixel art at 0,0. */
     Font sampled = {0};
