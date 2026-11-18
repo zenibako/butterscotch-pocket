@@ -2923,10 +2923,13 @@ static bool swrTilePictureCanKeep(SWRenderer* swr, int width, int height, int sh
     bool stationary = previous->width == width && previous->height == height &&
                       previous->generation == d->generation && swr->frameCounter - previous->frame == 1 &&
                       previous->x == swr->viewX && previous->y == swr->viewY && previous->shift == shift;
-    *previous = (SWTilePictureView) {
-        .frame = swr->frameCounter, .generation = d->generation,
-        .x = swr->viewX, .y = swr->viewY, .width = width, .height = height, .shift = shift
-    };
+    previous->frame = swr->frameCounter;
+    previous->generation = d->generation;
+    previous->x = swr->viewX;
+    previous->y = swr->viewY;
+    previous->width = width;
+    previous->height = height;
+    previous->shift = shift;
     return stationary;
 }
 
@@ -2944,7 +2947,12 @@ static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int coun
 {
     SWDirtyBuffer* d = swr->dirty;
     int width = d->width, height = d->height;
-    SWTilePictureKey key = { .left = left, .top = top, .count = swrPendingCount, .clear = clear };
+    SWTilePictureKey key;
+    memset(&key, 0, sizeof(key));
+    key.left = left;
+    key.top = top;
+    key.count = swrPendingCount;
+    key.clear = clear;
     for (int i = 0; i < swrPendingCount; i++) {
         const SWTileRun* run = swrPendingRuns[i];
         key.serials[i] = run->serial;
