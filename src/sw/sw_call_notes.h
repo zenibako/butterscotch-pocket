@@ -22,6 +22,27 @@ extern bool swrCallNotes;
 // timed calls.
 extern bool swrDrawTimed;
 
+typedef enum {
+    SWR_PROF_SPRITE, SWR_PROF_PART, SWR_PROF_TEXT, SWR_PROF_TILED, SWR_PROF_RECT,
+    SWR_PROF_FLUSH, SWR_PROF_CLEAR, SWR_PROF_KINDS
+} SWDrawProfileKind;
+
+#ifdef SW_DRAW_PROFILE
+typedef struct {
+    uint64_t start, accounted;
+    bool active;
+} SWDeferredProfile;
+
+SWDeferredProfile swrDeferredProfileBegin(SWDrawProfileKind kind);
+void swrDeferredProfileEnd(SWDrawProfileKind kind, SWDeferredProfile profile);
+
+#define SWR_DEFERRED_BEGIN(kind) SWDeferredProfile deferred_ = swrDeferredProfileBegin(kind)
+#define SWR_DEFERRED_END(kind) swrDeferredProfileEnd(kind, deferred_)
+#else
+#define SWR_DEFERRED_BEGIN(kind) do { } while (0)
+#define SWR_DEFERRED_END(kind) do { } while (0)
+#endif
+
 // Copies out the descriptions with the most time, heaviest first, and starts
 // over. *missed is how many calls were dropped: when the table of descriptions is
 // full, the one with the least time makes way for a new one.

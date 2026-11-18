@@ -36,8 +36,8 @@ static int g_count = 0;
 static unsigned g_skipped = 0, g_shownSkipped = 0;
 static uint64_t g_loadNanos[OF_LOAD_KINDS];
 static uint64_t g_phaseNanos[OF_PHASES];
-static uint64_t g_drawNanos[OF_DRAW_KINDS];
-static unsigned g_drawCalls[OF_DRAW_KINDS];
+static uint64_t g_drawNanos[SWR_PROF_KINDS];
+static unsigned g_drawCalls[SWR_PROF_KINDS];
 static OfPerfTotals g_totals;
 static OfPhase g_phase = OF_PHASE_OTHER;
 static uint64_t g_phaseStart = 0;
@@ -77,7 +77,7 @@ void ofPerfDetailAlways(bool always) {
 /* A draw call that was not timed. The audio queue is topped up by count
  * here, there being no time to go by; asking how full it is costs half a
  * microsecond. */
-void platformDrawCount(int kind) {
+void platformDrawCount(SWDrawProfileKind kind) {
     g_drawCalls[kind]++;
     static unsigned sinceTick = 0;
     if (++sinceTick >= 8) {
@@ -87,10 +87,12 @@ void platformDrawCount(int kind) {
     }
 }
 
-void platformDrawProfile(int kind, uint64_t nanos) {
+void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos) {
     g_drawNanos[kind] += nanos;
     g_drawCalls[kind]++;
+}
 
+void platformDrawTick(uint64_t nanos) {
     /* Top the audio queue up every few milliseconds of drawing. */
     static uint64_t sinceTick = 0;
     sinceTick += nanos;
@@ -123,8 +125,8 @@ static void reportSlowFrame(unsigned workMs) {
                 phase[OF_PHASE_OUT], phase[OF_PHASE_AUDIO]);
         logInfo("  load: rm %u tx %u fx %u mix %u mus %u\n", load[OF_LOAD_ROOM], load[OF_LOAD_TEXTURE],
                 load[OF_LOAD_SOUND], load[OF_LOAD_MIX], load[OF_LOAD_MUSIC]);
-        unsigned draw[OF_DRAW_KINDS];
-        for (int i = 0; i < OF_DRAW_KINDS; i++) draw[i] = (unsigned) (g_drawNanos[i] / 1000000u);
+        unsigned draw[SWR_PROF_FLUSH];
+        for (int i = 0; i < SWR_PROF_FLUSH; i++) draw[i] = (unsigned) (g_drawNanos[i] / 1000000u);
         /* Calls and ms per kind; the ms, like mix above, are zero on a frame taken without detail. */
         logInfo("  draw: s%u/%u p%u/%u t%u/%u b%u/%u r%u/%u%s\n", g_drawCalls[0], draw[0], g_drawCalls[1], draw[1],
                 g_drawCalls[2], draw[2], g_drawCalls[3], draw[3], g_drawCalls[4], draw[4], ofPerfDetail ? "" : " (not timed)");
@@ -139,7 +141,7 @@ static void reportSlowFrame(unsigned workMs) {
         g_totals.phaseNanos[i] += g_phaseNanos[i];
         g_phaseNanos[i] = 0;
     }
-    for (int i = 0; i < OF_DRAW_KINDS; i++) {
+    for (int i = 0; i < SWR_PROF_KINDS; i++) {
         g_totals.drawNanos[i] += g_drawNanos[i];
         g_totals.drawCalls[i] += g_drawCalls[i];
         g_drawNanos[i] = 0;

@@ -10,7 +10,7 @@ bool ofFocusStatsAdd(OfFocusStats *s, uint64_t total, uint64_t flip,
     s->work[s->count++] = total - flip;
     s->total += total; s->flip += flip; s->present += present;
     for (int i=0; i<OF_PHASES; ++i) s->totals.phaseNanos[i] += t->phaseNanos[i];
-    for (int i=0; i<OF_DRAW_KINDS; ++i) {
+    for (int i=0; i<SWR_PROF_KINDS; ++i) {
         s->totals.drawNanos[i] += t->drawNanos[i];
         s->totals.drawCalls[i] += t->drawCalls[i];
     }

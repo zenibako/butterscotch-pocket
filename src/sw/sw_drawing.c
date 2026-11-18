@@ -742,6 +742,7 @@ static void swrOverlayFlushHeld(SWRenderer* swr)
 #ifdef SW_HAS_PREMUL_BLEND
     int count = swr->overlayCount;
     if (count == 0) return;
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     swrTileRunsFlush(swr); // tile pictures and a clear still held are older than the stack
     swrClearSettle(swr);
     swr->overlayCount = 0;
@@ -783,6 +784,7 @@ static void swrOverlayFlushHeld(SWRenderer* swr)
             dstline[x] = lastOut;
         }
     }
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
 #else
     (void) swr;
 #endif
@@ -867,6 +869,7 @@ static const uint16_t* swrPipeSolidBounds(SWTexture* texture);
 static void swrFlushPipeLayers(SWRenderer* swr)
 {
     int count = swr->pipeCount;
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     swr->pipeCount = 0;
     for (int i = 0; i < count; ++i) {
         const SWSpriteCall* call = &swr->pipeCalls[i];
@@ -874,6 +877,7 @@ static void swrFlushPipeLayers(SWRenderer* swr)
                               call->sx, call->sy, call->sw, call->sh, call->tintColor, call->alpha,
                               false, SWR_CONTRAST_NONE);
     }
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
 }
 
 static void swrMirrorReplay(SWRenderer* swr, const SWSpriteCall* call)
@@ -1002,6 +1006,7 @@ static void swrMirrorFlush(SWRenderer* swr)
 {
     int layers = swr->mirrorLayers, stage = swr->mirrorStage;
     if (layers == 0 && stage == 0) return;
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     swrTileRunsFlush(swr); // tile pictures and a clear still held are older than the layers
     swrClearSettle(swr);
     swr->mirrorLayers = 0;
@@ -1069,6 +1074,7 @@ static void swrMirrorFlush(SWRenderer* swr)
     swr->blendMode = blendMode;
     swr->mirrorReplaying = false;
     swr->uniformValid = false;
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
 }
 
 // Holds the draw back if it can be a quarter of a mirrored layer. Takes the

@@ -777,12 +777,12 @@ static void frameLog(void) {
     if (now.frames < last.frames) memset(&last, 0, sizeof(last));
     t = now;
     for (int k = 0; k < OF_PHASES; k++) t.phaseNanos[k] -= last.phaseNanos[k];
-    for (int k = 0; k < OF_DRAW_KINDS; k++) t.drawCalls[k] -= last.drawCalls[k];
+    for (int k = 0; k < SWR_PROF_FLUSH; k++) t.drawCalls[k] -= last.drawCalls[k];
     last = now;
     fprintf(out, "%d %s %d %llu %llu %llu %llu", g_scriptFrame, g_runner->currentRoom ? g_runner->currentRoom->name : "?", g_nextW,
             (unsigned long long) (t.phaseNanos[OF_PHASE_STEP] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_DRAW] / 1000),
             (unsigned long long) (t.phaseNanos[OF_PHASE_OUT] / 1000), (unsigned long long) (t.phaseNanos[OF_PHASE_AUDIO] / 1000));
-    for (int k = 0; k < OF_DRAW_KINDS; k++) fprintf(out, " %llu", (unsigned long long) t.drawCalls[k]);
+    for (int k = 0; k < SWR_PROF_FLUSH; k++) fprintf(out, " %llu", (unsigned long long) t.drawCalls[k]);
     fprintf(out, " %u\n", swrDirtyLastTiles);
     fflush(out);
 }

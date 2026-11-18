@@ -669,24 +669,26 @@ static void reportWork(void) {
                    audioFree / 1000, audioFree % 1000 / 10);
     }
     /* Where each section's time went, in ms per frame. step: game code; draw:
-     * all drawing, of which the next five are sprites, sprite parts and
-     * tiles, text, tiled backgrounds and rectangles (what is left of draw is
-     * none of those: clears, held layers let out by another kind of draw,
-     * the runner's own work); snd: the audio update; out: presenting. The
-     * second table is how many of each kind of draw call a frame makes.
-     * The five kinds are averages over the frames timed in detail. */
+     * all drawing. The draw columns break out sprites, sprite parts and tiles,
+     * text, tiled backgrounds, rectangles, held background flushes and held
+     * clear settles (including tiled passes fused with a clear). Their times
+     * are exclusive and averaged over the detail frames. snd is the audio
+     * update and out is presenting. */
     #define TENTHS(nanos, frames) (unsigned) ((nanos) / ((uint64_t) (frames) * 1000000u)), \
                                   (unsigned) ((nanos) / ((uint64_t) (frames) * 100000u) % 10u)
-    ofLogPrint("ms/fr  step   draw =  spr   til   txt   bkg   rct   snd   out\n");
+    ofLogPrint("ms/fr  step   draw =  spr   til   txt   bkg   rct  flsh   clr   snd   out\n");
     firstFrame = 0;
     for (int i = 0; i < g_def.sectionCount; i++) {
         const OfPerfTotals *t = &g_sectionTotals[i];
         int frames = g_def.sections[i].lastFrame - firstFrame;
         int detail = t->detailFrames > 0 ? (int) t->detailFrames : 1;
-        ofLogPrint("%-5s %3u.%u %4u.%u  %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u\n", g_def.sections[i].tag,
+        ofLogPrint("%-5s %3u.%u %4u.%u  %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u %3u.%u\n",
+                   g_def.sections[i].tag,
                    TENTHS(t->phaseNanos[OF_PHASE_STEP], frames), TENTHS(t->phaseNanos[OF_PHASE_DRAW], frames),
-                   TENTHS(t->drawNanos[0], detail), TENTHS(t->drawNanos[1], detail), TENTHS(t->drawNanos[2], detail),
-                   TENTHS(t->drawNanos[3], detail), TENTHS(t->drawNanos[4], detail),
+                   TENTHS(t->drawNanos[SWR_PROF_SPRITE], detail), TENTHS(t->drawNanos[SWR_PROF_PART], detail),
+                   TENTHS(t->drawNanos[SWR_PROF_TEXT], detail), TENTHS(t->drawNanos[SWR_PROF_TILED], detail),
+                   TENTHS(t->drawNanos[SWR_PROF_RECT], detail), TENTHS(t->drawNanos[SWR_PROF_FLUSH], detail),
+                   TENTHS(t->drawNanos[SWR_PROF_CLEAR], detail),
                    TENTHS(t->phaseNanos[OF_PHASE_AUDIO], frames), TENTHS(t->phaseNanos[OF_PHASE_OUT], frames));
         firstFrame = g_def.sections[i].lastFrame;
     }

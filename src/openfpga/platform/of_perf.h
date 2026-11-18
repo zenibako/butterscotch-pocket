@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "sw/sw_call_notes.h"
 
 /* Frame-time and log overlays. Call ofPerfFrame once per presented frame, before the
  * copy to the display, and ofPerfAddSleep with time spent pacing. */
@@ -81,9 +82,9 @@ void ofPerfAddSleep(uint64_t nanos);
  * and sound effects, mixing audio, and reading streamed music. The third
  * gives calls/ms for each kind of draw call: sprites, sprite parts (tiles),
  * text, tiled backgrounds and rectangles. All times in ms. */
-#define OF_DRAW_KINDS 5
-void platformDrawProfile(int kind, uint64_t nanos);
-void platformDrawCount(int kind);
+void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos);
+void platformDrawCount(SWDrawProfileKind kind);
+void platformDrawTick(uint64_t nanos);
 #define OF_DRAW_TICK_NANOS 5000000u
 void platformBusyTick(void);
 void ofAudioRoomChange(void);
@@ -111,8 +112,8 @@ uint64_t ofPerfTextureLoadNanos(void);
  * start), for the benchmark's per-section table. Taking it starts a new sum. */
 typedef struct {
     uint64_t phaseNanos[OF_PHASES];
-    uint64_t drawNanos[OF_DRAW_KINDS];
-    uint64_t drawCalls[OF_DRAW_KINDS];
+    uint64_t drawNanos[SWR_PROF_KINDS];
+    uint64_t drawCalls[SWR_PROF_KINDS];
     uint64_t loadNanos[OF_LOAD_KINDS];
     uint32_t frames, detailFrames;
 } OfPerfTotals;

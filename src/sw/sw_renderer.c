@@ -1405,11 +1405,12 @@ void swrClearSettle(SWRenderer* swr)
     if (!swr->clearHeld) return;
     swr->clearHeld = false;
     if (!swr->mainFb) { swr->tiledHeldCount = 0; swrFillHeldDrop(); return; }
-    if (swr->tiledHeldCount > 0) {
-        SWR_NOTED("  of which: held clear and tiled written", swrTiledHeldWrite(swr, swr->clearHeldColor));
-        return;
-    }
-    SWR_NOTED("  of which: held clear written", swrClearMain(swr, swr->clearHeldColor));
+    SWR_DEFERRED_BEGIN(SWR_PROF_CLEAR);
+    if (swr->tiledHeldCount > 0)
+        swrTiledHeldWrite(swr, swr->clearHeldColor);
+    else
+        swrClearMain(swr, swr->clearHeldColor);
+    SWR_DEFERRED_END(SWR_PROF_CLEAR);
 }
 
 // swrClearSettle for a draw that may be its buffer's first draw (see
@@ -1448,7 +1449,8 @@ int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key)
             swrDirtyCheckKept(d, swr->mainFb, d->color);
             if (++kept % 300 == 1) logInfo("swr: first draw kept %u times\n", kept);
         }
-        SWR_NOTED("  of which: held clear written", swrFillTiles(swr, d, d->rows, NULL, d->color));
+        SWR_DEFERRED_BEGIN(SWR_PROF_CLEAR);
+        swrFillTiles(swr, d, d->rows, NULL, d->color);
         for (int r = 0; r < SWR_DIRTY_MAX_ROWS; r++) {
             d->keep[r] = d->baseRows[r] & ~d->rows[r];
             d->baseRows[r] = d->keep[r];
@@ -1456,6 +1458,7 @@ int swrClearSettleBase(SWRenderer* swr, const SWBaseKey* key)
         }
         swr->dirtyMark = d;
         swr->baseMode = 2;
+        SWR_DEFERRED_END(SWR_PROF_CLEAR);
     } else {
         swrClearSettle(swr);
         if (swr->dirty != d || !d->known) return 0;
@@ -2468,16 +2471,38 @@ static void SWRenderer_drawVertexBuffer(Renderer* renderer, VertexBuffer* buffer
 }
 // Draw-call timing (SW_DRAW_PROFILE): each kind of call is timed and the
 // totals handed to the platform, which can then say what a frame was spent
-// drawing. A timed call made inside another is taken off the outer one's
-// time, so no time is counted twice: swrProfInner is the time already
-// accounted for by calls that ended since some outer call began.
+// drawing. A parent's reported time excludes spans already reported by its
+// children. The original draw spans still drive audio and prefetch ticks.
 #ifdef SW_DRAW_PROFILE
-#include "gettime.h"
-void platformDrawProfile(int kind, uint64_t nanos);
-void platformDrawCount(int kind);
-enum { SWR_PROF_SPRITE, SWR_PROF_PART, SWR_PROF_TEXT, SWR_PROF_TILED, SWR_PROF_RECT };
-static uint64_t swrProfInner = 0;
-static uint64_t swrProfLast = 0; // what the SWR_PROFILED that ended last was charged
+void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos);
+void platformDrawCount(SWDrawProfileKind kind);
+void platformDrawTick(uint64_t nanos);
+static uint64_t swrProfInner;      // spans of original draw wrappers, for busy ticks
+static uint64_t swrProfAccounted;  // spans already attributed to any report category
+static uint64_t swrProfLast;       // exclusive reported time of the last draw wrapper
+static bool swrProfFlushing;
+
+SWDeferredProfile swrDeferredProfileBegin(SWDrawProfileKind kind)
+{
+    // A flush can in turn let out other held work. Its flush time is already
+    // covered by the outer timer, but a clear has its own category.
+    if (!swrDrawTimed || (kind == SWR_PROF_FLUSH && swrProfFlushing))
+        return (SWDeferredProfile) { 0 };
+    if (kind == SWR_PROF_FLUSH) swrProfFlushing = true;
+    return (SWDeferredProfile) { nowNanos(), swrProfAccounted, true };
+}
+
+void swrDeferredProfileEnd(SWDrawProfileKind kind, SWDeferredProfile profile)
+{
+    if (!profile.active) return;
+    uint64_t span = nowNanos() - profile.start;
+    uint64_t own = span - (swrProfAccounted - profile.accounted);
+    swrProfAccounted = profile.accounted + span;
+    if (kind == SWR_PROF_FLUSH) swrProfFlushing = false;
+    platformDrawProfile(kind, own);
+    if (swrCallNotes)
+        swrNote(own, kind == SWR_PROF_CLEAR ? "held clear settle" : "held background flush");
+}
 // Reading the clock is not free everywhere (17 us on openfpgaOS, a trap into
 // the kernel, against 6 us for the rest of a sprite draw that draws nothing),
 // so the platform says when calls are to be timed (swrDrawTimed); otherwise
@@ -2489,11 +2514,17 @@ static uint64_t swrProfLast = 0; // what the SWR_PROFILED that ended last was ch
             if (!swrProbing) platformDrawCount(kind); \
             break; \
         } \
-        uint64_t inner_ = swrProfInner, start_ = nowNanos(); \
+        uint64_t inner_ = swrProfInner, accounted_ = swrProfAccounted, start_ = nowNanos(); \
         call; \
         uint64_t span_ = nowNanos() - start_; \
-        swrProfLast = span_ - (swrProfInner - inner_); \
+        if (swrProfFlushing) { \
+            swrProfLast = 0; \
+        } else { \
+            swrProfLast = span_ - (swrProfAccounted - accounted_); \
+            swrProfAccounted = accounted_ + span_; \
+        } \
         platformDrawProfile(kind, swrProfLast); \
+        platformDrawTick(span_ - (swrProfInner - inner_)); \
         swrProfInner = inner_ + span_; \
     } while (0)
 #else
@@ -2530,6 +2561,7 @@ bool swrGridHeld(void) { return swrGrid.count > 0; }
 // Draws the held grids and leaves none held.
 static void swrGridReplay(SWRenderer* swr)
 {
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     Renderer* renderer = (Renderer*) swr;
     float alpha = renderer->drawAlpha;
     int count = swrGrid.count;
@@ -2566,6 +2598,7 @@ static void swrGridReplay(SWRenderer* swr)
     }
     renderer->drawAlpha = alpha;
     swrOverlayFlush(swr); // a cell held back as an overlay goes out with the rest
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
 }
 
 void swrGridFlush(SWRenderer* swr)
@@ -2950,7 +2983,9 @@ void swrTileRunsFlush(SWRenderer* swr)
     if (swrPendingCount == 0) return;
     if (swr == NULL) swr = swrPendingOwner;
     ++swrTileRunReaders;
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     SWR_PROFILED(SWR_PROF_PART, swrTileRunsDrawPending(swr));
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
     --swrTileRunReaders;
     swrPendingCount = 0;
 }
@@ -3473,7 +3508,7 @@ void swrSpriteCostProbe(Renderer* renderer, int calls, int32_t* width, int32_t* 
 static void SWRenderer_profDrawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha)
 {
     const TexturePageItem* tpag = NULL;
-    if (swrCallNotes && swrDrawTimed && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count)
+    if (swrCallNotes && swrDrawTimed && !swrProfFlushing && tpagIndex >= 0 && (uint32_t) tpagIndex < renderer->dataWin->tpag.count)
         tpag = &renderer->dataWin->tpag.items[tpagIndex];
     bool pipe = tpag != NULL && tpag->sourceWidth == SWR_PIPE_RASTER_W &&
                 tpag->sourceHeight == SWR_PIPE_RASTER_H && !SWR_SKIPPED((SWRenderer*) renderer) &&
@@ -3510,7 +3545,7 @@ static void SWRenderer_profDrawTextColor(Renderer* renderer, const char* text, f
 static void SWRenderer_profDrawSpriteTiled(Renderer* renderer, int32_t tpagIndex, float originX, float originY, float x, float y, float xscale, float yscale, bool tileX, bool tileY, float roomW, float roomH, uint32_t color, float alpha)
 {
     SWR_PROFILED(SWR_PROF_TILED, SWRenderer_drawSpriteTiled(renderer, tpagIndex, originX, originY, x, y, xscale, yscale, tileX, tileY, roomW, roomH, color, alpha));
-    if (swrCallNotes && swrDrawTimed) {
+    if (swrCallNotes && swrDrawTimed && !swrProfFlushing) {
         SWNoteKey key = { .kind = SWR_NOTE_TILED, .alpha = (int16_t) (alpha * 100.0f), .a = tpagIndex };
         swrNoteKeyed(swrProfLast, &key);
     }
@@ -3533,7 +3568,7 @@ static bool SWRenderer_profDrawTileLayer(Renderer* renderer, Background* tileset
 static void SWRenderer_profDrawRectangle(Renderer* renderer, float x1, float y1, float x2, float y2, uint32_t color, float alpha, bool outline)
 {
     SWR_PROFILED(SWR_PROF_RECT, SWRenderer_drawRectangle(renderer, x1, y1, x2, y2, color, alpha, outline));
-    if (swrCallNotes && swrDrawTimed) {
+    if (swrCallNotes && swrDrawTimed && !swrProfFlushing) {
         // Where it is on the screen, not in the room, so that a scrolling view does not make each frame's a new one.
         const SWRenderer* swr = (const SWRenderer*) renderer;
         SWNoteKey key = { .kind = SWR_NOTE_RECT, .alpha = (int16_t) (alpha * 100.0f), .a = (int) x1 - swr->viewX, .b = (int) y1 - swr->viewY,
