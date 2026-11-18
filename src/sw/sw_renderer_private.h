@@ -152,6 +152,11 @@ typedef struct {
 
 #define SWR_ROTATION_CACHE_SIZE 64
 
+typedef struct SWTilePictureView {
+    uint32_t frame, generation;
+    int x, y, width, height, shift; // width 0: no eligible view was observed
+} SWTilePictureView;
+
 typedef struct
 {
     Renderer base;
@@ -215,6 +220,7 @@ typedef struct
     struct SWDirtyBuffer* dirty;
     struct SWDirtyBuffer* dirtyMark; // `dirty` while there is anything left to mark; NULL once all of it is
     struct SWDirtyBuffer* dirtyBuffers; // SWR_DIRTY_BUFFERS of them, one per platform buffer
+    SWTilePictureView tilePictureView;
     uint8_t baseMode; // what the draw being made does with its buffer's backdrop (see SWBaseKey): 0 nothing, 1 records it, 2 redraws it
     
     // A solid-colour sprite draw that has been held back so that identical
@@ -301,6 +307,17 @@ SWRenderer;
 #define SWR_DIRTY_MAX_W 1024
 #define SWR_DIRTY_MAX_ROWS 64               // 1024 px down
 #define SWR_DIRTY_BUFFERS 4
+#define SWR_TILE_RUN_ENTRIES 4
+
+// A held clear with tile pictures over it, as last written to a main buffer.
+// The order and integer placement of the pictures are part of its identity.
+typedef struct SWTilePictureKey {
+    uint64_t serials[SWR_TILE_RUN_ENTRIES];
+    int x[SWR_TILE_RUN_ENTRIES], y[SWR_TILE_RUN_ENTRIES];
+    int left, top;
+    int count; // 0: no tile picture recorded
+    uintpixel_t clear;
+} SWTilePictureKey;
 // The first draw after a buffer is cleared, when it is an untinted 1:1 opaque
 // sprite (a battle backdrop): everything that decides what it writes. When
 // the same draw comes first again the next time that buffer is drawn into,
@@ -330,6 +347,7 @@ typedef struct SWDirtyBuffer {
     SWBaseKey baseKey;
     uint32_t baseRows[SWR_DIRTY_MAX_ROWS];
     uint32_t keep[SWR_DIRTY_MAX_ROWS];
+    SWTilePictureKey tilePicture; // outside rows[]: this picture, rather than a uniform clear
 } SWDirtyBuffer;
 
 // Bit counts for the tile masks; the builtins are missing from TinyCC, MSVC and old GCC.
