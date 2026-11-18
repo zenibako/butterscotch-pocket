@@ -1317,7 +1317,11 @@ static NOINLINE void swrCopyTintedDoubledSprite(SWRenderer* swr, const SWTexture
         // The scalar flipped sampler starts at (width - 1) / 2, so an odd
         // clipped width leaves one pixel at the leading edge when flipped.
         if (flipX && (width & 1)) {
-            if (swrIsOpaque(row[columns])) *top = *bottom = tint(tintColor, row[columns]);
+            if (swrIsOpaque(row[columns])) {
+                uintpixel_t tinted = tint(tintColor, row[columns]);
+                *top = tinted;
+                *bottom = tinted;
+            }
             top++;
             bottom++;
         }
@@ -1325,8 +1329,11 @@ static NOINLINE void swrCopyTintedDoubledSprite(SWRenderer* swr, const SWTexture
             swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, false);
         else
             swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, true);
-        if (!flipX && (width & 1) && swrIsOpaque(row[columns]))
-            top[width - 1] = bottom[width - 1] = tint(tintColor, row[columns]);
+        if (!flipX && (width & 1) && swrIsOpaque(row[columns])) {
+            uintpixel_t tinted = tint(tintColor, row[columns]);
+            top[width - 1] = tinted;
+            bottom[width - 1] = tinted;
+        }
     }
 }
 
