@@ -562,6 +562,50 @@ static void checkDoubledSprite(void)
     }
 }
 
+static void checkTintedDoubledSprite(void)
+{
+    enum { SRC_PITCH = 10, SRC_ROWS = 10, MAX_PITCH = 20, DST_ROWS = 13 };
+    uintpixel_t source[SRC_PITCH * SRC_ROWS];
+    _Alignas(uint32_t) uintpixel_t actual[MAX_PITCH * DST_ROWS], reference[MAX_PITCH * DST_ROWS];
+    SWTexture texture = {0};
+    texture.buffer = source;
+    texture.width = SRC_PITCH;
+    texture.height = SRC_ROWS;
+    for (int i = 0; i < SRC_PITCH * SRC_ROWS; i++)
+        source[i] = (uintpixel_t) ((i % 3 ? 0x8000 : 0) | ((i * 491) & 0x7fff));
+
+    for (int pitch = 19; pitch <= MAX_PITCH; pitch++) {
+        for (int x = -2; x <= 3; x++) {
+            for (int clip = 0; clip < 2; clip++) {
+                for (int flip = 0; flip < 2; flip++) {
+                    for (int i = 0; i < MAX_PITCH * DST_ROWS; i++)
+                        actual[i] = reference[i] = (uintpixel_t) (i * 7919);
+                    SWRenderer swr = {0};
+                    swr.portW = swr.maxX = 13 + clip;
+                    swr.portH = swr.maxY = 10 + clip;
+                    swr.fbPitch = (uint16_t) pitch;
+                    swr.blendMode = bm_normal;
+                    int dx = x + (flip ? 16 : 0);
+                    int dw = flip ? -16 : 16;
+                    swr.fb = swr.mainFb = reference;
+                    texture.immutable = false; // Use the scalar renderer as the oracle.
+                    swrDrawSpriteInternal(&swr.base, dx, 1, dw, 16, &texture, 1, 1, 8, 8, 0xda95, 256, false, SWR_CONTRAST_NONE);
+                    swr.fb = swr.mainFb = actual;
+                    texture.immutable = true;
+                    swrProbePath = 0;
+                    swrDrawSpriteInternal(&swr.base, dx, 1, dw, 16, &texture, 1, 1, 8, 8, 0xda95, 256, false, SWR_CONTRAST_NONE);
+                    if (swrProbePath != SWR_PROBE_PATH_TINTED_DOUBLED || memcmp(actual, reference, sizeof(actual))) {
+                        fprintf(stderr, "FAIL: tinted doubled sprite at x=%d pitch=%d clip=%d flip=%d (path=%d)\n",
+                                x, pitch, clip, flip, swrProbePath);
+                        exit(1);
+                    }
+                    checks += MAX_PITCH * DST_ROWS;
+                }
+            }
+        }
+    }
+}
+
 static void checkHalfBlend(void)
 {
     // The packed average must never carry across channels or use the opacity bit.
@@ -651,6 +695,7 @@ int main(int argc, char** argv)
     checkGrowingVine();
     checkHalfTint();
     checkDoubledSprite();
+    checkTintedDoubledSprite();
     checkHalfBlend();
     negativeControl = argc > 1;
     if (negativeControl) checkRow(1, 1, 133, 0x8000, 0);
