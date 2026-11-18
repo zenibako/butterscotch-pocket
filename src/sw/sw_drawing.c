@@ -1269,6 +1269,74 @@ static void swrCopyDoubledSprite(uintpixel_t* dst, int dstPitch, const uintpixel
     }
 }
 
+typedef struct {
+    uintpixel_t source, tinted;
+} SWTintedDoubledMemo;
+
+// Apply one tint per source texel shared by two columns and two rows.
+FORCE_INLINE void swrCopyTintedDoubledPairs(uintpixel_t* top, uintpixel_t* bottom, const uintpixel_t* source,
+                                           int columns, int col, int step, uintpixel_t tintColor,
+                                           SWTintedDoubledMemo* memo, bool aligned)
+{
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+    if (aligned) {
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+    }
+#endif
+#endif
+    for (int x = 0; x < columns * 2; x += 2, col += step) {
+        uintpixel_t texel = source[col];
+        if (!swrIsOpaque(texel)) continue;
+        if (texel != memo->source) {
+            memo->source = texel;
+            memo->tinted = tint(tintColor, texel);
+        }
+        if (aligned) {
+            uint32_t pair = ((uint32_t) memo->tinted << 16) | memo->tinted;
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        } else {
+            top[x] = top[x + 1] = memo->tinted;
+            bottom[x] = bottom[x + 1] = memo->tinted;
+        }
+    }
+}
+
+static NOINLINE void swrCopyTintedDoubledSprite(SWRenderer* swr, const SWTexture* texture, int dx, int dy,
+                                               int width, int height, int sx, int sy, bool flipX, uintpixel_t tintColor)
+{
+    swrDirtyRect(swr, dx, dy, dx + width, dy + height);
+    SWTintedDoubledMemo memo = {0, 0};
+    int columns = width / 2, start = flipX ? columns - 1 : 0, step = flipX ? -1 : 1;
+    for (int y = 0; y < height; y += 2) {
+        uintpixel_t* top = swr->fb + (dy + y) * swr->fbPitch + dx;
+        uintpixel_t* bottom = top + (y + 1 < height ? swr->fbPitch : 0);
+        const uintpixel_t* row = texture->buffer + (sy + y / 2) * texture->width + sx;
+        // The scalar flipped sampler starts at (width - 1) / 2, so an odd
+        // clipped width leaves one pixel at the leading edge when flipped.
+        if (flipX && (width & 1)) {
+            if (swrIsOpaque(row[columns])) {
+                uintpixel_t tinted = tint(tintColor, row[columns]);
+                *top = tinted;
+                *bottom = tinted;
+            }
+            top++;
+            bottom++;
+        }
+        if (((uintptr_t) top | (uintptr_t) bottom) & 3)
+            swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, false);
+        else
+            swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, true);
+        if (!flipX && (width & 1) && swrIsOpaque(row[columns])) {
+            uintpixel_t tinted = tint(tintColor, row[columns]);
+            top[width - 1] = tinted;
+            bottom[width - 1] = tinted;
+        }
+    }
+}
+
 // Copy a solid run in reverse. Align the destination before writing pairs.
 static void swrCopyReversedPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
 {
@@ -1858,6 +1926,12 @@ static void swrDrawSpriteInternal(
             swrDirtyRect(swr, dx, dy, dx + dw, dy + dh);
             swrCopyDoubledSprite(swr->fb + dy * swr->fbPitch + dx, swr->fbPitch,
                                  texture->buffer + sy * texture->width + sx, texture->width, dw, dh, flipX);
+            return;
+        }
+        if (!untinted && texture->immutable && !flipY && !pointSample && contrast == SWR_CONTRAST_NONE &&
+            xstep == (1 << (fp_prec - 1)) && ystep == xstep) {
+            SWR_PROBE_PATH(SWR_PROBE_PATH_TINTED_DOUBLED);
+            swrCopyTintedDoubledSprite(swr, texture, dx, dy, dw, dh, sx, sy, flipX, tintColor);
             return;
         }
         uint32_t lastPixel = 0xFFFFFFFF;
@@ -4168,6 +4242,47 @@ static bool swrTiledHeldRepeats(const SWRenderer* swr, int count, int* step)
     return true;
 }
 
+// Which of the pass's texel rows lands on row y of the buffer, or -1 for none:
+// the only thing about y that swrTiledPassPattern's result depends on.
+// swrTiledRowIds then names texel rows that put down the same pixels alike.
+FORCE_INLINE int swrTiledPassSourceRow(const SWTiledPass* pass, int y)
+{
+    int fromOrigin = y - pass->originY;
+    if (y < pass->minY || y >= pass->maxY || fromOrigin < 0) return -1;
+    int copyY = fromOrigin / pass->stepY, row = fromOrigin - copyY * pass->stepY;
+    if (copyY >= pass->countY || row >= pass->height) return -1;
+    return row;
+}
+
+// For each texel row of the pass, the first row that puts down exactly the
+// same pixels: the same opaque bounds, texels and coverage between them.
+// A grid's tile is mostly the same row of a vertical line over and over.
+static void swrTiledRowIds(const SWTiledPass* pass, uint8_t* ids)
+{
+    uint32_t hashes[SWR_TILED_OWN_SIDE];
+    for (int r = 0; r < pass->height; r++) {
+        int from = (int) pass->bounds[r * 2], to = (int) pass->bounds[r * 2 + 1];
+        uint32_t h = (uint32_t) from * 0x9e3779b9u ^ (uint32_t) to;
+        int lo = from - pass->boundsBase < 0 ? 0 : from - pass->boundsBase;
+        int hi = to - pass->boundsBase > pass->width ? pass->width : to - pass->boundsBase;
+        for (int c = lo; c < hi; c++) {
+            h = (h ^ pass->texels[r * pass->pitch + c]) * 16777619u;
+            if (pass->coverage != NULL) h = (h ^ pass->coverage[r * pass->pitch + c]) * 16777619u;
+        }
+        hashes[r] = h;
+        ids[r] = (uint8_t) r;
+        for (int e = 0; e < r; e++) {
+            if (ids[e] != e || hashes[e] != h || pass->bounds[e * 2] != pass->bounds[r * 2] ||
+                pass->bounds[e * 2 + 1] != pass->bounds[r * 2 + 1]) continue;
+            bool same = hi <= lo || memcmp(&pass->texels[e * pass->pitch + lo], &pass->texels[r * pass->pitch + lo],
+                                            (size_t) (hi - lo) * sizeof(uintpixel_t)) == 0;
+            if (same && pass->coverage != NULL && hi > lo)
+                same = memcmp(&pass->coverage[e * pass->pitch + lo], &pass->coverage[r * pass->pitch + lo], (size_t) (hi - lo)) == 0;
+            if (same) { ids[r] = (uint8_t) e; break; }
+        }
+    }
+}
+
 // What the pass puts on row y, into one stretch of the row: `pattern[i]`
 // stands for every pixel x of the row with x % period == i. The same pixels
 // as swrTiledPassRow, from one copy instead of every copy across the row.
@@ -4224,7 +4339,30 @@ void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color)
         SWFilledMemo filledMemo = { 0 };
         int width = swr->mainWidth, first = period < width ? period : width;
         bool laid = false; // row[] holds a row laid out from the stretch now in row[0..first)
+        // A row's stretch depends only on which texel row each pass puts on
+        // it (the colour and fills are the same for every row): when those are
+        // the previous row's, so is the stretch, and row[] is already laid.
+        static int noMemo = -1;
+        if (noMemo < 0) noMemo = getenv("BS_NO_BG_REUSE") != NULL;
+        int lastSource[SWR_TILED_HELD_MAX];
+        uint8_t rowIds[SWR_TILED_HELD_MAX][SWR_TILED_OWN_SIDE];
+        bool idsKnown = !noMemo;
+        for (int p = 0; p < count && idsKnown; p++) {
+            if (swrTiledHeld[p].height > SWR_TILED_OWN_SIDE) idsKnown = false;
+            else swrTiledRowIds(&swrTiledHeld[p], rowIds[p]);
+        }
         for (int y = 0; y < swr->mainHeight; y++) {
+            bool same = laid && idsKnown;
+            for (int p = 0; p < count; p++) {
+                int source = swrTiledPassSourceRow(&swrTiledHeld[p], y);
+                if (source >= 0 && idsKnown) source = rowIds[p][source];
+                if (!laid || source != lastSource[p]) same = false;
+                lastSource[p] = source;
+            }
+            if (same) {
+                memcpy(&swr->mainFb[y * width], row, (size_t) width * sizeof(uintpixel_t));
+                continue;
+            }
             swrFillPixels(pattern, (size_t) period, color);
             for (int p = 0; p < count; p++) swrTiledPassPattern(&swrTiledHeld[p], y, pattern, period, &memos[p]);
             if (fills > 0)

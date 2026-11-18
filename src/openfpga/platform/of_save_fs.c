@@ -79,6 +79,7 @@ static OfSaveFile *findFile(OfSaveFs *fs, const char *path) {
 }
 
 static void loadArchive(OfSaveFs *fs) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
     if (g_volatile) return;
     FILE *slot = fopen(OF_SAVE_SLOT_FILE, "rb");
     if (slot == NULL) {
@@ -126,6 +127,7 @@ static void loadArchive(OfSaveFs *fs) {
 }
 
 static bool storeArchive(OfSaveFs *fs) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
     if (g_volatile) return true;
     uint32_t total = (uint32_t) (sizeof(OfSaveHeader) + fs->fileCount * sizeof(OfSaveEntry));
     for (uint32_t i = 0; i < fs->fileCount; i++) total += fs->files[i].size;
@@ -202,6 +204,7 @@ static char *fsResolvePath(FileSystem *base, const char *relativePath) {
  * the game writes goes to the archive, which is looked up first. On the device they are stored in the audio
  * pack, since a core has no spare data slot; the desktop build reads them from the folder it runs in. */
 static bool readBundled(const char *relativePath, uint8_t **outData, uint32_t *outSize) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
     if (ofAudioReadPackFile(relativePath, outData, outSize)) return true;
 #ifdef OF_PC
     FILE *f = fopen(relativePath, "rb");
@@ -229,6 +232,7 @@ static bool readBundled(const char *relativePath, uint8_t **outData, uint32_t *o
 
 /* Whether readBundled would find the file, without reading it. */
 static bool bundledExists(const char *relativePath) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
 #ifdef OF_PC
     FILE *f = fopen(relativePath, "rb");
     if (f != NULL) {
@@ -441,6 +445,7 @@ bad:
 }
 
 bool ofSaveFsApplySnapshot(FileSystem *base, void *ptr) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
     OfSaveFs *fs = (OfSaveFs *)base;
     OfSaveSnapshot *p = ptr;
     if (!g_volatile) {

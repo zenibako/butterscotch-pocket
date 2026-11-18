@@ -1,13 +1,14 @@
 #!/bin/sh
-# Records which texture items each Undertale battle draws, for
-# tools/battle_prefetch_table.py.
+# Records which texture items each Undertale battle draws, and which sounds
+# it starts, for tools/battle_prefetch_table.py.
 #
 #   tools/battle_prefetch_items.sh ./undertale_pc games/undertale out/items
 #
 # Runs the battle tour (--bench-battles --bench-battles-list) over every
 # global.battlegroup, seven to a run, on the desktop build: uncapped, seed 7.
-# Each run leaves runN.list (its groups), runN.items (BS_ITEM_LOG) and
-# runN.frames (BS_FRAME_LOG) in the output directory. JOBS (default 4) runs
+# Each run leaves runN.list (its groups), runN.items (BS_ITEM_LOG),
+# runN.frames (BS_FRAME_LOG) and runN.out (its log, with BS_AUDIO_LOG's
+# sound lines) in the output directory. JOBS (default 4) runs
 # go at once. A run that fails or does not finish its benchmark makes the
 # script fail, so a table is never made from partial logs.
 set -eu
@@ -41,7 +42,7 @@ for list in $groups; do
         echo "$list" > "$out/run$n.list"
         ok=1
         (cd "$run" && SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy BS_NOFLIP=1 BS_UNCAPPED=1 BS_SEED=7 \
-            BS_ITEM_LOG="$out/run$n.items" BS_FRAME_LOG="$out/run$n.frames" BS_PREFETCH=0 \
+            BS_ITEM_LOG="$out/run$n.items" BS_FRAME_LOG="$out/run$n.frames" BS_PREFETCH=0 BS_AUDIO_LOG=1 \
             "$bin" --bench-battles --bench-battles-list "$list" > "$out/run$n.out" 2>&1) || ok=0
         grep -q "benchmark finished" "$out/run$n.out" || ok=0
         rm -rf "$run"

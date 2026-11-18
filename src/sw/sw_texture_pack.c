@@ -132,6 +132,12 @@ uint32_t swrTexturePackOffset(void)
     return packBase;
 }
 
+const char* swrTexturePackFile(void)
+{
+    if (!packProbed) packOpen();
+    return packPath;
+}
+
 static void packOpen(void)
 {
     packProbed = true;
@@ -284,8 +290,69 @@ const char* swrTexturePackLastError(void)
 static uint16_t window[WINDOW_BYTES / sizeof(uint16_t)];
 static uint32_t windowStart = 0, windowEnd = 0;
 
+// Data read ahead (swrTexturePackStage): a read within one of these copies
+// from it instead.
+#define STAGED_MAX 256 // at most 16 read-ahead entries, each with 16 windows
+static struct { uint32_t start, size; uint16_t* data; int tag; } staged[STAGED_MAX];
+static int stagedCount = 0;
+static uint32_t stagedReads = 0;
+
+bool swrTexturePackStage(uint32_t start, uint32_t size, uint16_t* data, int tag)
+{
+    if (stagedCount >= STAGED_MAX) {
+        free(data);
+        return false;
+    }
+    staged[stagedCount].start = start;
+    staged[stagedCount].size = size;
+    staged[stagedCount].data = data;
+    staged[stagedCount].tag = tag;
+    stagedCount++;
+    return true;
+}
+
+uint32_t swrTexturePackUnstage(int tag)
+{
+    uint32_t freed = 0;
+    int kept = 0;
+    for (int i = 0; i < stagedCount; i++) {
+        if (staged[i].tag <= tag) { freed += staged[i].size; free(staged[i].data); }
+        else staged[kept++] = staged[i];
+    }
+    stagedCount = kept;
+    return freed;
+}
+
+uint32_t swrTexturePackStagedReads(void)
+{
+    return stagedReads;
+}
+
+// Reuse read windows across planned items without freeing them before the last user.
+bool swrTexturePackHasStaged(uint32_t start, uint32_t size, int tag)
+{
+    for (int i = 0; i < stagedCount; i++) {
+        if (start < staged[i].start || (uint64_t) start + size > (uint64_t) staged[i].start + staged[i].size) continue;
+        if (staged[i].tag < tag) staged[i].tag = tag;
+        return true;
+    }
+    return false;
+}
+
+static bool readStaged(uint32_t start, uint32_t size, uint16_t* dest)
+{
+    for (int i = 0; i < stagedCount; i++) {
+        if (start < staged[i].start || (uint64_t) start + size > (uint64_t) staged[i].start + staged[i].size) continue;
+        memcpy(dest, (const uint8_t*) staged[i].data + (start - staged[i].start), size);
+        stagedReads++;
+        return true;
+    }
+    return false;
+}
+
 static bool readPackBlock(uint32_t start, uint32_t size, uint16_t* dest)
 {
+    if (stagedCount != 0 && readStaged(start, size, dest)) return true;
     errno = 0;
     uint64_t readStart = nowNanos();
     uint64_t readEnd = readStart;
@@ -420,7 +487,8 @@ bool swrTexturePackDecodeFloweyStalk(unsigned pose, int width, int height, uintp
 // Reads the window that starts with tile (tx, ty) of the rectangle's tiles
 // tx0..tx1 x ty0..ty1, taking in the tiles after it while they are close
 // enough and fit.
-static bool loadWindowFrom(const PackPage* page, int columns, int tx0, int tx1, int ty1, int tx, int ty)
+static bool windowFrom(const PackPage* page, int columns, int tx0, int tx1, int ty1, int tx, int ty,
+                       uint32_t* outStart, uint32_t* outEnd)
 {
     const PackTile* first = &packTiles[page->firstTile + (uint32_t) (ty * columns + tx)];
     uint32_t start = first->offset;
@@ -432,16 +500,128 @@ static bool loadWindowFrom(const PackPage* page, int columns, int tx0, int tx1, 
         for (; x <= tx1; x++)
         {
             uint32_t index = page->firstTile + (uint32_t) (y * columns + x);
-            if (index >= packTileCount) return readWindow(start, end);
+            if (index >= packTileCount) goto done;
             const PackTile* tile = &packTiles[index];
             if (tile->size == 0) continue;
             if (tile->offset < end || tile->offset - end > WINDOW_GAP_BYTES ||
                 tile->offset + tile->size - start > WINDOW_BYTES)
-                return readWindow(start, end);
+                goto done;
             end = tile->offset + tile->size;
         }
     }
-    return readWindow(start, end);
+done:
+    *outStart = start;
+    *outEnd = end;
+    return true;
+}
+
+static bool loadWindowFrom(const PackPage* page, int columns, int tx0, int tx1, int ty1, int tx, int ty)
+{
+    uint32_t start, end;
+    return windowFrom(page, columns, tx0, tx1, ty1, tx, ty, &start, &end) && readWindow(start, end);
+}
+
+// The window as the decodes planned so far would leave it.
+static uint32_t planStart = 0, planEnd = 0;
+
+void swrTexturePackPlanReset(void)
+{
+    planStart = windowStart;
+    planEnd = windowEnd;
+}
+
+int swrTexturePackPlanRect(uint32_t pageId, int x, int y, int w, int h, SwrPackSpan* spans, int max)
+{
+    int pageW, pageH;
+    if (!swrTexturePackGetSize(pageId, &pageW, &pageH)) return -1;
+    if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > pageW || y + h > pageH) return -1;
+    const int tileSize = packTile;
+    const PackPage* page = &packPages[pageId];
+    int columns = (pageW + tileSize - 1) / tileSize;
+    int tx0 = x / tileSize, tx1 = (x + w - 1) / tileSize;
+    int ty0 = y / tileSize, ty1 = (y + h - 1) / tileSize;
+    int count = 0;
+    // Each item is self-contained: intervening draws can replace the decode window.
+    planStart = planEnd = 0;
+    // As swrTexturePackDecodeRect goes through the tiles.
+    for (int ty = ty0; ty <= ty1; ty++)
+    {
+        for (int tx = tx0; tx <= tx1; tx++)
+        {
+            uint32_t index = page->firstTile + (uint32_t) (ty * columns + tx);
+            if (index >= packTileCount) return -1;
+            const PackTile* tile = &packTiles[index];
+            if (tile->size == 0 || (tile->offset >= planStart && tile->offset + tile->size <= planEnd)) continue;
+            uint32_t start, end;
+            if (count >= max || !windowFrom(page, columns, tx0, tx1, ty1, tx, ty, &start, &end)) return -1;
+            spans[count].start = start;
+            spans[count].size = end - start;
+            count++;
+            planStart = start;
+            planEnd = end;
+        }
+    }
+    return count;
+}
+
+// One tile per call. Staged-only work cannot issue a synchronous file read;
+// yielding between calls must tolerate an ordinary draw replacing `window`.
+int swrTexturePackDecodeRectStep(uint32_t pageId, int x, int y, int w, int h,
+                                 uintpixel_t* buffer, unsigned* next, bool stagedOnly)
+{
+    int pageW, pageH;
+    if (!swrTexturePackGetSize(pageId, &pageW, &pageH)) return -1;
+    if (x < 0 || y < 0 || w <= 0 || h <= 0 || x > pageW - w || y > pageH - h) return -1;
+    const int tileSize = packTile;
+    const PackPage* page = &packPages[pageId];
+    int columns = (pageW + tileSize - 1) / tileSize;
+    static uint16_t pixels[TILE_MAX * TILE_MAX];
+    int tx0 = x / tileSize, tx1 = (x + w - 1) / tileSize;
+    int ty0 = y / tileSize, ty1 = (y + h - 1) / tileSize;
+    unsigned across = (unsigned) (tx1 - tx0 + 1);
+    unsigned total = across * (unsigned) (ty1 - ty0 + 1);
+    if (*next >= total) return *next == total ? 1 : -1;
+    int tx = tx0 + (int) (*next % across), ty = ty0 + (int) (*next / across);
+    uint32_t index = page->firstTile + (uint32_t) (ty * columns + tx);
+    if (index >= packTileCount) return -1;
+    int tileX = tx * tileSize, tileY = ty * tileSize;
+    int tw = pageW - tileX < tileSize ? pageW - tileX : tileSize;
+    int th = pageH - tileY < tileSize ? pageH - tileY : tileSize;
+    int left = x > tileX ? x : tileX;
+    int top = y > tileY ? y : tileY;
+    int right = x + w < tileX + tw ? x + w : tileX + tw;
+    int bottom = y + h < tileY + th ? y + h : tileY + th;
+    size_t rowBytes = (size_t) (right - left) * sizeof(uintpixel_t);
+    const PackTile* tile = &packTiles[index];
+    if (tile->size == 0) {
+        packLastError = "";
+        for (int row = top; row < bottom; row++)
+            memset(&buffer[(size_t) (row - y) * w + (left - x)], 0, rowBytes);
+    } else {
+        const uint16_t* words = NULL;
+        if (stagedOnly) {
+            for (int i = 0; i < stagedCount; i++) {
+                if (tile->offset >= staged[i].start &&
+                    (uint64_t) tile->offset + tile->size <= (uint64_t) staged[i].start + staged[i].size) {
+                    words = staged[i].data + (tile->offset - staged[i].start) / sizeof(uint16_t);
+                    break;
+                }
+            }
+            if (!words) return -1;
+        } else {
+            if ((tile->offset < windowStart || tile->offset + tile->size > windowEnd) &&
+                !loadWindowFrom(page, columns, tx0, tx1, ty1, tx, ty)) return -1;
+            words = &window[(tile->offset - windowStart) / sizeof(uint16_t)];
+        }
+        if ((tile->offset & 1) || (tile->size & 1) || tile->size / sizeof(uint16_t) > TILE_MAX_WORDS) return -1;
+        uint64_t start = nowNanos();
+        if (!decodeRle(words, tile->size / sizeof(uint16_t), (size_t) tw * th, pixels)) return -1;
+        packStats.decodeNanos += nowNanos() - start;
+        for (int row = top; row < bottom; row++)
+            memcpy(&buffer[(size_t) (row - y) * w + (left - x)], &pixels[(row - tileY) * tw + (left - tileX)], rowBytes);
+    }
+    ++*next;
+    return *next == total ? 1 : 0;
 }
 
 bool swrTexturePackDecodeRect(uint32_t pageId, int x, int y, int w, int h, uintpixel_t* buffer)
@@ -513,9 +693,19 @@ bool swrTexturePackDecodeFloweyStalk(UNUSED unsigned pose, UNUSED int width, UNU
 bool swrTexturePackDecodeFloweyOpeningItem(UNUSED int32_t item, UNUSED uint32_t page, UNUSED int x, UNUSED int y,
                                          UNUSED int w, UNUSED int h, UNUSED uintpixel_t* buffer) { return false; }
 bool swrTexturePackDecode(UNUSED uint32_t pageId, UNUSED uintpixel_t* buffer) { return false; }
+int swrTexturePackDecodeRectStep(UNUSED uint32_t pageId, UNUSED int x, UNUSED int y, UNUSED int w, UNUSED int h,
+                                 UNUSED uintpixel_t* buffer, UNUSED unsigned* next, UNUSED bool stagedOnly) { return -1; }
 bool swrTexturePackDecodeRect(UNUSED uint32_t pageId, UNUSED int x, UNUSED int y, UNUSED int w, UNUSED int h, UNUSED uintpixel_t* buffer) { return false; }
 const char* swrTexturePackLastError(void) { return ""; }
 uint32_t swrTexturePackOffset(void) { return 0; }
+const char* swrTexturePackFile(void) { return SW_TEXTURE_PACK_PATH; }
+void swrTexturePackPlanReset(void) {}
+int swrTexturePackPlanRect(UNUSED uint32_t pageId, UNUSED int x, UNUSED int y, UNUSED int w, UNUSED int h,
+                           UNUSED SwrPackSpan* spans, UNUSED int max) { return -1; }
+bool swrTexturePackStage(UNUSED uint32_t start, UNUSED uint32_t size, uint16_t* data, UNUSED int tag) { free(data); return false; }
+uint32_t swrTexturePackUnstage(UNUSED int tag) { return 0; }
+bool swrTexturePackHasStaged(UNUSED uint32_t start, UNUSED uint32_t size, UNUSED int tag) { return false; }
+uint32_t swrTexturePackStagedReads(void) { return 0; }
 void swrTexturePackTakeStats(SwrTexturePackStats* out) { memset(out, 0, sizeof(*out)); }
 void swrTexturePackGetReadTotals(SwrTexturePackReadTotals* out) { memset(out, 0, sizeof(*out)); }
 

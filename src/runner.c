@@ -5011,9 +5011,16 @@ void Runner_step(Runner* runner) {
 
         // Gravity: add velocity in gravity_direction (HTML5: AddTo_Speed)
         if (inst->gravity != 0.0f) {
+#if defined(OF_FAST_LOOP) && defined(USE_FLOAT_REALS)
+            GMLReal gravCos, gravSin;
+            Instance_motionUnit(runner, inst->gravityDirection, &gravCos, &gravSin);
+            inst->hspeed += (float) (inst->gravity * gravCos);
+            inst->vspeed -= (float) (inst->gravity * gravSin);
+#else
             GMLReal gravDirRad = inst->gravityDirection * (M_PI / 180.0);
             inst->hspeed += (float) (inst->gravity * clampFloat(GMLReal_cos(gravDirRad)));
             inst->vspeed -= (float) (inst->gravity * clampFloat(GMLReal_sin(gravDirRad)));
+#endif
             Instance_computeSpeedFromComponents(inst);
         }
 

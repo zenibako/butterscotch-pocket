@@ -129,9 +129,10 @@ jobs:
       - name: Check Pocket controller input and button prompts
         working-directory: butterscotch/src/openfpga
         run: |
-          make gamepad-input-fixture button-prompts-fixture
+          make gamepad-input-fixture button-prompts-fixture performance-controls-fixture
           ./undertale_pc_gamepad_input_fixture
           ./undertale_pc_button_prompts_fixture
+          ./undertale_pc_performance_controls_fixture
           make GAME=deltarune deltarune-button-prompts-fixture-build
           ./deltarune_pc_button_names_fixture
 

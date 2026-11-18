@@ -7,6 +7,7 @@
 #include "image/image_decoder.h"
 
 #include "sw_renderer_private.h"
+#include "sw_texture_pack.h"
 #include "gettime.h"
 #include "vm_builtins.h"
 
@@ -189,7 +190,10 @@ MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb,
         SWDirtyBuffer* d = &swr->dirtyBuffers[i];
         // A buffer of another size was drawn in with another layout: what
         // was known of every buffer is gone.
-        if (d->fb != NULL && (d->width != width || d->height != height)) d->known = false;
+        if (d->fb != NULL && (d->width != width || d->height != height)) {
+            d->known = false;
+            d->tilePicture.count = 0;
+        }
         if (d->fb == fb && d->width == width && d->height == height) found = d;
         if (d->lastUsed < oldest->lastUsed) oldest = d;
     }
@@ -197,8 +201,12 @@ MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb,
         found = oldest;
         found->fb = fb;
         found->known = false;
+        found->tilePicture.count = 0;
     }
-    if (found->generation != swrDirtyGeneration) found->known = false;
+    if (found->generation != swrDirtyGeneration) {
+        found->known = false;
+        found->tilePicture.count = 0;
+    }
     found->width = width;
     found->height = height;
     found->generation = swrDirtyGeneration;
@@ -259,6 +267,7 @@ void swrClearMain(SWRenderer* swr, uintpixel_t color)
     memset(d->rows, 0, sizeof(d->rows));
     memset(d->baseRows, 0, sizeof(d->baseRows));
     d->baseValid = false;
+    d->tilePicture.count = 0;
     swr->dirtyMark = d;
 }
 
@@ -2626,7 +2635,6 @@ static bool SWRenderer_drawSpriteGrid(Renderer* renderer, int32_t spriteIndex, c
 // that picture is drawn in their place for as long as the run stays the same.
 // The key describes tile appearance and relative positions. Moving a whole
 // run reuses its picture; changing its contents or arrangement makes a new one.
-#define SWR_TILE_RUN_ENTRIES 4
 #define SWR_TILE_RUN_MIN_TILES 16
 #define SWR_TILE_RUN_MAX_PIXELS (2 * 1024 * 1024)
 #define SWR_TILE_RUN_MAX_SIDE 4096
@@ -2644,6 +2652,7 @@ enum { SWR_BLOCK_EMPTY, SWR_BLOCK_SOLID, SWR_BLOCK_MIXED };
 // a queued placement can translate that storage to any whole-pixel position.
 typedef struct {
     uint64_t key;
+    uint64_t serial;       // new for every allocation, even at the same address
     uintpixel_t* pixels;    // NULL when the entry is free
     uint8_t* blocks;        // one SWR_BLOCK_* per block, row by row; lives in the same allocation as pixels
     int x, y, width, height;
@@ -2653,6 +2662,7 @@ typedef struct {
 } SWTileRun;
 
 static SWTileRun swrTileRuns[SWR_TILE_RUN_ENTRIES];
+static uint64_t swrTileRunSerial;
 
 // Pictures waiting to be drawn, bottom first. A room has several tile layers
 // one over the other, and drawing each in turn fills most of the screen once
@@ -2738,6 +2748,7 @@ static bool swrRunAllocate(SWTileRun* run, int width, int height)
     size_t pixelBytes = (size_t) width * height * sizeof(uintpixel_t);
     uintpixel_t* pixels = (uintpixel_t*) calloc(pixelBytes + (size_t) blocksX * blocksY, 1);
     if (pixels == NULL) return false;
+    run->serial = ++swrTileRunSerial;
     run->pixels = pixels;
     run->blocks = (uint8_t*) pixels + pixelBytes;
     run->width = width; run->height = height;
@@ -2886,6 +2897,119 @@ static SWTileRun* swrPendingFlattened(SWRenderer* swr)
     return NULL;
 }
 
+static bool swrTilePictureCanKeep(SWRenderer* swr, int width, int height, int shift)
+{
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_TILE_PICTURE_KEEP") != NULL;
+    const SWDirtyBuffer* d = swr->dirty;
+    // Only a full main-buffer clear under the pictures guarantees that their
+    // transparent pixels are determined too. A grid below the pictures can
+    // vary independently, while a grid above them is replayed after the copy.
+    bool eligible = !off && swr->clearHeld && d != NULL && d->fb == swr->mainFb &&
+                    swr->fb == swr->mainFb && swr->fbPitch == width && swr->portX == 0 && swr->portY == 0 &&
+                    width > 0 && height > 0 && width == swr->mainWidth && height == swr->mainHeight &&
+                    d->width == width && d->height == height && (!swrGridHeld() || swrGrid.above) &&
+                    swr->baseMode == 0 && !swr->mirrorReplaying && swr->mirrorLayers == 0 &&
+                    swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
+    SWTilePictureView* previous = &swr->tilePictureView;
+    if (!eligible) {
+        previous->width = 0;
+        return false;
+    }
+
+    // Tracking dirty tiles adds work to each draw over the picture. Wait for
+    // a second consecutive frame at the same view before starting it.
+    // The raw view and shift determine the effective picture coordinates.
+    bool stationary = previous->width == width && previous->height == height &&
+                      previous->generation == d->generation && swr->frameCounter - previous->frame == 1 &&
+                      previous->x == swr->viewX && previous->y == swr->viewY && previous->shift == shift;
+    previous->frame = swr->frameCounter;
+    previous->generation = d->generation;
+    previous->x = swr->viewX;
+    previous->y = swr->viewY;
+    previous->width = width;
+    previous->height = height;
+    previous->shift = shift;
+    return stationary;
+}
+
+static bool swrTilePictureMatches(const SWTilePictureKey* key, const SWTilePictureKey* prior)
+{
+    if (key->count != prior->count || key->left != prior->left || key->top != prior->top || key->clear != prior->clear)
+        return false;
+    for (int i = 0; i < key->count; i++)
+        if (key->serials[i] != prior->serials[i] || key->x[i] != prior->x[i] || key->y[i] != prior->y[i])
+            return false;
+    return true;
+}
+
+static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, uintpixel_t clear)
+{
+    SWDirtyBuffer* d = swr->dirty;
+    int width = d->width, height = d->height;
+    SWTilePictureKey key;
+    memset(&key, 0, sizeof(key));
+    key.left = left;
+    key.top = top;
+    key.count = swrPendingCount;
+    key.clear = clear;
+    for (int i = 0; i < swrPendingCount; i++) {
+        const SWTileRun* run = swrPendingRuns[i];
+        key.serials[i] = run->serial;
+        key.x[i] = run->x;
+        key.y[i] = run->y;
+    }
+    const int tileHeight = 1 << SWR_DIRTY_TILE_H_SHIFT;
+    int rows = (height + tileHeight - 1) >> SWR_DIRTY_TILE_H_SHIFT;
+    uint32_t full = swrDirtyMask(0, width);
+    bool keep = swrTilePictureMatches(&key, &d->tilePicture);
+    if (keep) {
+        // A full write after the previous picture can dirty every tile.
+        int r = 0;
+        while (r < rows && (d->rows[r] & full) == full) r++;
+        keep = r < rows;
+    }
+    if (keep) {
+        for (int r = 0; r < rows; r++) {
+            int y = r << SWR_DIRTY_TILE_H_SHIFT, h = swrMin(height - y, tileHeight);
+            uint32_t bits = d->rows[r] & full;
+            while (bits != 0) {
+                int c0 = swrLowestBit(bits), c1 = c0 + 1;
+                while (c1 < 32 && (bits & (1u << c1))) c1++;
+                bits &= c1 >= 32 ? 0 : ~((1u << c1) - 1);
+                int x = c0 << SWR_DIRTY_TILE_W_SHIFT;
+                int end = swrMin(width, c1 << SWR_DIRTY_TILE_W_SHIFT);
+                swrRunsDrawOnto(runs, count, swr->mainFb + y * width + x, width,
+                                left + x, top + y, end - x, h, &clear, false);
+            }
+        }
+#ifdef OF_PC
+        static int check = -1;
+        if (check < 0) check = getenv("BS_CHECK_TILE_PICTURE_KEEP") != NULL;
+        if (check) {
+            size_t bytes = (size_t) width * height * sizeof(uintpixel_t);
+            uintpixel_t* fresh = malloc(bytes);
+            require(fresh != NULL);
+            swrRunsDrawOnto(swrPendingRuns, swrPendingCount, fresh, width, left, top, width, height, &clear, false);
+            require(memcmp(swr->mainFb, fresh, bytes) == 0);
+            free(fresh);
+            logInfo("swr: tile picture kept and checked at frame %u, view %d,%d\n", swr->frameCounter, left, top);
+        }
+#endif
+    } else {
+        swrRunsDrawOnto(runs, count, swr->mainFb, width, left, top, width, height, &clear, false);
+    }
+
+    // Later draws dirty this picture. The clear-colour and first-sprite
+    // shortcuts continue to require their own known uniform base.
+    d->tilePicture = key;
+    d->known = false;
+    d->baseValid = false;
+    memset(d->rows, 0, sizeof(d->rows));
+    memset(d->baseRows, 0, sizeof(d->baseRows));
+    swr->dirtyMark = d;
+}
+
 static void swrTileRunsDrawPending(SWRenderer* swr)
 {
     // The top left of the port in the pictures' units: the view's corner, or
@@ -2897,8 +3021,9 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
     if (swr->tiledHeldCount > 0) swrClearSettle(swr); // a clear with tiled passes over it is written as it is, not worked in below
     uintpixel_t* target = &swr->fb[swr->portY * swr->fbPitch + swr->portX];
     int width = swr->maxX - swr->portX, height = swr->maxY - swr->portY;
-    swrDirtyRect(swr, swr->portX, swr->portY, swr->maxX, swr->maxY);
-    
+    bool canKeep = swrTilePictureCanKeep(swr, width, height, shift);
+    if (!canKeep) swrDirtyRect(swr, swr->portX, swr->portY, swr->maxX, swr->maxY);
+
     // A clear still held goes under the pictures if they are drawn over the
     // whole of what it clears; they then write its colour only in their gaps.
     const uintpixel_t* under = NULL;
@@ -2926,12 +3051,13 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
     SWTileRun* flat;
     SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL);
     SWR_NOTE_START(copyNote);
-    if (flat != NULL) {
-        SWTileRun* const one[1] = { flat };
-        swrRunsDrawOnto(one, 1, target, swr->fbPitch, left, top, width, height, under, false);
-    } else {
-        swrRunsDrawOnto(swrPendingRuns, swrPendingCount, target, swr->fbPitch, left, top, width, height, under, false);
-    }
+    SWTileRun* const one[1] = { flat };
+    SWTileRun* const* runs = flat != NULL ? one : swrPendingRuns;
+    int count = flat != NULL ? 1 : swrPendingCount;
+    if (canKeep)
+        swrTilePictureDraw(swr, runs, count, left, top, *under);
+    else
+        swrRunsDrawOnto(runs, count, target, swr->fbPitch, left, top, width, height, under, false);
     SWR_NOTE_END(copyNote, "  of which: tile pictures copied");
     
     // Grids held over the pictures come last.
@@ -3647,6 +3773,33 @@ int SWRenderer_prefetchItem(Renderer* renderer, int32_t tpagIndex)
 {
     if (renderer == NULL || renderer->vtable != &swrVtable) return SWR_PREFETCH_SKIPPED;
     return (int) swrPrefetchItem((SWRenderer*) renderer, tpagIndex);
+}
+
+int SWRenderer_prefetchItemStep(Renderer* renderer, int32_t tpagIndex, void** state)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable) {
+        swrPrefetchCancel(state);
+        return SWR_PREFETCH_SKIPPED;
+    }
+    return (int) swrPrefetchItemStep((SWRenderer*) renderer, tpagIndex, state);
+}
+
+void SWRenderer_prefetchCancel(void** state)
+{
+    swrPrefetchCancel(state);
+}
+
+int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)[2], int max)
+{
+    if (renderer == NULL || renderer->vtable != &swrVtable || max <= 0) return -1;
+    SwrPackSpan planned[16];
+    if (max > 16) max = 16;
+    int count = swrPlanItem((SWRenderer*) renderer, tpagIndex, planned, max);
+    for (int i = 0; i < count; ++i) {
+        spans[i][0] = planned[i].start;
+        spans[i][1] = planned[i].size;
+    }
+    return count;
 }
 
 void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos)

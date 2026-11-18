@@ -79,6 +79,9 @@ static void keepHistory(const char *text) {
 #define OF_LOG_HEADER "Butterscotch log, " OF_GAME_NAME "\n"
 
 bool ofLogDump(void) {
+#ifndef OF_HOST_TOOL
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
+#endif
     /* Read the earlier runs once; later dumps in this run replace only this run's part. */
     static char *earlier = NULL;
     static uint32_t earlierLen = 0;

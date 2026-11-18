@@ -493,12 +493,14 @@ void swrTakeItemLoads(SwrItemLoads* out)
     memset(&drawLoads, 0, sizeof(drawLoads));
 }
 
-SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
+// Whether an item would be loaded ahead now (SWR_PREFETCH_LOADED, with what
+// swrPrefetchItem needs to load it), or why not.
+static SwrPrefetch prefetchCheck(SWRenderer* swr, int32_t tpagIndex, const TexturePageItem** outTpag,
+                                 uint32_t* outPage, int* pageW, int* pageH)
 {
     const TexturePageItem* tpag;
-    int pageW, pageH;
     // Flowey's fight decodes some items its own way (loadItem's openingItem).
-    if (swr->floweySpeedRoom || !packedItem(swr, tpagIndex, &tpag, &pageW, &pageH)) return SWR_PREFETCH_SKIPPED;
+    if (swr->floweySpeedRoom || !packedItem(swr, tpagIndex, &tpag, pageW, pageH)) return SWR_PREFETCH_SKIPPED;
     uint32_t pageId = (uint32_t) tpag->texturePageId;
     if (swr->textures[pageId] != NULL || (swr->itemTextures != NULL && swr->itemTextures[tpagIndex] != NULL))
         return SWR_PREFETCH_PRESENT;
@@ -513,8 +515,8 @@ SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
     // have nothing to evict.
     int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
     int top = tpag->sourceY > 0 ? tpag->sourceY - 1 : 0;
-    int right = tpag->sourceX + tpag->sourceWidth + 1 < pageW ? tpag->sourceX + tpag->sourceWidth + 1 : pageW;
-    int bottom = tpag->sourceY + tpag->sourceHeight + 1 < pageH ? tpag->sourceY + tpag->sourceHeight + 1 : pageH;
+    int right = tpag->sourceX + tpag->sourceWidth + 1 < *pageW ? tpag->sourceX + tpag->sourceWidth + 1 : *pageW;
+    int bottom = tpag->sourceY + tpag->sourceHeight + 1 < *pageH ? tpag->sourceY + tpag->sourceHeight + 1 : *pageH;
     if (left >= right || top >= bottom) return SWR_PREFETCH_SKIPPED;
     size_t bytes = (size_t) (right - left) * (size_t) (bottom - top) * sizeof(uintpixel_t);
     if (cachedBytes(swr) + bytes > TEXTURE_CACHE_BYTES) return SWR_PREFETCH_FULL;
@@ -527,6 +529,18 @@ SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
     free(probe);
 #endif
 #endif
+    *outTpag = tpag;
+    *outPage = pageId;
+    return SWR_PREFETCH_LOADED;
+}
+
+SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
+{
+    const TexturePageItem* tpag = NULL;
+    uint32_t pageId = 0;
+    int pageW, pageH;
+    SwrPrefetch check = prefetchCheck(swr, tpagIndex, &tpag, &pageId, &pageW, &pageH);
+    if (check != SWR_PREFETCH_LOADED) return check;
     
     ensureItemTable(swr);
     bool outOfMemory;
@@ -534,6 +548,106 @@ SwrPrefetch swrPrefetchItem(SWRenderer* swr, int32_t tpagIndex)
     if (item == NULL) return SWR_PREFETCH_SKIPPED; // a draw will try again
     keepItem(swr, tpagIndex, item);
     return SWR_PREFETCH_LOADED;
+}
+
+// A paced preload owns its unfinished pixels privately. Nothing is inserted
+// in the renderer's cache until all tiles are valid. Cancellation needs no
+// renderer (also used before restore destroys it).
+typedef struct {
+    SWTexture* texture;
+    int32_t item;
+    uint32_t page;
+    unsigned next;
+} PrefetchWork;
+
+void swrPrefetchCancel(void** state)
+{
+    PrefetchWork* work = (PrefetchWork*) *state;
+    if (!work) return;
+    free(work->texture->buffer);
+    free(work->texture);
+    free(work);
+    *state = NULL;
+}
+
+SwrPrefetch swrPrefetchItemStep(SWRenderer* swr, int32_t tpagIndex, void** state)
+{
+    PrefetchWork* work = (PrefetchWork*) *state;
+    const TexturePageItem* tpag = NULL;
+    uint32_t pageId = 0;
+    int pageW, pageH;
+    if (work && work->item != tpagIndex) swrPrefetchCancel(state);
+    work = (PrefetchWork*) *state;
+    if (work) {
+        // Avoid reserving the pixel allocation twice. Only this private work
+        // owns it; a normal draw may meanwhile have cached the same item.
+        if (swr->textures[work->page] || (swr->itemTextures && swr->itemTextures[tpagIndex])) {
+            swrPrefetchCancel(state);
+            return SWR_PREFETCH_PRESENT;
+        }
+        if (cachedBytes(swr) + pageBytes(work->texture) > TEXTURE_CACHE_BYTES) {
+            swrPrefetchCancel(state);
+            return SWR_PREFETCH_FULL;
+        }
+    } else {
+        SwrPrefetch check = prefetchCheck(swr, tpagIndex, &tpag, &pageId, &pageW, &pageH);
+        if (check != SWR_PREFETCH_LOADED) return check;
+    }
+    if (!work) {
+        int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
+        int top = tpag->sourceY > 0 ? tpag->sourceY - 1 : 0;
+        int right = tpag->sourceX + tpag->sourceWidth + 1;
+        int bottom = tpag->sourceY + tpag->sourceHeight + 1;
+        if (right > pageW) right = pageW;
+        if (bottom > pageH) bottom = pageH;
+        work = (PrefetchWork*) calloc(1, sizeof(*work));
+        SWTexture* texture = (SWTexture*) calloc(1, sizeof(*texture));
+        uintpixel_t* pixels = (uintpixel_t*) malloc((size_t) (right - left) * (bottom - top) * sizeof(*pixels));
+        if (!work || !texture || !pixels) {
+            free(work); free(texture); free(pixels);
+            return SWR_PREFETCH_FULL;
+        }
+        texture->buffer = pixels;
+        texture->width = (uint16_t) (right - left);
+        texture->height = (uint16_t) (bottom - top);
+        texture->originX = (uint16_t) left;
+        texture->originY = (uint16_t) top;
+        texture->immutable = true;
+        work->texture = texture;
+        work->page = pageId;
+        work->item = tpagIndex;
+        *state = work;
+    }
+    SWTexture* texture = work->texture;
+    int result = swrTexturePackDecodeRectStep(work->page, texture->originX, texture->originY,
+                    texture->width, texture->height, texture->buffer, &work->next, true);
+    if (result < 0) {
+        swrPrefetchCancel(state);
+        return SWR_PREFETCH_SKIPPED;
+    }
+    if (result == 0) return SWR_PREFETCH_PENDING;
+    ensureItemTable(swr);
+    keepItem(swr, tpagIndex, texture);
+    free(work);
+    *state = NULL;
+    return SWR_PREFETCH_LOADED;
+}
+
+int swrPlanItem(SWRenderer* swr, int32_t tpagIndex, SwrPackSpan* spans, int max)
+{
+    const TexturePageItem* tpag = NULL;
+    uint32_t pageId = 0;
+    int pageW, pageH;
+    if (prefetchCheck(swr, tpagIndex, &tpag, &pageId, &pageW, &pageH) != SWR_PREFETCH_LOADED) return -1;
+    // The rectangle loadItem decodes.
+    int left = tpag->sourceX > 0 ? tpag->sourceX - 1 : 0;
+    int top = tpag->sourceY > 0 ? tpag->sourceY - 1 : 0;
+    int right = tpag->sourceX + tpag->sourceWidth + 1;
+    int bottom = tpag->sourceY + tpag->sourceHeight + 1;
+    if (right > pageW) right = pageW;
+    if (bottom > pageH) bottom = pageH;
+    int count = swrTexturePackPlanRect(pageId, left, top, right - left, bottom - top, spans, max);
+    return count < 0 ? -2 : count;
 }
 
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)

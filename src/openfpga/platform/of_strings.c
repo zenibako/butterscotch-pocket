@@ -32,11 +32,10 @@ static const OfStringPatch g_patches[] = {
     { "[Z or ENTER]", "[" OF_ICON_A " or " OF_ICON_START "]" },
     { "[X or SHIFT]", OF_ICON_B },
     { "[C or CTRL]", "[" OF_ICON_X " or " OF_ICON_Y "]" },
-    /* F4 toggled fullscreen; here L switches the 640x480 screens between
-     * native resolution (accurate) and smoothed 320x240 (fast). The Esc-to-
-     * quit line has no counterpart; Undertale's game_undertale.c drops it. */
-    { "[F4]", OF_ICON_L },
-    { "Fullscreen", "Toggle speed/accuracy" },
+    /* Reuse the fullscreen row for the port menu. The Esc-to-quit row
+     * has no counterpart; Undertale's game_undertale.c drops it. */
+    { "[F4]", OF_ICON_SELECT },
+    { "Fullscreen", "Butterscotch menu" },
     /* Settings / joystick screens. */
     { "[Z / ENTER]", "[" OF_ICON_A " / " OF_ICON_START "]" },
     { "[X / SHIFT]", OF_ICON_B },

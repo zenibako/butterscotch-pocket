@@ -121,7 +121,7 @@ FOCUS_DEFS = -DOF_FOCUSED_BENCH -DOF_FOCUS_BUILD_ID='"$(FOCUS_BUILD_ID)"'
 endif
 
 BS_DEFS = $(FOCUS_DEFS) $(GAME_DEFS) -DOF_GAME_NAME='"$(APP)"' -DOF_SAVE_SLOT_FILE='"$(SAVE_SLOT_FILE)"' -DOF_LOG_SLOT_FILE='"$(LOG_SLOT_FILE)"' -DOF_FAST_LOOP $(foreach w,$(WADS),-DENABLE_WAD$(w)) -DENABLE_SW_RENDERER -DPIXEL_SIZE=16 \
-          -DUSE_FLOAT_REALS -DNO_RVALUE_INT64 -DSW_DRAW_PROFILE -DPLATFORM_BUSY_TICK -DPLATFORM_PACK_READ -DSW_TEXTURE_PACK_HOST='"music.bin"' -DENABLE_VM_GML_PROFILER \
+          -DUSE_FLOAT_REALS -DNO_RVALUE_INT64 -DSW_DRAW_PROFILE -DPLATFORM_BUSY_TICK -DPLATFORM_PACK_READ -DPLATFORM_DATA_FILE_READ_BEGIN -DSW_TEXTURE_PACK_HOST='"music.bin"' -DENABLE_VM_GML_PROFILER \
           -DBUTTERSCOTCH_VIDEO_NULL -DUSE_PLATFORM_AUDIO -DUSE_PLATFORM_FILE_SYSTEM -DSW_PLATFORM_FRAMEBUFFER -DSW_PLATFORM_BUTTON_GLYPHS -DDATAWIN_LOG_CHUNKS \
           -DBUTTERSCOTCH_COMMIT_HASH='"openfpga"' -DBUTTERSCOTCH_COMMIT_DATE='"unknown"' -DUSE_STB_IMGDEC
 
@@ -554,3 +554,8 @@ deltarune-button-prompts-fixture-build: $(PC_OBJS)
 .PHONY: gamepad-input-fixture
 gamepad-input-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/gamepad-input.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_gamepad_input_fixture
+
+# Real event handler, injected shoulders, and retained menu mode selection.
+.PHONY: performance-controls-fixture
+performance-controls-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/performance-controls.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/platform/of_platform.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_performance_controls_fixture

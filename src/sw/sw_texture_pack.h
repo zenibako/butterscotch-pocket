@@ -64,6 +64,11 @@ bool swrTexturePackDecode(uint32_t pageId, uintpixel_t* buffer);
 // `buffer`. The rectangle must lie within the page.
 bool swrTexturePackDecodeRect(uint32_t pageId, int x, int y, int w, int h, uintpixel_t* buffer);
 
+// Decodes one intersecting tile. next starts at zero; 1 complete, 0 pending, -1 failed.
+// With stagedOnly, missing compressed data fails instead of reading the file.
+int swrTexturePackDecodeRectStep(uint32_t pageId, int x, int y, int w, int h,
+                                 uintpixel_t* buffer, unsigned* next, bool stagedOnly);
+
 // Where the time of the decodes since the last call went, for the log line
 // of a slow load: the reads, how long they waited for the platform to accept
 // them, the platform's busy work between reads (audio) and the decoding.
@@ -88,6 +93,36 @@ void swrTexturePackGetReadTotals(SwrTexturePackReadTotals* out);
 
 // Where in its file the pack starts: 0 unless it rides in the host file.
 uint32_t swrTexturePackOffset(void);
+// The file the pack is read from (the host file when it rides in one).
+const char* swrTexturePackFile(void);
+
+// Reading ahead without decoding. A platform that can read in the background
+// asks which reads a decode of a rectangle will make (swrTexturePackPlanRect),
+// reads them while other work goes on, and hands the data back
+// (swrTexturePackStage). A later read that lies within staged data copies it
+// from there instead of reading. A planned read is a window, as a decode makes
+// it, in pack offsets (add swrTexturePackOffset for the file's).
+typedef struct SwrPackSpan
+{
+    uint32_t start, size;
+}
+SwrPackSpan;
+// Starts planning from the reads made so far: plans follow on from each other
+// as decodes do, each assuming the ones planned before it have run.
+void swrTexturePackPlanReset(void);
+// The reads a decode of the rectangle (as swrTexturePackDecodeRect takes it)
+// would make, up to `max` of them. Returns how many, or -1 if it cannot be
+// planned (no pack, or more than `max` reads).
+int swrTexturePackPlanRect(uint32_t pageId, int x, int y, int w, int h, SwrPackSpan* spans, int max);
+// Hands over `data`, `size` bytes read at pack offset `start` (malloc'd; the
+// pack frees it), under `tag`. Returns false, having freed it, if no room.
+bool swrTexturePackHasStaged(uint32_t start, uint32_t size, int tag);
+bool swrTexturePackStage(uint32_t start, uint32_t size, uint16_t* data, int tag);
+// Frees the staged data of tags up to `tag` (all of it with INT32_MAX).
+// Returns the bytes actually freed (shared windows may outlive the item).
+uint32_t swrTexturePackUnstage(int tag);
+// Reads served from staged data so far.
+uint32_t swrTexturePackStagedReads(void);
 
 // Why the last decode failed: "read" (with errno left as the C library set
 // it) or "data" for a tile that does not decode. Empty after a success.

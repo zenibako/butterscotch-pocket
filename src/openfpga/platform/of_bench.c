@@ -3,6 +3,7 @@
 #include "of.h"
 
 #include "gettime.h"
+#include "of_hooks.h"
 #include "of_diag.h"
 #include "of_game.h"
 #include "of_bench_scene.h"
@@ -201,6 +202,7 @@ bool ofBenchLivePacing(void) {
 #define OF_IO_FILE "music.bin"
 
 static unsigned ioTest(uint32_t megabyteOffset, uint32_t chunk) {
+    ofBgReadSettle(); /* the OS refuses other reads while a background one is in flight */
     uint8_t *buffer = malloc(OF_IO_BYTES);
     if (buffer == NULL) return 0;
 

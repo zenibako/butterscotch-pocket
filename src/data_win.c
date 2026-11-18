@@ -2986,6 +2986,11 @@ void DataWin_loadTxtrIfNeeded(DataWin* dw, uint32_t textureId) {
         return;
     }
 
+#ifdef PLATFORM_DATA_FILE_READ_BEGIN
+    extern void platformBeforeDataFileRead(void);
+    platformBeforeDataFileRead();
+#endif
+
     tex->blobData = (uint8_t *)safeMalloc(tex->blobSize);
 
     memset(tex->blobData, 0, tex->blobSize);
@@ -3762,6 +3767,14 @@ void DataWin_loadRoomPayload(DataWin* dw, int32_t roomIndex) {
     requireMessage(dw->roomChunkBuffer != nullptr || dw->lazyLoadFile != nullptr,
                    "DataWin_loadRoomPayload called without a ROOM cache or lazy-load FILE*");
 
+#ifdef PLATFORM_DATA_FILE_READ_BEGIN
+    // A platform may have asynchronous asset I/O in flight. Handoff only for
+    // file-backed loads; this also covers room_get_info, not just transitions.
+    if (dw->roomChunkBuffer == nullptr) {
+        extern void platformBeforeDataFileRead(void);
+        platformBeforeDataFileRead();
+    }
+#endif
     // A cached ROOM payload must never fall back to file I/O during a state load.
     BinaryReader lazyReader = BinaryReader_create(
         dw->roomChunkBuffer != nullptr ? nullptr : dw->lazyLoadFile, dw->fileSize);
