@@ -2476,9 +2476,9 @@ static void SWRenderer_drawVertexBuffer(Renderer* renderer, VertexBuffer* buffer
 #ifdef SW_DRAW_PROFILE
 void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos);
 void platformDrawCount(SWDrawProfileKind kind);
-void platformDrawTick(uint64_t nanos);
+uint64_t platformDrawTick(uint64_t nanos, bool measureTick);
 static uint64_t swrProfInner;      // spans of original draw wrappers, for busy ticks
-static uint64_t swrProfAccounted;  // spans already attributed to any report category
+static uint64_t swrProfAccounted;  // spans already reported or excluded as busy ticks
 static uint64_t swrProfLast;       // exclusive reported time of the last draw wrapper
 static bool swrProfFlushing;
 
@@ -2524,7 +2524,8 @@ void swrDeferredProfileEnd(SWDrawProfileKind kind, SWDeferredProfile profile)
             swrProfAccounted = accounted_ + span_; \
         } \
         platformDrawProfile(kind, swrProfLast); \
-        platformDrawTick(span_ - (swrProfInner - inner_)); \
+        uint64_t tick_ = platformDrawTick(span_ - (swrProfInner - inner_), swrProfFlushing); \
+        swrProfAccounted += tick_; \
         swrProfInner = inner_ + span_; \
     } while (0)
 #else

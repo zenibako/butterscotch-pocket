@@ -84,7 +84,7 @@ void ofPerfAddSleep(uint64_t nanos);
  * text, tiled backgrounds and rectangles. All times in ms. */
 void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos);
 void platformDrawCount(SWDrawProfileKind kind);
-void platformDrawTick(uint64_t nanos);
+uint64_t platformDrawTick(uint64_t nanos, bool measureTick);
 #define OF_DRAW_TICK_NANOS 5000000u
 void platformBusyTick(void);
 void ofAudioRoomChange(void);

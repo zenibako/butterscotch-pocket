@@ -92,15 +92,17 @@ void platformDrawProfile(SWDrawProfileKind kind, uint64_t nanos) {
     g_drawCalls[kind]++;
 }
 
-void platformDrawTick(uint64_t nanos) {
-    /* Top the audio queue up every few milliseconds of drawing. */
+uint64_t platformDrawTick(uint64_t nanos, bool measureTick) {
+    /* Top the audio queue up every few milliseconds of drawing. When a
+     * held replay encloses the tick, exclude the callbacks from its cost. */
     static uint64_t sinceTick = 0;
     sinceTick += nanos;
-    if (sinceTick >= OF_DRAW_TICK_NANOS) {
-        sinceTick = 0;
-        platformBusyTick();
-        ofPrefetchTick();
-    }
+    if (sinceTick < OF_DRAW_TICK_NANOS) return 0;
+    sinceTick = 0;
+    uint64_t start = measureTick ? nowNanos() : 0;
+    platformBusyTick();
+    ofPrefetchTick();
+    return measureTick ? nowNanos() - start : 0;
 }
 
 void ofPerfPhase(OfPhase phase) {

@@ -3634,6 +3634,7 @@ static void swrDrawPipeRow(const SWPipeRow* row, uintpixel_t* dst, SWPipeSpan fi
 
 static void swrComposePipeLayers(SWRenderer* swr)
 {
+    SWR_DEFERRED_BEGIN(SWR_PROF_FLUSH);
     SWPipeLayer layers[3] = {0};
     int top = swr->maxY, bottom = swr->portY;
     swr->pipeCount = 0;
@@ -3665,6 +3666,7 @@ static void swrComposePipeLayers(SWRenderer* swr)
         swrDrawPipeRow(&middle, dst, front.solid, (SWPipeSpan) {0, 0});
         swrDrawPipeSpan(&front, dst, front.visible.from, front.visible.to);
     }
+    SWR_DEFERRED_END(SWR_PROF_FLUSH);
 }
 
 static bool swrHoldPipeLayer(SWRenderer* swr, const SWSpriteCall* call)
