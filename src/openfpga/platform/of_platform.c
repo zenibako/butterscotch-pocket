@@ -588,7 +588,34 @@ static void logFramebufferAddress(const void *surface) {
 /* The renderer draws each frame straight into the display's back buffer, so
  * presenting is just a flip. Returns NULL (renderer keeps its own buffer and
  * the frame is copied) if the mode is unavailable or its rows are padded. */
+/* Full screen: whether the room is too short for the taller frame. The view
+ * grows 24 px up and 24 px down (the runner's widescreen hack); in a room
+ * shorter than the grown view, that shows what lies past the room or what the
+ * game keeps just outside its 4:3 view (Undertale's first room, the
+ * single-screen Ruins rooms, a battle shrunk for Speed). Those rooms are shown
+ * at 4:3 inside the 320x288 frame: the two bands are blacked out. A room
+ * without views is drawn whole, so it counts as short. */
+static bool fullScreenRoomIsShort(void) {
+    if (g_runner == NULL || g_runner->currentRoom == NULL) return true;
+    int64_t roomH = (int64_t) g_runner->currentRoom->height;
+    if (!g_runner->viewsEnabled) return true;
+    for (int32_t vi = 0; vi < MAX_VIEWS; vi++) {
+        if (!g_runner->views[vi].enabled) continue;
+        GMLCamera *camera = Runner_getCameraForView(g_runner, vi);
+        if (camera == NULL) continue;
+        /* Grown view height: viewHeight * 288 / 240. */
+        return roomH * OF_SCREEN_H < (int64_t) camera->viewHeight * OF_TALL_H;
+    }
+    return true;
+}
+static bool g_fullScreenShort = false; /* fullScreenRoomIsShort() for the frame being drawn */
+
 uint16_t *platformAcquireFramebuffer(int width, int height) {
+    /* Decided once per frame, before it is drawn: fades over the 4:3 view
+     * are drawn over the whole frame (swrFillExtendRows) unless the bands
+     * are to be blacked out anyway. */
+    g_fullScreenShort = g_fullScreen && height == OF_TALL_H && fullScreenRoomIsShort();
+    swrFillExtendRows = g_fullScreen && height == OF_TALL_H && !g_fullScreenShort ? (OF_TALL_H - OF_SCREEN_H) / 2 : 0;
     matchVideoMode(width, height);
     if (width != g_modeW || height != g_modeH) return NULL;
     if (g_modeStride != width * (int) sizeof(uint16_t)) return NULL;
@@ -833,6 +860,18 @@ void platformSwapBuffers(void) {
         }
     }
 #endif
+    /* Full screen in a short room: black out the bands above and below the
+     * 4:3 picture, after everything the game drew, overlays included. */
+    if (g_fullScreenShort && g_nextW == OF_SCREEN_W && g_nextH == OF_TALL_H) {
+        const int band = (OF_TALL_H - OF_SCREEN_H) / 2;
+        const size_t bandBytes = (size_t) band * OF_SCREEN_W * sizeof(uint16_t);
+        memset(g_nextFb, 0, bandBytes);
+        memset(g_nextFb + (size_t) (OF_TALL_H - band) * OF_SCREEN_W, 0, bandBytes);
+        if (g_runner != NULL) {
+            swrMarkDrawnRows(g_runner->renderer, 0, band);
+            swrMarkDrawnRows(g_runner->renderer, OF_TALL_H - band, OF_TALL_H);
+        }
+    }
     /* Words drawn over the picture are not the renderer's: it then clears
      * the whole of this buffer next time it gets it. */
     bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);

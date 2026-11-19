@@ -893,6 +893,14 @@ static bool swrOverlayHold(SWRenderer* swr, int dx, int dy, int dw, int dh, SWTe
             if (srcline[col] != texel) return false;
     }
     
+    // Full screen (swrFillExtendRows): one colour over the whole 4:3 view, a fade or a flash, covers the whole frame.
+    int band = swrFillExtendRows;
+    if (band > 0 && swr->fb == swr->mainFb && dx == 0 && dw >= swr->mainWidth && dy <= band &&
+        dy + dh >= swr->mainHeight - band && (dy > 0 || dy + dh < swr->mainHeight)) {
+        dy = 0;
+        dh = swr->mainHeight;
+    }
+
     uintpixel_t color = tint(tintColor, texel);
     float cover = alpha > 253 ? 1.0f : (float) alpha / 256.0f;
     float red = (float) ((color >> 10) & 0x1F) * 256.0f;

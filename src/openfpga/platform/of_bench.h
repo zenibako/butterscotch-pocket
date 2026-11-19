@@ -51,8 +51,10 @@ void ofPlatformSetSmoothLowres(bool enabled);
 void ofPlatformSetSpeedFullBattles(bool full);
 void ofPlatformSetPrefetch(bool on);
 /* Full screen (prototype): 320-wide frames are drawn at 320x288, the Pocket's 10:9 screen shape, with the
- * room view grown downward to fill it (the runner's widescreen hack). 640x480 frames stay 4:3: the core
- * has no 640x576 mode. --full-screen, or BS_FULL_SCREEN=1 on desktop. */
+ * room view grown 24 px up and 24 px down, evenly about its centre, to fill it (the runner's widescreen hack).
+ * Rooms too short for the grown view are shown at 4:3 inside the frame, the two bands blacked out; elsewhere a
+ * fade or flash over the 4:3 view is drawn over the whole frame (swrFillExtendRows). 640x480 frames stay 4:3:
+ * the core has no 640x576 mode. --full-screen, or BS_FULL_SCREEN=1 on desktop. */
 void ofPlatformSetFullScreen(bool on);
 bool ofPlatformFullScreen(void);
 /* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
