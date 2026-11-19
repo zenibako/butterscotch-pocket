@@ -460,16 +460,19 @@ described where it is done, in the comments of `../sw/sw_renderer.c` and
 
 The built-in controls are exposed as one GameMaker gamepad, including the
 legacy joystick API used by Undertale. Instruction glyphs mark physical
-Pocket button positions; Deltarune's generated prompts follow the active
-controller bindings. Select and the shoulders remain port controls.
+Pocket button positions; Select and Start show the leftmost and rightmost
+of the three small circular buttons below the screen. Deltarune's generated
+prompts follow the active controller bindings. Select and the shoulders
+remain reserved from gameplay. The left shoulder is unused; the right
+shoulder is a debug control.
 
 The right face button confirms, the bottom cancels, and either the top or
 left opens the game's menu. The D-pad moves. The right small button below
 the screen (Start) also confirms; the left (Select) opens the port's menu
-(below). The left shoulder toggles speed/accuracy and shows the new setting in
-the top right corner for two seconds. The core starts in speed (the desktop
-build in accuracy, since frames are compared against what the game asks
-for). Accuracy is the target: when an optimisation brings accuracy up to
+(below). Select → Performance Mode chooses Speed or Accuracy and shows the
+new setting in the top right corner for two seconds. The core starts in
+speed (the desktop build in accuracy, since frames are compared against
+what the game asks for). Accuracy is the target: when an optimisation brings accuracy up to
 speed's frame rate somewhere, the shortcut speed takes there is removed, so
 the two differ only where they still have to. Accuracy draws everything the
 game asks for. Speed gives up these for time: 640x480 rooms are drawn at
@@ -493,7 +496,7 @@ hardware gives a core no menu variables of its own.
 | Row | What it does |
 |---|---|
 | Resume | closes the menu |
-| Performance Mode | Speed or Accuracy, as L sets it |
+| Performance Mode | selects Speed or Accuracy |
 | Debug | opens the rows below |
 | Save log to SD card | first row in Debug; writes the log to the spare save slot; leave through the Analogue menu to keep it |
 | Save-state status | shows whether the current scene is eligible, and displays a refusal reason when selected |
@@ -509,8 +512,8 @@ With the debug buttons on (or after starting with `--debug` in the OS
 config's `ARGS=`, or `BS_DEBUG=1` on desktop):
 
 - R toggles the log.
-- "Accuracy" or "Speed" stays in the top right corner, the way L's toggle
-  is set.
+- The selected Performance Mode, "Accuracy" or "Speed", stays in the top
+  right corner.
 - Butterscotch's own debug hotkeys are reached with Select held, since the
   Pocket has no keyboard: Select + Right/Left goes to the next/previous
   room, Select + Start pauses, Select + A steps one frame while paused,
@@ -535,8 +538,8 @@ with small fonts, so those rooms are rendered at 640x480 and the display
 mode is switched to match (`of_video_set_mode`). If the OS refuses the mode
 everything stays at 320x240.
 
-L switches to the alternative: every room at 320x240, with the renderer
-averaging each 2x2 block of texels when it shrinks a 640x480 screen.
+Speed mode draws rooms at 320x240. The rendering implementation is in
+[`../sw/sw_drawing.c`](../sw/sw_drawing.c).
 Undertale's battles are the exception: Speed draws them at 640x480, except
 the heaviest, which stay at 320x240. Those are the `global.battlegroup` values
 in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Flowey's own battle

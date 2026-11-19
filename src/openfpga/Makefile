@@ -554,3 +554,8 @@ deltarune-button-prompts-fixture-build: $(PC_OBJS)
 .PHONY: gamepad-input-fixture
 gamepad-input-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/gamepad-input.c $(filter-out $(PC_OBJ_DIR)/main.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_gamepad_input_fixture
+
+# Real event handler, injected shoulders, and retained menu mode selection.
+.PHONY: performance-controls-fixture
+performance-controls-fixture: $(PC_OBJS)
+	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) tests/performance-controls.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/platform/of_platform.o,$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_performance_controls_fixture

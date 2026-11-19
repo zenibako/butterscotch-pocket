@@ -12982,7 +12982,7 @@ static RValue builtin_draw_arrow(MAYBE_UNUSED VMContext* ctx, RValue* args, int3
         uint32_t color = runner->renderer->drawColor;
         float alpha = runner->renderer->drawAlpha;
 
-        runner->renderer->vtable->drawLine(runner->renderer, x1, y1, x2, y2, color, color, alpha);
+        runner->renderer->vtable->drawLine(runner->renderer, x1, y1, x2, y2, 1.0f, color, alpha);
         runner->renderer->vtable->drawTriangle(runner->renderer, tx1, ty1, tx2, ty2, tx3, ty3, color, color, color, alpha, false);
     }
 

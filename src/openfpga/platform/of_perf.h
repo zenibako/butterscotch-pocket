@@ -132,7 +132,7 @@ void ofPerfPeekTotals(OfPerfTotals *out); /* the same sum, left running */
 void ofPerfPhase(OfPhase phase);
 bool ofPerfFrame(uint16_t *fb, int width, int height); /* true if it drew on fb */
 /* Writes a few words in the top right corner, in the game's font (see
- * of_font.h): which way L's speed/accuracy toggle is set, or a notice. */
+ * of_font.h): the selected Performance Mode, or a notice. */
 void ofPerfDrawMode(uint16_t *fb, int width, int height, const char *label);
 
 #endif /* OF_OF_PERF_H */

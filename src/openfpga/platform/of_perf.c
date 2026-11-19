@@ -1,7 +1,7 @@
 /*
  * Frame-time overlay and log overlay (both switched on in the menu; R also
  * toggles the log with the debug buttons on), and the words in the top right
- * corner: which way L's speed/accuracy toggle is set, or a notice.
+ * corner: the selected Performance Mode, or a notice.
  *
  * Shows four numbers in the top-left corner over the last 30 frames, the
  * first three in milliseconds:

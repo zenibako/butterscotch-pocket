@@ -565,7 +565,13 @@ static void swrDrawLineInt(Renderer* renderer, int x1, int y1, int x2, int y2, i
         else if (alignment == SWR_LINE_ALIGN_M1)
             x1 -= width;
         
-        for (int i = 0; i < width; i++) {
+        // Only the columns inside the port draw anything (swrDrawVLineInt
+        // clips each one), so a very wide line costs no more than the port.
+        SWRenderer* swr = (SWRenderer*) renderer;
+        int64_t lo = (int64_t) swr->portX - x1, hi = (int64_t) swr->maxX - x1;
+        int64_t first = lo > 0 ? lo : 0, last = hi < width ? hi : width;
+        if (first >= last) return;
+        for (int i = (int) first; i < (int) last; i++) {
             swrDrawVLineInt(renderer, x1 + i, swrMin(y1, y2), swrAbs(y1 - y2), color1, color2, alpha);
         }
         return;
@@ -577,7 +583,13 @@ static void swrDrawLineInt(Renderer* renderer, int x1, int y1, int x2, int y2, i
         else if (alignment == SWR_LINE_ALIGN_M1)
             y1 -= width;
         
-        for (int i = 0; i < width; i++) {
+        // Only the rows inside the port draw anything (swrDrawHLineInt clips
+        // each one), so a very wide line costs no more than the port.
+        SWRenderer* swr = (SWRenderer*) renderer;
+        int64_t lo = (int64_t) swr->portY - y1, hi = (int64_t) swr->maxY - y1;
+        int64_t first = lo > 0 ? lo : 0, last = hi < width ? hi : width;
+        if (first >= last) return;
+        for (int i = (int) first; i < (int) last; i++) {
             swrDrawHLineInt(renderer, swrMin(x1, x2), y1 + i, swrAbs(x1 - x2), color1, color2, alpha);
         }
         return;
@@ -1269,6 +1281,74 @@ static void swrCopyDoubledSprite(uintpixel_t* dst, int dstPitch, const uintpixel
     }
 }
 
+typedef struct {
+    uintpixel_t source, tinted;
+} SWTintedDoubledMemo;
+
+// Apply one tint per source texel shared by two columns and two rows.
+FORCE_INLINE void swrCopyTintedDoubledPairs(uintpixel_t* top, uintpixel_t* bottom, const uintpixel_t* source,
+                                           int columns, int col, int step, uintpixel_t tintColor,
+                                           SWTintedDoubledMemo* memo, bool aligned)
+{
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+    if (aligned) {
+        top = __builtin_assume_aligned(top, 4);
+        bottom = __builtin_assume_aligned(bottom, 4);
+    }
+#endif
+#endif
+    for (int x = 0; x < columns * 2; x += 2, col += step) {
+        uintpixel_t texel = source[col];
+        if (!swrIsOpaque(texel)) continue;
+        if (texel != memo->source) {
+            memo->source = texel;
+            memo->tinted = tint(tintColor, texel);
+        }
+        if (aligned) {
+            uint32_t pair = ((uint32_t) memo->tinted << 16) | memo->tinted;
+            memcpy(top + x, &pair, sizeof(pair));
+            memcpy(bottom + x, &pair, sizeof(pair));
+        } else {
+            top[x] = top[x + 1] = memo->tinted;
+            bottom[x] = bottom[x + 1] = memo->tinted;
+        }
+    }
+}
+
+static NOINLINE void swrCopyTintedDoubledSprite(SWRenderer* swr, const SWTexture* texture, int dx, int dy,
+                                               int width, int height, int sx, int sy, bool flipX, uintpixel_t tintColor)
+{
+    swrDirtyRect(swr, dx, dy, dx + width, dy + height);
+    SWTintedDoubledMemo memo = {0, 0};
+    int columns = width / 2, start = flipX ? columns - 1 : 0, step = flipX ? -1 : 1;
+    for (int y = 0; y < height; y += 2) {
+        uintpixel_t* top = swr->fb + (dy + y) * swr->fbPitch + dx;
+        uintpixel_t* bottom = top + (y + 1 < height ? swr->fbPitch : 0);
+        const uintpixel_t* row = texture->buffer + (sy + y / 2) * texture->width + sx;
+        // The scalar flipped sampler starts at (width - 1) / 2, so an odd
+        // clipped width leaves one pixel at the leading edge when flipped.
+        if (flipX && (width & 1)) {
+            if (swrIsOpaque(row[columns])) {
+                uintpixel_t tinted = tint(tintColor, row[columns]);
+                *top = tinted;
+                *bottom = tinted;
+            }
+            top++;
+            bottom++;
+        }
+        if (((uintptr_t) top | (uintptr_t) bottom) & 3)
+            swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, false);
+        else
+            swrCopyTintedDoubledPairs(top, bottom, row, columns, start, step, tintColor, &memo, true);
+        if (!flipX && (width & 1) && swrIsOpaque(row[columns])) {
+            uintpixel_t tinted = tint(tintColor, row[columns]);
+            top[width - 1] = tinted;
+            bottom[width - 1] = tinted;
+        }
+    }
+}
+
 // Copy a solid run in reverse. Align the destination before writing pairs.
 static void swrCopyReversedPixels(uintpixel_t* dst, const uintpixel_t* src, int count)
 {
@@ -1858,6 +1938,12 @@ static void swrDrawSpriteInternal(
             swrDirtyRect(swr, dx, dy, dx + dw, dy + dh);
             swrCopyDoubledSprite(swr->fb + dy * swr->fbPitch + dx, swr->fbPitch,
                                  texture->buffer + sy * texture->width + sx, texture->width, dw, dh, flipX);
+            return;
+        }
+        if (!untinted && texture->immutable && !flipY && !pointSample && contrast == SWR_CONTRAST_NONE &&
+            xstep == (1 << (fp_prec - 1)) && ystep == xstep) {
+            SWR_PROBE_PATH(SWR_PROBE_PATH_TINTED_DOUBLED);
+            swrCopyTintedDoubledSprite(swr, texture, dx, dy, dw, dh, sx, sy, flipX, tintColor);
             return;
         }
         uint32_t lastPixel = 0xFFFFFFFF;

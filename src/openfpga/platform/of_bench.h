@@ -51,7 +51,7 @@ void ofPlatformSetSpeedFullBattles(bool full);
 void ofPlatformSetPrefetch(bool on);
 /* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
 const char *ofPlatformSpeedBattlesNote(void);
-/* Which way L's speed/accuracy setting is. */
+/* The selected Performance Mode. */
 bool ofPlatformSpeedMode(void);
 void ofSaveFsSetVolatile(bool enabled);
 void ofPlatformSetInputScript(const char *script);

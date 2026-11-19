@@ -85,7 +85,7 @@ static void blankDisplayBuffers(void);
 static const char *g_inputScript = NULL;
 static bool g_uncapped = false;
 static bool g_hiresAvailable = true;
-/* L's setting: true is speed, false accuracy (see the list of what speed
+/* Performance Mode: true is speed, false accuracy (see the list of what speed
  * gives up further down). Speed is what the player starts in. Accuracy is the
  * target: wherever an optimisation brings accuracy up to speed's frame rate,
  * the shortcut speed takes there should go, so that the two differ only
@@ -119,7 +119,7 @@ static uint32_t g_blockedGameButtons = 0;
  * port and not for playing. Off at start-up unless the game was started with
  * --debug; the menu switches them on or off. With them on:
  *   - R toggles the log overlay;
- *   - 640x480 rooms keep showing which way L's speed/accuracy toggle is set;
+ *   - 640x480 rooms keep showing the selected Performance Mode;
  *   - Butterscotch's own debug hotkeys (see "Debug Features" in its README)
  *     are reached by holding Select and pressing another button, since a
  *     Pocket has no keyboard. A button pressed with Select held does not
@@ -258,8 +258,8 @@ void ofPlatformSetHiresAllowed(bool allowed) {
 
 static int32_t visibleWidth(Runner *runner);
 
-/* L's two settings. Accuracy draws everything as the game asks. Speed gives
- * up five things for time:
+/* The two performance settings. Accuracy draws everything as the game asks.
+ * Speed gives up five things for time:
  *   - 640x480 rooms are drawn at 320x240 with 2x2 averaging;
  *   - mirrored blend layers too faint to move a 16-bit channel by more than
  *     one step are left out (swrMirrorFaintAlpha);
@@ -296,8 +296,8 @@ static int g_dumpFrame = 0;
 static int g_dumpTarget = -2;
 #endif
 
-/* Desktop test aids: a fixed threshold whatever L says, and skipping all but
- * every nth frame whatever the clock says. */
+/* Desktop test aids: a fixed threshold regardless of Performance Mode, and
+ * skipping all but every nth frame whatever the clock says. */
 void ofPlatformSetMirrorFaint(int alpha) {
     g_faintOverride = alpha;
 }
@@ -831,9 +831,9 @@ void platformSwapBuffers(void) {
      * the whole of this buffer next time it gets it. */
     bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);
     ofFocusPresent(g_runner,false);
-    /* L's setting, by the name the instruction screen gives the toggle:
-     * for a moment after L is pressed, and in debug mode for as long as a
-     * 640x480 room (the only kind it changes) is showing. */
+    /* The selected Performance Mode:
+     * for a moment after the menu changes it, and in debug mode for as
+     * long as a 640x480 room is showing. */
     static bool wasPaused = false;
     bool paused = g_runner != NULL && g_runner->paused;
     if (wasPaused && !paused) showNotice("Resumed");
@@ -1585,7 +1585,7 @@ static void runInputScript(void) {
 static void toggleSpeed(void) {
     g_smoothLowres = !g_smoothLowres;
     g_modeShownUntil = nowNanos() + OF_MODE_SHOWN_NANOS;
-    logInfo("Video: %s\n", g_smoothLowres ? "speed (640x480 rooms at 320x240, faint layers left out, frame skipping)" : "accuracy");
+    logInfo("Video: %s\n", g_smoothLowres ? "Speed" : "Accuracy");
 }
 
 static void toggleScriptTimes(void) {
@@ -1840,7 +1840,6 @@ bool platformHandleEvents(void) {
     }
     bool chording = g_debugMode && of_btn(OF_BTN_SELECT);
     if (g_debugMode && of_btn_pressed(OF_BTN_R1)) ofPerfToggleLog();
-    if (of_btn_pressed(OF_BTN_L1)) toggleSpeed();
     runInputScript();
     prefetchCheck();
     decideFrameSkip();
