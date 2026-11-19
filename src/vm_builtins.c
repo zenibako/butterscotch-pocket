@@ -4384,7 +4384,7 @@ static RValue builtin_camera_apply(VMContext* ctx, RValue* args, int32_t argCoun
     Runner* runner = ctx->runner;
     GMLCamera* camera = Runner_getCameraById(runner, RValue_toInt32(args[0]));
     if (camera != nullptr) {
-        runner->renderer->vtable->applyProjection(runner->renderer, &camera->viewMatrix, &camera->projectionMatrix);
+        Runner_applyCameraProjection(runner, camera);
         runner->renderer->cameraCurrent = RValue_toInt32(args[0]);
     }
     return RValue_makeUndefined();
@@ -23787,7 +23787,8 @@ static RValue builtin_d3d_end(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_U
     d3dIdentity(renderer);
     d3dApplyState(renderer);
     GMLCamera* camera = Runner_getCameraById(ctx->runner, renderer->cameraCurrent);
-    if (camera && renderer->vtable->applyProjection) renderer->vtable->applyProjection(renderer, &camera->viewMatrix, &camera->projectionMatrix);
+    if (camera && renderer->vtable->applyProjection)
+        Runner_applyCameraProjection(ctx->runner, camera);
     return RValue_makeBool(true);
 }
 
