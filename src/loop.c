@@ -1352,16 +1352,20 @@ int loop(CommandLineArgs args, const char *argv0) {
                 // top/bottom). Runner_drawViews reads widescreenExtraWidth/Height to expand each view to match.
                 runner->widescreenExtraWidth = 0;
                 runner->widescreenExtraHeight = 0;
-                if (args.widescreenAspect > 0.0f && runner->usingAppSurface && gameW > 0 && gameH > 0) {
+                // A negative aspect asks for the framebuffer's own shape (the Pocket's 320x288 full-screen mode),
+                // which the platform can change from frame to frame.
+                float widescreenAspect = args.widescreenAspect;
+                if (widescreenAspect < 0.0f && fbWidth > 0 && fbHeight > 0) widescreenAspect = (float) fbWidth / (float) fbHeight;
+                if (widescreenAspect > 0.0f && runner->usingAppSurface && gameW > 0 && gameH > 0) {
                     float nativeAspect = (float) gameW / (float) gameH;
-                    if (args.widescreenAspect > nativeAspect) {
-                        int32_t targetW = (int32_t) ((float) gameH * args.widescreenAspect + 0.5f);
+                    if (widescreenAspect > nativeAspect + 0.001f) {
+                        int32_t targetW = (int32_t) ((float) gameH * widescreenAspect + 0.5f);
                         if (targetW > gameW) {
                             runner->widescreenExtraWidth = targetW - gameW;
                             gameW = targetW;
                         }
-                    } else if (args.widescreenAspect < nativeAspect) {
-                        int32_t targetH = (int32_t) ((float) gameW / args.widescreenAspect + 0.5f);
+                    } else if (widescreenAspect < nativeAspect - 0.001f) {
+                        int32_t targetH = (int32_t) ((float) gameW / widescreenAspect + 0.5f);
                         if (targetH > gameH) {
                             runner->widescreenExtraHeight = targetH - gameH;
                             gameH = targetH;

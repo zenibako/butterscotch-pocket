@@ -171,6 +171,7 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
+        if (strcmp(argv[i], "--full-screen") == 0) ofPlatformSetFullScreen(true);
         /* --no-prefetch: a battle's textures are read at their first draw, not during its encounter's flash. */
         if (strcmp(argv[i], "--no-prefetch") == 0) ofPlatformSetPrefetch(false);
         /* --slow-frame-ms <n>: log frames from n ms of work up as slow, not from OF_PERF_SLOW_FRAME_MS. */
@@ -208,6 +209,7 @@ int main(int argc, char **argv) {
     if (getenv("BS_SCRIPT") != NULL) ofPlatformSetInputScript(getenv("BS_SCRIPT"));
     if (getenv("BS_UNCAPPED") != NULL && !ofBenchLivePacing()) ofPlatformSetUncapped(true);
     if (getenv("BS_SMOOTH") != NULL) ofPlatformSetSmoothLowres(true);
+    if (getenv("BS_FULL_SCREEN") != NULL && strcmp(getenv("BS_FULL_SCREEN"), "0") != 0) ofPlatformSetFullScreen(true);
     /* BS_NO_MIRROR=1 draws mirrored layers the ordinary way; BS_MIRROR_FAINT=<alpha of 256> sets how faint
      * a mirrored layer has to be to be left out (4 leaves none out). For comparing frames. */
     if (getenv("BS_NO_MIRROR") != NULL) swrMirrorMerge = false;
@@ -253,6 +255,9 @@ int main(int argc, char **argv) {
         logError("Bench: live pacing cannot be combined with forced skipping\n");
         return EXIT_FAILURE;
     }
+
+    /* Full screen: the runner grows each view to the framebuffer's shape (see loop.c). */
+    if (ofPlatformFullScreen()) args.widescreenAspect = -1.0f;
 
     int ret = loop(args, OF_GAME_NAME);
     freeCommandLineArgs(&args);

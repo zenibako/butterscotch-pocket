@@ -73,6 +73,12 @@ int platformHeapCanReserve(size_t bytes)
 
 #define OF_HIRES_W 640
 #define OF_HIRES_H 480
+/* Full screen's frame: the Pocket's screen is 10:9, and the core's video.json
+ * has a 320x288 10:9 scaler slot for it. */
+#define OF_TALL_H 288
+static bool g_fullScreen = false;
+void ofPlatformSetFullScreen(bool on) { g_fullScreen = on; }
+bool ofPlatformFullScreen(void) { return g_fullScreen; }
 
 static Runner *g_runner = NULL;
 static uint16_t *g_nextFb = NULL;
@@ -494,7 +500,7 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     }
 #endif
     *outW = hires ? OF_HIRES_W : OF_SCREEN_W;
-    *outH = hires ? OF_HIRES_H : OF_SCREEN_H;
+    *outH = hires ? OF_HIRES_H : g_fullScreen ? OF_TALL_H : OF_SCREEN_H;
     return true;
 }
 
