@@ -35,11 +35,6 @@ static inline bool Collision_matchesTarget(DataWin* dataWin, Instance* inst, int
     return VM_isObjectOrDescendant(dataWin, inst->objectIndex, target);
 }
 
-typedef struct {
-    GMLReal left, right, top, bottom;
-    bool valid;
-} InstanceBBox;
-
 // Returns the collision sprite for an instance (mask sprite if set, else display sprite)
 static inline Sprite* Collision_getSprite(DataWin* dataWin, Instance* inst) {
     int32_t sprIdx = (inst->maskIndex >= 0) ? inst->maskIndex : inst->spriteIndex;
@@ -82,6 +77,17 @@ static inline InstanceBBox Collision_computeBBox(Runner* runner, Instance* inst)
     GMLReal marginB = (spr->bboxMode == 1) ? (GMLReal) spr->height : (GMLReal) (spr->marginBottom + 1);
     GMLReal originX = (GMLReal) spr->originX;
     GMLReal originY = (GMLReal) spr->originY;
+
+    if (inst->bboxCache.bbox.valid &&
+        inst->bboxCache.x == inst->x && inst->bboxCache.y == inst->y &&
+        inst->bboxCache.xscale == inst->imageXscale && inst->bboxCache.yscale == inst->imageYscale &&
+        inst->bboxCache.angle == inst->imageAngle &&
+        inst->bboxCache.marginLeft == marginL && inst->bboxCache.marginRight == marginR &&
+        inst->bboxCache.marginTop == marginT && inst->bboxCache.marginBottom == marginB &&
+        inst->bboxCache.originX == originX && inst->bboxCache.originY == originY &&
+        inst->bboxCache.compatibilityMode == runner->collisionCompatibilityMode) {
+        return inst->bboxCache.bbox;
+    }
 
     GMLReal left, right, top, bottom;
     if (GMLReal_fabs(inst->imageAngle) > GML_ANGLE_EPSILON) {
@@ -139,6 +145,19 @@ static inline InstanceBBox Collision_computeBBox(Runner* runner, Instance* inst)
     ret.top = top;
     ret.bottom = bottom;
     ret.valid = true;
+    inst->bboxCache.bbox = ret;
+    inst->bboxCache.x = inst->x;
+    inst->bboxCache.y = inst->y;
+    inst->bboxCache.xscale = inst->imageXscale;
+    inst->bboxCache.yscale = inst->imageYscale;
+    inst->bboxCache.angle = inst->imageAngle;
+    inst->bboxCache.marginLeft = marginL;
+    inst->bboxCache.marginRight = marginR;
+    inst->bboxCache.marginTop = marginT;
+    inst->bboxCache.marginBottom = marginB;
+    inst->bboxCache.originX = originX;
+    inst->bboxCache.originY = originY;
+    inst->bboxCache.compatibilityMode = runner->collisionCompatibilityMode;
     return ret;
 }
 
