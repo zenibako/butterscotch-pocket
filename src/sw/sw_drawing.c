@@ -569,9 +569,9 @@ static void swrDrawLineInt(Renderer* renderer, int x1, int y1, int x2, int y2, i
         // clips each one), so a very wide line costs no more than the port.
         SWRenderer* swr = (SWRenderer*) renderer;
         int64_t lo = (int64_t) swr->portX - x1, hi = (int64_t) swr->maxX - x1;
-        int first = lo > 0 ? (int) lo : 0;
-        int last = hi < width ? (int) hi : width;
-        for (int i = first; i < last; i++) {
+        int64_t first = lo > 0 ? lo : 0, last = hi < width ? hi : width;
+        if (first >= last) return;
+        for (int i = (int) first; i < (int) last; i++) {
             swrDrawVLineInt(renderer, x1 + i, swrMin(y1, y2), swrAbs(y1 - y2), color1, color2, alpha);
         }
         return;
@@ -587,9 +587,9 @@ static void swrDrawLineInt(Renderer* renderer, int x1, int y1, int x2, int y2, i
         // each one), so a very wide line costs no more than the port.
         SWRenderer* swr = (SWRenderer*) renderer;
         int64_t lo = (int64_t) swr->portY - y1, hi = (int64_t) swr->maxY - y1;
-        int first = lo > 0 ? (int) lo : 0;
-        int last = hi < width ? (int) hi : width;
-        for (int i = first; i < last; i++) {
+        int64_t first = lo > 0 ? lo : 0, last = hi < width ? hi : width;
+        if (first >= last) return;
+        for (int i = (int) first; i < (int) last; i++) {
             swrDrawHLineInt(renderer, swrMin(x1, x2), y1 + i, swrAbs(x1 - x2), color1, color2, alpha);
         }
         return;
