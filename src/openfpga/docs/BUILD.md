@@ -39,15 +39,23 @@ latest downloads are not external build inputs.
 
 The checked-in `release/sdk.tar.gz` is the SDK snapshot used by this pipeline,
 with the matching runtime's API headers. `release/runtime/` contains the
-matched `os.bin`, `os25.rbf_r`, `loader.bin` and `SAVESTATES_RUNTIME.json`.
+matched `os.bin`, `os20.rbf_r`, `loader.bin` and `SAVESTATES_RUNTIME.json`.
 The lock covers every snapshot/runtime input; validation fails on any hash
 or runtime provenance mismatch. Historical SDK trees remain in the preserved release history and original
 repository; they are not active build inputs in this fork.
 
-This is the experimental os25 sleep/clock runtime at 100 MHz from
+This is the experimental os20 save-state runtime at 100 MHz from
 [pocket-runtime-19d9d50](https://github.com/zenibako/openfpgaCore/releases/tag/pocket-runtime-19d9d50)
-(openfpgaOS API 0.9.1, seed 31), with -0.496 ns worst setup slack in the slow
-85°C corner. It misses that timing target. Its mixer divides the final mix by
+(openfpgaOS API 0.9.1, seed 19), with -0.597 ns worst setup slack in the slow
+85°C corner. It misses that timing target. os20 has a dual-issue CPU with a
+64 KB data cache; on the Pocket it ran both benchmarks 6 to 7% faster than
+the same release's os25. It drops only GPU span features Butterscotch does not
+use. Its FPU uses reduced-accuracy fused multiply-add, so float results can
+in principle differ from os25 in the last bits; replays of Undertale and
+Deltarune battle frames on the 19d9d50 os20 and os25 CPU netlists gave
+identical game state, pixels and audio (2026-11-20, simulated). The release's
+`SAVESTATES_RUNTIME.json` names os25; this repository's copy is regenerated
+by `tools/runtime-provenance.py` for `os20.rbf_r` from the same release. Its mixer divides the final mix by
 4 rather than 16, so audio is 12 dB louder than with the earlier `902a8adc`
 runtime; Butterscotch keeps that level. Do not describe it as a timing-clean FPGA build or swap
 in another runtime merely because it is newer. Local/private and public ELFs
@@ -188,10 +196,10 @@ defaults. The information page fits Analogue's 32-line limit.
 | Metadata | Audited value and evidence |
 |---|---|
 | Cartridges | `cartridge_adapter: -1`: no cartridge-game support; leaves cartridge power off. |
-| Link port | `link_port: false`: pinned runtime `variants/os25.mk` omits `INCLUDE_LINK`; `core_top.v` disables the link peripheral. Debug UART is separate. |
+| Link port | `link_port: false`: pinned runtime `variants/os20.mk` omits `INCLUDE_LINK`; `core_top.v` disables the link peripheral. Debug UART is separate. |
 | Dock | Digital Dock support remains enabled; runtime handles Dock notifications and controllers. This audit did not physically test a Dock. |
 | Analog Dock | Disabled. Runtime Analogizer support is a separate external interface and does not establish analog Dock support. |
-| Save states / sleep | Enabled by the matched os25 runtime and both game builds; experimental and subject to scene eligibility. Check **Select > Debug > Save-state status** before sleeping. |
+| Save states / sleep | Enabled by the matched os20 runtime and both game builds; experimental and subject to scene eligibility. Check **Select > Debug > Save-state status** before sleeping. |
 | Firmware minimum | Retains `2.2`; the exact minimum has not been independently established by a firmware compatibility matrix. |
 | Games | Undertale **v1.08**, experimental Deltarune **Chapter 1**; user-owned game data required. |
 

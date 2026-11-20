@@ -22,12 +22,17 @@ GAMES=(
     "deltarune|Deltarune.json|games/deltarune|deltarune.win|dr_textures.bin|dr_music.bin"
 )
 if [ "${SAVESTATES:-0}" = 1 ]; then
-    if [ "${VARIANT:-os25}" != os25 ]; then
-        echo "mkcard: save-state runtime requires VARIANT=os25" >&2
+    if [ "${VARIANT:-os20}" != os20 ]; then
+        echo "mkcard: save-state runtime requires VARIANT=os20" >&2
         exit 1
     fi
-    export VARIANT=os25
+    export VARIANT=os20
     python3 "$(dirname "$0")/runtime-provenance.py" check "$ROOT/runtime/pocket" || exit 1
+else
+    # The template core.json names the release's os20, but an ordinary build
+    # takes os.bin from the plain v0.7 SDK, whose os.bin boot-loops on os20.
+    # Keep that build on its own os25 unless a variant is asked for.
+    export VARIANT="${VARIANT:-os25}"
 fi
 
 first=""

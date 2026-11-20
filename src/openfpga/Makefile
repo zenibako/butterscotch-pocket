@@ -473,7 +473,7 @@ tile-stripes-fixture: $(PC_OBJS)
 writer-draw-fixture: $(PC_OBJS)
 	$(PC_CC) $(ALL_PC_CFLAGS) $(PC_SDL_CFLAGS) -finstrument-functions -fno-inline-functions tests/writer-draw.c $(filter-out $(PC_OBJ_DIR)/main.o $(PC_OBJ_DIR)/up/vm.o $(filter %/src/vm.o,$(PC_OBJS)),$(PC_OBJS)) $(PC_SDL_LIBS) $(PC_EXTRA_CFLAGS) -lm -o $(PC_BIN)_writer_draw_fixture
 
-# Requires an SDK staged with the matching save-state-enabled os25 runtime.
+# Requires an SDK staged with the matching save-state-enabled os20 runtime.
 # Keep this output separate from the ordinary two-game core. Both games share
 # the one core, and the Pocket's sleep switch is per core, so every game built
 # here answers save and load requests (refusing what it cannot restore).

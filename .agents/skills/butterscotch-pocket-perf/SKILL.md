@@ -20,7 +20,8 @@ Ask once only for required information that cannot be established there:
   [zenibako/pocket-dev-tools](https://github.com/zenibako/pocket-dev-tools)
   repository is, as a path or `host:path`. For collector work, resolve the
   checkout through the local router above (including `POCKET_HARNESS_ROOT`).
-  Simulated runs require its separate canonical `os25-harness` skill.
+  Simulated runs require its separate canonical `os25-harness` skill
+  (the skill keeps that name; it also covers os20, see below).
 
 ## Reading a report from the halt-screen QR
 
@@ -243,11 +244,23 @@ uncached". What still holds, whatever the cause:
   back-to-back stores, the clear and fills, are what cost. Don't re-use
   the per-row or 1 us scattered-store figures without an isolated probe.
 
-## Simulated runs: the os25 harness (2026-10-11)
+## Simulated runs: the RTL harness (2026-10-11, os20 2026-11-20)
 
-The user has a cycle-level simulator of the os25 CPU and memory system,
-the os25 harness, in the private repository zenibako/pocket-harness (the
-**harness** input). The Butterscotch workload is its original one, at the
+The user has a cycle-level simulator of the Pocket CPU and memory system
+(historically "the os25 harness") in the private repository
+zenibako/pocket-dev-tools, formerly pocket-harness (the **harness** input).
+Releases ship os20 since butterscotch-pocket#132. The harness's frozen
+default models the older os25; for release questions use the runtime-matched
+models from openfpgaCore 19d9d50 (`--cpu-platform rt-os20`, with `rt-os25`
+as its control) once that option is in the shared checkout. They run the
+fitted CPU netlists, so dual issue, the 64 KB D$ and reduced-accuracy FMA
+are modelled. Measured 2026-11-20 (simulated, 3-frame windows): rt-os20 vs
+rt-os25 was -3.9% UT Flowey, -7.5% DR battle menu, -8.8% DR dodge, against
+device -5.7% UT tour and -4.3%/-5.7% for those DR scenes: Deltarune battles
+come out 2 to 3 points too favourable (no scanout or audio-hardware traffic
+in the model). Output was identical between the two. The QEMU oracle does
+IEEE FMA, so an os20 divergence would show as an oracle failure; compare os20
+RTL against os25 RTL to tell them apart. The Butterscotch workload is its original one, at the
 repository root. Read its `README.md` and its
 `.agents/skills/os25-harness/SKILL.md` before running it. Game data,
 captures and cases stay in its gitignored `inputs/` and `experiments/`;

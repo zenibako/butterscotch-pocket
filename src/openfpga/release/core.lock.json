@@ -13,10 +13,10 @@
   "runtime": {
     "repository": "zenibako/openfpgaCore",
     "commit": "19d9d50ceec15771b16386456c4a3a22c355f0a5",
-    "variant": "os25",
+    "variant": "os20",
     "savestates": true,
     "clock_mhz": 100,
-    "worst_setup_slack_ns": -0.496
+    "worst_setup_slack_ns": -0.597
   },
   "compiler": {
     "ubuntu": "24.04",
@@ -25,9 +25,9 @@
   },
   "sha256": {
     "release/sdk.tar.gz": "c8b3d53a3a6d52551daa1862a27a00793796dbed1dc4be6ef8d0ccc42189a758",
-    "release/runtime/SAVESTATES_RUNTIME.json": "ad07bb46498950b251c841b332959d52b0e9196b5d109cd3ecd3e9d7cd32e833",
+    "release/runtime/SAVESTATES_RUNTIME.json": "d0d13cd259af0b7ad8b7b974a9651420773c79808830f8a34a7a49f6706ddab5",
     "release/runtime/loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99",
     "release/runtime/os.bin": "da2cd963a38ee52460688c975433f55a0a5f84759db5237a583fda6c955c96f3",
-    "release/runtime/os25.rbf_r": "59df24f307692104f4f788af867e6b84bae0095eaf4131380b4d131fb3d0edaf"
+    "release/runtime/os20.rbf_r": "94d3f547d741a6929835e86dc73aa2ff46e069cddfaadb103206df49de5282c4"
   }
 }

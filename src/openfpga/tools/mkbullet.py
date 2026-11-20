@@ -58,7 +58,7 @@ def package(elf: Path, output: Path, version: str, *, flowey_music: str = '') ->
         shortname='BsBullet', description='Undertale Bullet Hell Tour', version=version)
     core['core']['framework']['sleep_supported'] = False
     entries[f'Cores/{CORE_ID}/core.json'] = (json.dumps(core, indent=4) + '\n').encode()
-    for name in ('os25.rbf_r', 'loader.bin'):
+    for name in ('os20.rbf_r', 'loader.bin'):
         entries[f'Cores/{CORE_ID}/{name}'] = (RUNTIME / name).read_bytes()
     for name in ('butterscotch.json', '_images/butterscotch.bin'):
         entries[f'Platforms/{name}'] = (DIST / 'Platforms' / name).read_bytes()
@@ -69,7 +69,7 @@ def package(elf: Path, output: Path, version: str, *, flowey_music: str = '') ->
     for label, mode, arguments in MODES:
         ini = f'bs_bullet_{mode}.ini'
         entries[f'Assets/butterscotch/common/{ini}'] = (
-            f'[os]\nELF=bs_bullet.elf\nARGS={arguments}\nVARIANT=os25\n').encode()
+            f'[os]\nELF=bs_bullet.elf\nARGS={arguments}\nVARIANT=os20\n').encode()
         item = copy.deepcopy(instance)
         for slot in item['instance']['data_slots']:
             number = slot['id']

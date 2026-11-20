@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 REQUIRED_REVISION = '52abf78bde0446bc4af8e23631f41ff950e5a535'
-FILES = ('os.bin', 'os25.rbf_r', 'loader.bin')
+FILES = ('os.bin', 'os20.rbf_r', 'loader.bin')
 MARKER = 'SAVESTATES_RUNTIME.json'
 # Match Pocket firmware compile/link inputs, excluding test fixtures and other
 # targets. Unrelated docs/tools must not require a firmware rebuild.

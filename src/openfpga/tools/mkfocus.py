@@ -20,7 +20,7 @@ def package(elf: Path, template: Path, output: Path):
     for number, (mode, label) in enumerate(MODES, 1):
         ini = 'deltarune_tiles_' + mode.replace('-', '_') + '.ini'
         entries['Assets/butterscotch/common/' + ini] = (
-            f'[os]\nELF=deltarune_tiles.elf\nARGS=--focus-{mode}\nVARIANT=os25\n').encode()
+            f'[os]\nELF=deltarune_tiles.elf\nARGS=--focus-{mode}\nVARIANT=os20\n').encode()
         item = copy.deepcopy(instance)
         slots = item['instance']['data_slots']
         for slot in slots:

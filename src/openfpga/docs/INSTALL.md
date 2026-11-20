@@ -58,8 +58,8 @@ Speed or Accuracy. L is unused. See the
 for detailed controls, debugging and scene-specific save-state support.
 
 Performance varies by scene and some rendering features remain incomplete.
-The pinned release runtime uses an experimental os25 sleep/clock configuration
-at 100 MHz with -0.496 ns worst setup slack in the slow 85°C corner
+The pinned release runtime uses an experimental os20 (dual-issue) save-state configuration
+at 100 MHz with -0.597 ns worst setup slack in the slow 85°C corner
 (the build misses that timing target). Save states and sleep support
 remain experimental. Private Memories from earlier test ELFs may not load with
 public release ELFs because their binary identities differ. Ordinary progress
