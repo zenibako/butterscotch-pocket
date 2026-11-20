@@ -3208,11 +3208,24 @@ RuntimeLayer* Runner_findRuntimeLayerByName(Runner* runner, char* name) {
     return nullptr;
 }
 
+// Layer ids are unique, so the index a search found last time for an id is
+// the answer again for as long as the layer there still has that id. A room
+// with a few dozen layers asks this several times per instance per frame.
+#define RUNTIME_LAYER_HINTS 64
+static struct { int32_t id; uint32_t index; } runtimeLayerHints[RUNTIME_LAYER_HINTS];
+
 RuntimeLayer* Runner_findRuntimeLayerById(Runner* runner, int32_t id) {
     size_t count = arrlenu(runner->runtimeLayers);
+    uint32_t slot = (uint32_t) id & (RUNTIME_LAYER_HINTS - 1);
+    uint32_t hint = runtimeLayerHints[slot].index;
+    if (runtimeLayerHints[slot].id == id && hint < count && (int32_t) runner->runtimeLayers[hint].id == id)
+        return &runner->runtimeLayers[hint];
     repeat(count, i) {
-        if ((int32_t) runner->runtimeLayers[i].id == id)
+        if ((int32_t) runner->runtimeLayers[i].id == id) {
+            runtimeLayerHints[slot].id = id;
+            runtimeLayerHints[slot].index = (uint32_t) i;
             return &runner->runtimeLayers[i];
+        }
     }
     return nullptr;
 }

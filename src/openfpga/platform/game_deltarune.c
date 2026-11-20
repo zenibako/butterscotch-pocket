@@ -36,6 +36,7 @@ static bool isNumber(RValue value) {
 
 #include "game_deltarune_sentry.h"
 #include "game_deltarune_charbox.h"
+#include "game_deltarune_lightfairy.h"
 
 /* gml_Object_obj_purplegrass_Draw_0: the floor of the field, and
  * what is behind its battles. About 11,000 operations a frame for:
@@ -542,12 +543,15 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_darkponman_ow_Step_0", 2236, 0x2e65f505e4e7b03eull, forestSentryStep },
     { "gml_Object_obj_writer_Draw_0", 12780, 0xad8c918f7aad19f8ull, writerDraw },
     { "gml_Object_obj_purplegrass_Draw_0", 348, 0x8cf611b685a27620ull, purpleGrassDraw },
+    { "gml_Object_obj_lightfairy_Step_0", 144, 0x3641253c13a51fc1ull, lightFairyStep },
+    { "gml_Object_obj_lightfairy_Draw_0", 204, 0x542b03812858eb62ull, lightFairyDraw },
 };
 
 static void forgetVm(void) {
     sentryResolved = false;
     writerResolved = 0;
     charboxResolved = 0;
+    lightFairyResolved = false;
     g_spriteMapVar = -1;
 }
 
@@ -593,6 +597,25 @@ static const OfBenchSection g_sections[] = {
     { "battle: menu, attack", 3225, "bmenu", NULL, NULL, NULL },
     { "battle: dodging", 3380, "dodge", NULL, NULL, NULL },
     { "battle: next turn", 3600, "bnext", NULL, NULL, NULL },
+};
+
+/* Room 85 (room_forest_dancers1), past the Bake Sale: about 90 light fairies
+ * (scaled, fading sprites) over the field and 23 scissor dancers sweeping its
+ * paths, 220 instances in all. The run jumps there with Kris and Ralsei,
+ * stands at the entrance while the dancers go by, then walks right to the
+ * first path (taking a dancer's hit there, as players often do). */
+static const char g_roomScript[] = "480:R*60";
+
+static const OfJump g_roomJumps[] = {
+    { 59, -1, "darkzone=1,char[1]=3,char[2]=0,plot=70,interact=0", NULL },
+    { 60, 85, NULL, NULL },
+};
+
+static const OfBenchSection g_roomSections[] = {
+    { "boot", 60, "boot", NULL, NULL, NULL },
+    { "room 85 entry", 180, "entry", "room_forest_dancers1", "obj_scissordancer", NULL },
+    { "standing at the entrance", 480, "stand", "room_forest_dancers1", "obj_scissordancer", NULL },
+    { "walking right", 560, "walk", "room_forest_dancers1", "obj_scissordancer", NULL },
 };
 
 /* The cutscene marker describes player control, not a missing snapshot
@@ -709,6 +732,12 @@ const OfGame ofGame = {
     .benchJumpCount = (int) (sizeof(g_jumps) / sizeof(g_jumps[0])),
     .benchSections = g_sections,
     .benchSectionCount = (int) (sizeof(g_sections) / sizeof(g_sections[0])),
+    .roomTitle = "Deltarune room 85 dancers",
+    .roomScript = g_roomScript,
+    .roomJumps = g_roomJumps,
+    .roomJumpCount = (int) (sizeof(g_roomJumps) / sizeof(g_roomJumps[0])),
+    .roomSections = g_roomSections,
+    .roomSectionCount = (int) (sizeof(g_roomSections) / sizeof(g_roomSections[0])),
     /* The audio pack is about 43 MB against Undertale's 134; the read tests use the same offsets, scaled. */
     .ioDivisor = 3u,
     .ioAsyncBase = 35u,

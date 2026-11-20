@@ -153,13 +153,13 @@ typedef struct {
     int floweySectionCount;
     const OfBenchOpeningWindow *floweyOpening;
     int floweyOpeningCount;
-    /* Optional single-room benchmark: the snow patch in Undertale's room 57. */
-    const char *snowTitle;
-    const char *snowScript;
-    const OfJump *snowJumps;
-    int snowJumpCount;
-    const OfBenchSection *snowSections;
-    int snowSectionCount;
+    /* Optional single-room benchmark ("--bench-room"): Undertale's room 57 snow patch, Deltarune's room 85 dancers. */
+    const char *roomTitle;
+    const char *roomScript;
+    const OfJump *roomJumps;
+    int roomJumpCount;
+    const OfBenchSection *roomSections;
+    int roomSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

@@ -2637,6 +2637,10 @@ static bool SWRenderer_drawSpriteGrid(Renderer* renderer, int32_t spriteIndex, c
 // run reuses its picture; changing its contents or arrangement makes a new one.
 #define SWR_TILE_RUN_MIN_TILES 16
 #define SWR_TILE_RUN_MAX_PIXELS (2 * 1024 * 1024)
+// One run's picture may be bigger, up to a 1680x1568 layer at full size
+// (Deltarune's dancers room), when the heap can spare it beside the
+// texture cache's reserve.
+#define SWR_TILE_RUN_MAX_PIXELS_BIG (3 * 1024 * 1024)
 #define SWR_TILE_RUN_MAX_SIDE 4096
 #define SWR_TILE_RUN_IDLE_FRAMES 300
 
@@ -2739,6 +2743,31 @@ static void swrRunClassify(SWTileRun* run)
             run->blocks[by * blocksX + bx] = opaque == 0 ? SWR_BLOCK_EMPTY : (opaque == total && whole) ? SWR_BLOCK_SOLID : SWR_BLOCK_MIXED;
         }
     }
+}
+
+#ifdef TEXTURE_CACHE_RESERVE_BYTES
+extern int platformHeapCanReserve(size_t bytes);
+#endif
+
+// Whether a picture this big may be built: always up to SWR_TILE_RUN_MAX_PIXELS,
+// beyond that only when the texture cache's reserve would still be free after it.
+static bool swrRunFits(int width, int height)
+{
+    if (width * height <= SWR_TILE_RUN_MAX_PIXELS) return true;
+    if (width * height > SWR_TILE_RUN_MAX_PIXELS_BIG) return false;
+#ifdef TEXTURE_CACHE_RESERVE_BYTES
+    size_t bytes = (size_t) width * height * sizeof(uintpixel_t) + TEXTURE_CACHE_RESERVE_BYTES;
+#if defined(OF_NATIVE_SAVESTATES) && !defined(OF_PC)
+    return platformHeapCanReserve(bytes) > 0;
+#else
+    void* probe = malloc(bytes);
+    if (probe == NULL) return false;
+    free(probe);
+    return true;
+#endif
+#else
+    return true;
+#endif
 }
 
 // Allocates a picture's pixels (cleared) and block marks in one piece.
@@ -3268,7 +3297,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     top = swrFloorToStep(top, SWR_TILE_RUN_BLOCK << shift);
     int width = (right - left + shift) >> shift, height = (bottom - top + shift) >> shift;
     if (width <= 0 || height <= 0 || width > SWR_TILE_RUN_MAX_SIDE || height > SWR_TILE_RUN_MAX_SIDE) return false;
-    if (width * height > SWR_TILE_RUN_MAX_PIXELS) return false;
+    if (width * height > SWR_TILE_RUN_MAX_PIXELS_BIG) return false;
     
     // Find the picture, or the entry to build it in: a free one, else the one unused for longest.
     SWTileRun* run = NULL;
@@ -3307,7 +3336,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         swrGridFlush(swr);
         free(spare->pixels);
         spare->pixels = NULL;
-        if (!swrRunAllocate(spare, width, height)) return false;
+        if (!swrRunFits(width, height) || !swrRunAllocate(spare, width, height)) return false;
         run = spare;
         run->key = key;
         run->x = left >> shift; run->y = top >> shift;

@@ -26,8 +26,9 @@ bool ofBenchStartBulletTour(bool livePacing);
 bool ofBenchStartChaosSaber(void);
 /* The game's Flowey checkpoint tour, optionally with normal gameplay pacing. */
 bool ofBenchStartFloweyTour(bool livePacing);
-/* "--bench-snow": the game's single-room snow patch benchmark, if available. */
-bool ofBenchStartSnow(void);
+/* "--bench-room" (or "--bench-snow"): the game's single-room benchmark, if it has one: Undertale's
+ * room 57 snow patch, Deltarune's room 85 dancers. */
+bool ofBenchStartRoom(void);
 bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
