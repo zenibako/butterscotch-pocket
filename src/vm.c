@@ -272,6 +272,11 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
     return arr;
 }
 
+// VM_arraySetWithCoW for native stand-ins, which set ctx->currentArrayOwner as the bytecode's setowner would first.
+GMLArray* VM_arraySet(VMContext* ctx, RValue* slot, int32_t index, RValue val) {
+    return VM_arraySetWithCoW(ctx, slot, index, val);
+}
+
 // Creates a copy of "name"
 int32_t VM_getOrAllocateVarID(VMContext* ctx, const char* name) {
     ptrdiff_t slot = shgeti(ctx->varNameMap, name);

@@ -55,12 +55,17 @@ static int dancerCompare(VMContext *ctx, GMLReal a, GMLReal b) {
 /* OP_ADD, OP_SUB and OP_MUL on an INT32 or REAL and an INT32 or REAL:
  * whole numbers stay whole, anything else is one GMLReal operation. */
 static RValue dancerArith(char op, RValue a, RValue b) {
-    if (a.type == RVALUE_INT32 && b.type == RVALUE_INT32)
-        return RValue_makeInt32(op == '+' ? a.int32 + b.int32 : op == '-' ? a.int32 - b.int32 : a.int32 * b.int32);
-    GMLReal x = (a.type == RVALUE_INT32 || a.type == RVALUE_REAL) ? dancerReal(a) : RValue_toReal(a);
-    GMLReal y = (b.type == RVALUE_INT32 || b.type == RVALUE_REAL) ? dancerReal(b) : RValue_toReal(b);
-    volatile GMLReal result = op == '+' ? x + y : op == '-' ? x - y : x * y;
-    return RValue_makeReal(result);
+    RValue result;
+    if (a.type == RVALUE_INT32 && b.type == RVALUE_INT32) {
+        result = RValue_makeInt32(op == '+' ? a.int32 + b.int32 : op == '-' ? a.int32 - b.int32 : a.int32 * b.int32);
+    } else {
+        GMLReal x = (a.type == RVALUE_INT32 || a.type == RVALUE_REAL) ? dancerReal(a) : RValue_toReal(a);
+        GMLReal y = (b.type == RVALUE_INT32 || b.type == RVALUE_REAL) ? dancerReal(b) : RValue_toReal(b);
+        volatile GMLReal real = op == '+' ? x + y : op == '-' ? x - y : x * y;
+        result = RValue_makeReal(real);
+    }
+    result.gmlStackType = GML_TYPE_VARIABLE; /* every one of these is an <op>.x.v */
+    return result;
 }
 
 static RValue dancerGet(VMContext *ctx, Instance *inst, int16_t id, const char *name) {
