@@ -21,6 +21,9 @@ static void swrFlushPendingClear(SWRenderer* swr);
 static int swrPendingCount = 0; // tile pictures being held (see the tile run cache)
 static SWRenderer* swrPendingOwner = NULL;
 static unsigned swrTileRunReaders; // grid replay can request texture-memory eviction
+// A translucent fill of the whole screen that the held pictures are drawn
+// through as they come out (see SWRenderer_drawRectangle); 0 if none.
+static uint32_t swrPendingTint = 0;
 
 // ===[ Call notes ]===
 // See sw_call_notes.h.
@@ -960,6 +963,23 @@ static void SWRenderer_drawSpritePos(Renderer* renderer, int32_t tpagIndex,
     SWRenderer_drawSprite(renderer, tpagIndex, x1, y1, 0.0f, 0.0f, ascalex, ascaley, 0.0f, renderer->drawColor, alpha);
 }
 
+// A held fill can be worked into the tile pictures only where the premultiplied blend exists.
+MAYBE_UNUSED static bool swrTintFoldable(void)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    return true;
+#else
+    return false;
+#endif
+}
+
+MAYBE_UNUSED static bool swrPendingTintOff(void)
+{
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_TINT_FOLD") != NULL;
+    return off != 0;
+}
+
 static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, float x2, float y2,
                                      uint32_t color, float alpha, bool outline)
 {
@@ -996,6 +1016,20 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
     if (!outline && nothingHeld && swr->clearHeld && swr->tiledHeldCount > 0 && swrPendingCount == 0 && !swrGridHeld() &&
         swr->fb == swr->mainFb && swr->fbPitch == swr->mainWidth && swr->blendMode == bm_normal &&
         swrIntAlpha(alpha) <= 253 && swrFillCoversWhole(swr, x1, y1, x2, y2) && swrFillHold(swr, pxcolor, swrIntAlpha(alpha))) {
+        swr->uniformValid = false;
+        return;
+    }
+    // The same over a held clear and tile pictures (Deltarune's darkened
+    // forest): the pictures come out through it, so the screen is gone over
+    // once. Each pixel is blended as the fill would blend it.
+    if (!outline && nothingHeld && swr->clearHeld && swr->tiledHeldCount == 0 && swrPendingCount > 0 && !swrGridHeld() &&
+        swr->fb == swr->mainFb && swr->fbPitch == swr->mainWidth && swr->blendMode == bm_normal &&
+        swrIsPartialAlpha(swrIntAlpha(alpha)) && swrTintFoldable() && !swrPendingTintOff() &&
+        swr->portX == 0 && swr->portY == 0 && swr->maxX == swr->mainWidth && swr->maxY == swr->mainHeight &&
+        swrFillCoversWhole(swr, x1, y1, x2, y2)) {
+        swrPendingTint = (uint32_t) pxcolor | (uint32_t) swrIntAlpha(alpha) << 16;
+        swrTileRunsFlush(swr);
+        swrPendingTint = 0;
         swr->uniformValid = false;
         return;
     }
@@ -2636,6 +2670,9 @@ static bool SWRenderer_drawSpriteGrid(Renderer* renderer, int32_t spriteIndex, c
 // The key describes tile appearance and relative positions. Moving a whole
 // run reuses its picture; changing its contents or arrangement makes a new one.
 #define SWR_TILE_RUN_MIN_TILES 16
+// A shorter run over pictures being held joins them rather than letting them
+// out, when an entry is free for it (it never pushes out another picture).
+#define SWR_TILE_RUN_MIN_TILES_HELD 8
 #define SWR_TILE_RUN_MAX_PIXELS (2 * 1024 * 1024)
 // One run's picture may be bigger, up to a 1680x1568 layer at full size
 // (Deltarune's dancers room), when the heap can spare it beside the
@@ -2663,6 +2700,7 @@ typedef struct {
     int anchorX, anchorY;   // first tile's origin when built, in picture units
     int shift;
     uint32_t lastUsedFrame;
+    uint32_t tint;          // a flattened picture's opaque pixels can have a fill worked in (swrPendingTint)
 } SWTileRun;
 
 static SWTileRun swrTileRuns[SWR_TILE_RUN_ENTRIES];
@@ -2880,9 +2918,10 @@ static void swrRunsDrawOnto(SWTileRun* const* runs, int count, uintpixel_t* pixe
 
 // The pictures being held flattened into one, or NULL: when they have not
 // been held together before, are too big together, or there is no room.
-static SWTileRun* swrPendingFlattened(SWRenderer* swr)
+static SWTileRun* swrPendingFlattened(SWRenderer* swr, uint32_t tint)
 {
     uint64_t key = BS_FNV64_OFFSET;
+    key = swrTileRunHash(key, &tint, sizeof(tint));
     int left = INT32_MAX, top = INT32_MAX, right = INT32_MIN, bottom = INT32_MIN;
     for (int i = 0; i < swrPendingCount; i++) {
         const SWTileRun* run = swrPendingRuns[i];
@@ -2895,7 +2934,7 @@ static SWTileRun* swrPendingFlattened(SWRenderer* swr)
         if (run->y + run->height > bottom) bottom = run->y + run->height;
     }
     int width = right - left, height = bottom - top;
-    if (width > SWR_TILE_RUN_MAX_SIDE || height > SWR_TILE_RUN_MAX_SIDE || width * height > SWR_TILE_RUN_MAX_PIXELS) return NULL;
+    if (width > SWR_TILE_RUN_MAX_SIDE || height > SWR_TILE_RUN_MAX_SIDE || width * height > SWR_TILE_RUN_MAX_PIXELS_BIG) return NULL;
     
     SWTileRun* spare = NULL;
     for (int e = 0; e < SWR_TILE_FLAT_ENTRIES; e++)
@@ -2907,10 +2946,22 @@ static SWTileRun* swrPendingFlattened(SWRenderer* swr)
             entry->lastUsedFrame = swr->frameCounter;
             if (entry->pixels != NULL) return entry;
             // Seen a moment ago too: worth a picture of its own.
-            if (!swrRunAllocate(entry, width, height)) return NULL;
+            if (!swrRunFits(width, height) || !swrRunAllocate(entry, width, height)) return NULL;
             entry->x = left; entry->y = top;
             entry->shift = swrPendingRuns[0]->shift;
             swrRunsDrawOnto(swrPendingRuns, swrPendingCount, entry->pixels, width, left, top, width, height, NULL, false);
+            entry->tint = tint;
+#ifdef SW_HAS_PREMUL_BLEND
+            if (tint != 0) {
+                // Only the pixels with something in them: the gaps still show what is under the picture.
+                uint32_t alpha = tint >> 16;
+                uintpixel_t color = (uintpixel_t) (tint & 0xffff);
+                uint32_t srcRedBlue = swrSpreadRedBlue(color) * alpha, srcGreen = swrGreen(color) * alpha, dstalpha = 256 - alpha;
+                for (size_t i = 0, n = (size_t) width * height; i < n; i++)
+                    if (swrIsOpaque(entry->pixels[i]))
+                        entry->pixels[i] = swrBlendPremultiplied(entry->pixels[i], srcRedBlue, srcGreen, dstalpha);
+            }
+#endif
             swrRunClassify(entry);
             return entry;
         }
@@ -2924,6 +2975,35 @@ static SWTileRun* swrPendingFlattened(SWRenderer* swr)
         spare->lastUsedFrame = swr->frameCounter;
     }
     return NULL;
+}
+
+// Works a held translucent fill (swrPendingTint) into rows just drawn, as swrDrawHLineInt would over them.
+// A tint is only ever held where swrTintFoldable().
+static void swrTintRows(uintpixel_t* pixels, int pitch, int width, int height, uint32_t tint)
+{
+#ifdef SW_HAS_PREMUL_BLEND
+    uint32_t alpha = tint >> 16;
+    uintpixel_t color = (uintpixel_t) (tint & 0xffff);
+    uint32_t srcRedBlue = swrSpreadRedBlue(color) * alpha, srcGreen = swrGreen(color) * alpha, dstalpha = 256 - alpha;
+    for (int y = 0; y < height; y++)
+        swrBlendSolidRow(&pixels[y * pitch], (size_t) width, srcRedBlue, srcGreen, dstalpha);
+#else
+    (void) pixels; (void) pitch; (void) width; (void) height; (void) tint;
+#endif
+}
+
+// swrRunsDrawOnto, then the tint if there is one, a band of rows at a time while the band is still in the cache.
+static void swrRunsDrawTinted(SWTileRun* const* runs, int count, uintpixel_t* pixels, int pitch, int left, int top, int width, int height, const uintpixel_t* under, uint32_t tint)
+{
+    if (tint == 0) {
+        swrRunsDrawOnto(runs, count, pixels, pitch, left, top, width, height, under, false);
+        return;
+    }
+    for (int y = 0; y < height; y += SWR_TILE_RUN_BLOCK) {
+        int h = swrMin(height - y, SWR_TILE_RUN_BLOCK);
+        swrRunsDrawOnto(runs, count, pixels + y * pitch, pitch, left, top + y, width, h, under, false);
+        swrTintRows(pixels + y * pitch, pitch, width, h, tint);
+    }
 }
 
 static bool swrTilePictureCanKeep(SWRenderer* swr, int width, int height, int shift)
@@ -2942,7 +3022,9 @@ static bool swrTilePictureCanKeep(SWRenderer* swr, int width, int height, int sh
                     swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
     SWTilePictureView* previous = &swr->tilePictureView;
     if (!eligible) {
-        previous->width = 0;
+        // Pictures drawn later in the frame, over what the clear's pictures
+        // left (the dancers room's trees), are only marked dirty over them.
+        if (swr->clearHeld || off) previous->width = 0;
         return false;
     }
 
@@ -2964,7 +3046,8 @@ static bool swrTilePictureCanKeep(SWRenderer* swr, int width, int height, int sh
 
 static bool swrTilePictureMatches(const SWTilePictureKey* key, const SWTilePictureKey* prior)
 {
-    if (key->count != prior->count || key->left != prior->left || key->top != prior->top || key->clear != prior->clear)
+    if (key->count != prior->count || key->left != prior->left || key->top != prior->top || key->clear != prior->clear ||
+        key->tint != prior->tint)
         return false;
     for (int i = 0; i < key->count; i++)
         if (key->serials[i] != prior->serials[i] || key->x[i] != prior->x[i] || key->y[i] != prior->y[i])
@@ -2972,7 +3055,7 @@ static bool swrTilePictureMatches(const SWTilePictureKey* key, const SWTilePictu
     return true;
 }
 
-static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, uintpixel_t clear)
+static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, uintpixel_t clear, uint32_t tint, uint32_t keyTint)
 {
     SWDirtyBuffer* d = swr->dirty;
     int width = d->width, height = d->height;
@@ -2982,6 +3065,7 @@ static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int coun
     key.top = top;
     key.count = swrPendingCount;
     key.clear = clear;
+    key.tint = keyTint;
     for (int i = 0; i < swrPendingCount; i++) {
         const SWTileRun* run = swrPendingRuns[i];
         key.serials[i] = run->serial;
@@ -3008,8 +3092,8 @@ static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int coun
                 bits &= c1 >= 32 ? 0 : ~((1u << c1) - 1);
                 int x = c0 << SWR_DIRTY_TILE_W_SHIFT;
                 int end = swrMin(width, c1 << SWR_DIRTY_TILE_W_SHIFT);
-                swrRunsDrawOnto(runs, count, swr->mainFb + y * width + x, width,
-                                left + x, top + y, end - x, h, &clear, false);
+                swrRunsDrawTinted(runs, count, swr->mainFb + y * width + x, width,
+                                  left + x, top + y, end - x, h, &clear, tint);
             }
         }
 #ifdef OF_PC
@@ -3019,14 +3103,14 @@ static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int coun
             size_t bytes = (size_t) width * height * sizeof(uintpixel_t);
             uintpixel_t* fresh = malloc(bytes);
             require(fresh != NULL);
-            swrRunsDrawOnto(swrPendingRuns, swrPendingCount, fresh, width, left, top, width, height, &clear, false);
+            swrRunsDrawTinted(runs, count, fresh, width, left, top, width, height, &clear, tint);
             require(memcmp(swr->mainFb, fresh, bytes) == 0);
             free(fresh);
             logInfo("swr: tile picture kept and checked at frame %u, view %d,%d\n", swr->frameCounter, left, top);
         }
 #endif
     } else {
-        swrRunsDrawOnto(runs, count, swr->mainFb, width, left, top, width, height, &clear, false);
+        swrRunsDrawTinted(runs, count, swr->mainFb, width, left, top, width, height, &clear, tint);
     }
 
     // Later draws dirty this picture. The clear-colour and first-sprite
@@ -3037,6 +3121,29 @@ static void swrTilePictureDraw(SWRenderer* swr, SWTileRun* const* runs, int coun
     memset(d->rows, 0, sizeof(d->rows));
     memset(d->baseRows, 0, sizeof(d->baseRows));
     swr->dirtyMark = d;
+}
+
+// Marks the blocks of the port that the pictures have anything in.
+static void swrRunsMarkDirty(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, int width, int height)
+{
+    for (int i = 0; i < count; i++) {
+        const SWTileRun* run = runs[i];
+        int x0 = swrMax(left, run->x), y0 = swrMax(top, run->y);
+        int x1 = swrMin(left + width, run->x + run->width), y1 = swrMin(top + height, run->y + run->height);
+        if (x0 >= x1 || y0 >= y1) continue;
+        // Blocks are SWR_TILE_RUN_BLOCK from the picture's corner.
+        for (int by = run->y + swrFloorToStep(y0 - run->y, SWR_TILE_RUN_BLOCK); by < y1; by += SWR_TILE_RUN_BLOCK) {
+            int bx = run->x + swrFloorToStep(x0 - run->x, SWR_TILE_RUN_BLOCK);
+            while (bx < x1) {
+                if (swrRunBlockKind(run, bx, by) == SWR_BLOCK_EMPTY) { bx += SWR_TILE_RUN_BLOCK; continue; }
+                int start = bx;
+                while (bx < x1 && swrRunBlockKind(run, bx, by) != SWR_BLOCK_EMPTY) bx += SWR_TILE_RUN_BLOCK;
+                int sx0 = swrMax(start, x0), sx1 = swrMin(bx, x1);
+                int sy0 = swrMax(by, y0), sy1 = swrMin(by + SWR_TILE_RUN_BLOCK, y1);
+                swrDirtyRect(swr, swr->portX + sx0 - left, swr->portY + sy0 - top, swr->portX + sx1 - left, swr->portY + sy1 - top);
+            }
+        }
+    }
 }
 
 static void swrTileRunsDrawPending(SWRenderer* swr)
@@ -3051,7 +3158,14 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
     uintpixel_t* target = &swr->fb[swr->portY * swr->fbPitch + swr->portX];
     int width = swr->maxX - swr->portX, height = swr->maxY - swr->portY;
     bool canKeep = swrTilePictureCanKeep(swr, width, height, shift);
-    if (!canKeep) swrDirtyRect(swr, swr->portX, swr->portY, swr->maxX, swr->maxY);
+    if (!canKeep) {
+        // Pictures over what is there already write only where they have
+        // something; a kept picture under them is then redrawn only there.
+        if (!swr->clearHeld && swrGrid.count == 0 && swr->dirtyMark != NULL && swr->fb == swr->mainFb)
+            swrRunsMarkDirty(swr, swrPendingRuns, swrPendingCount, left, top, width, height);
+        else
+            swrDirtyRect(swr, swr->portX, swr->portY, swr->maxX, swr->maxY);
+    }
 
     // A clear still held goes under the pictures if they are drawn over the
     // whole of what it clears; they then write its colour only in their gaps.
@@ -3077,16 +3191,31 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
         swrPendingCount = count;
     }
     
+    // A tint is only taken over a held clear with no grid (SWRenderer_drawRectangle), so it covers everything drawn here.
+    uint32_t tint = swrPendingTint, keyTint = tint;
+    swrPendingTint = 0;
+    if (under == NULL) tint = 0; // (not reached: kept for safety)
     SWTileRun* flat;
-    SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr) : NULL);
+    SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr, tint) : NULL);
     SWR_NOTE_START(copyNote);
     SWTileRun* const one[1] = { flat };
     SWTileRun* const* runs = flat != NULL ? one : swrPendingRuns;
     int count = flat != NULL ? 1 : swrPendingCount;
+    // A flattened picture has the tint worked in already; its gaps show the clear with the tint over it.
+#ifdef SW_HAS_PREMUL_BLEND
+    uintpixel_t tintedUnder;
+    if (flat != NULL && tint != 0) {
+        uint32_t alpha = tint >> 16;
+        uintpixel_t color = (uintpixel_t) (tint & 0xffff);
+        tintedUnder = swrBlendPremultiplied(*under, swrSpreadRedBlue(color) * alpha, swrGreen(color) * alpha, 256 - alpha);
+        under = &tintedUnder;
+        tint = 0;
+    }
+#endif
     if (canKeep)
-        swrTilePictureDraw(swr, runs, count, left, top, *under);
+        swrTilePictureDraw(swr, runs, count, left, top, *under, tint, keyTint);
     else
-        swrRunsDrawOnto(runs, count, target, swr->fbPitch, left, top, width, height, under, false);
+        swrRunsDrawTinted(runs, count, target, swr->fbPitch, left, top, width, height, under, tint);
     SWR_NOTE_END(copyNote, "  of which: tile pictures copied");
     
     // Grids held over the pictures come last.
@@ -3264,6 +3393,13 @@ static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile
 }
 #endif
 
+MAYBE_UNUSED static bool swrSmallRunsOff(void)
+{
+    static int off = -1;
+    if (off < 0) off = getenv("BS_NO_SMALL_TILE_RUNS") != NULL;
+    return off != 0;
+}
+
 // Draws the run from its cached picture, building it first if need be. Returns false if the run cannot be drawn that way.
 static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const float* offsets, int32_t count)
 {
@@ -3275,7 +3411,8 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     // The picture holds no partial coverage, so it can only stand in for
     // tiles drawn opaque and with normal blending, and at the room's own
     // size or at half of it.
-    if (count < SWR_TILE_RUN_MIN_TILES) return false;
+    bool small = count < SWR_TILE_RUN_MIN_TILES;
+    if (small && (count < SWR_TILE_RUN_MIN_TILES_HELD || swrPendingCount == 0 || swrSmallRunsOff())) return false;
     if (swr->drawingToSurface || swr->blendMode != bm_normal) return false;
     int shift;
     if (swr->scaleX == 1.0f && swr->scaleY == 1.0f) shift = 0;
@@ -3328,6 +3465,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     {
         // An entry used this frame belongs to another run of the room being drawn; leave it be.
         if (spare->pixels != NULL && spare->lastUsedFrame == swr->frameCounter) return false;
+        if (small && spare->pixels != NULL) return false;
         
         // Pictures being held belong on the screen, and would come out into the
         // new one once the tiles below start drawing: let them out first. That

@@ -470,6 +470,73 @@ MAYBE_UNUSED static uint32_t swrCopyBackdropRuns(uintpixel_t* dst, const uintpix
     return wrote;
 }
 
+#ifdef SW_HAS_PREMUL_BLEND
+// A long row of one translucent colour: each channel's result depends only on
+// that channel of the pixel under it, so tables of the results for blue and
+// green together (the low 10 bits) and for red stand in for the three
+// multiplies per pixel. They hold exactly swrBlendPremultiplied's values and
+// are kept for as long as the colour and alpha stay the same: a fade or a
+// darkened screen fills hundreds of rows with them.
+static uint16_t swrSolidLow[1024], swrSolidHigh[32];
+static uint32_t swrSolidKey[3] = { ~0u, ~0u, ~0u };
+
+static void swrBlendSolidRowTable(uintpixel_t* line, size_t count, uint32_t srcRedBlue, uint32_t srcGreen, uint32_t dstalpha)
+{
+    if (swrSolidKey[0] != srcRedBlue || swrSolidKey[1] != srcGreen || swrSolidKey[2] != dstalpha) {
+        uint32_t srcRed = srcRedBlue >> 16, srcBlue = srcRedBlue & 0xffffu;
+        uint16_t blues[32], greens[32];
+        for (uint32_t c = 0; c < 32; c++) {
+            blues[c] = (uint16_t) (((c * dstalpha + srcBlue) >> 8) & 0x1f);
+            greens[c] = (uint16_t) ((((c * dstalpha + srcGreen) >> 8) & 0x1f) << 5);
+            swrSolidHigh[c] = (uint16_t) (0x8000u | ((((c * dstalpha + srcRed) >> 8) & 0x1f) << 10));
+        }
+        for (uint32_t g = 0; g < 32; g++)
+            for (uint32_t b = 0; b < 32; b++)
+                swrSolidLow[(g << 5) | b] = (uint16_t) (greens[g] | blues[b]);
+        swrSolidKey[0] = srcRedBlue; swrSolidKey[1] = srcGreen; swrSolidKey[2] = dstalpha;
+    }
+    const uint16_t* low = swrSolidLow;
+    const uint16_t* high = swrSolidHigh;
+    if ((uintptr_t) line & 3) {
+        uintpixel_t under = *line;
+        uintpixel_t result = (uintpixel_t) (low[under & 0x3ff] | high[(under >> 10) & 0x1f]);
+        if (result != under) *line = result;
+        line++;
+        count--;
+    }
+    // Word access: the row is aligned from here (see swrBlendSolidRow).
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_assume_aligned)
+    line = (uintpixel_t*) __builtin_assume_aligned(line, 4);
+#endif
+#elif defined(__GNUC__)
+    line = (uintpixel_t*) __builtin_assume_aligned(line, 4);
+#endif
+    uint32_t lastUnder = 0, lastResult = 0;
+    if (count >= 2) {
+        memcpy(&lastUnder, line, sizeof(lastUnder));
+        lastUnder = ~lastUnder;
+    }
+    while (count >= 2) {
+        uint32_t under;
+        memcpy(&under, line, sizeof(under));
+        if (under != lastUnder) {
+            lastUnder = under;
+            lastResult = (uint32_t) (low[under & 0x3ff] | high[(under >> 10) & 0x1f]) |
+                         ((uint32_t) (low[(under >> 16) & 0x3ff] | high[(under >> 26) & 0x1f]) << 16);
+        }
+        if (lastResult != under) memcpy(line, &lastResult, sizeof(lastResult));
+        line += 2;
+        count -= 2;
+    }
+    if (count) {
+        uintpixel_t under = *line;
+        uintpixel_t result = (uintpixel_t) (low[under & 0x3ff] | high[(under >> 10) & 0x1f]);
+        if (result != under) *line = result;
+    }
+}
+#endif
+
 static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixel_t color, UNUSED uintpixel_t color2, int alpha)
 {
     SWRenderer *swr = (SWRenderer*) renderer;
@@ -496,7 +563,11 @@ static void swrDrawHLineInt(Renderer* renderer, int dx, int dy, int dw, uintpixe
             // under it, so it is worked out again only when that changes, and
             // written only when it differs. A fade to black over a screen
             // that is mostly black already then mostly just reads.
-            swrBlendSolidRow(line, (size_t) dw, srcRedBlue, srcGreen, dstalpha);
+            // Half black has a cheaper path of its own in swrBlendSolidRow.
+            if (dw >= 64 && !(dstalpha == 128 && (srcRedBlue | srcGreen) == 0))
+                swrBlendSolidRowTable(line, (size_t) dw, srcRedBlue, srcGreen, dstalpha);
+            else
+                swrBlendSolidRow(line, (size_t) dw, srcRedBlue, srcGreen, dstalpha);
             return;
         }
 #endif
