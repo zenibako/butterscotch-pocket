@@ -52,6 +52,13 @@ struct Instance {
     uint32_t collisionGridGenerationLow, collisionGridGenerationHigh;
     uint32_t collisionCellCount, collisionCellsTrusted;
     uint32_t lastCollisionQueryId;
+    /* Draw-list rebuild scratch (runner.c), also omitted from snapshots:
+     * the instance's first index in its layer's elements, and its place in
+     * the list last sorted, each valid while its stamp matches. */
+    int32_t elementPlace;
+    uint32_t elementPlaceStamp;
+    int32_t drawRank;
+    uint32_t drawRankStamp;
     struct {
         InstanceBBox bbox;
         float x, y, xscale, yscale;

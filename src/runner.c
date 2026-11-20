@@ -798,6 +798,120 @@ void Runner_drawTileLayer(Runner* runner, RoomLayerTilesData* data, float layerO
     }
 }
 
+// Sorts drawables as qsort with compareDrawables would (a stable merge
+// sort, top down, halves of n/2 and n - n/2, as glibc's), with each key
+// worked out once rather than at every comparison. Depth layers made and
+// merged as instances change depth rebuild the list every frame in busy
+// rooms (Deltarune's dancers room has some 260 drawables).
+static void mergeSortDrawKeys(int32_t* idx, int32_t* tmp, size_t n, const DrawKey* keys) {
+    if (n <= 1) return;
+    size_t n1 = n / 2, n2 = n - n1;
+    int32_t* b1 = idx;
+    int32_t* b2 = idx + n1;
+    mergeSortDrawKeys(b1, tmp, n1, keys);
+    mergeSortDrawKeys(b2, tmp, n2, keys);
+    int32_t* out = tmp;
+    while (n1 > 0 && n2 > 0) {
+        if (compareDrawKeys(&keys[*b1], &keys[*b2]) <= 0) { *out++ = *b1++; n1--; }
+        else { *out++ = *b2++; n2--; }
+    }
+    if (n1 > 0) memcpy(out, b1, n1 * sizeof(int32_t));
+    memcpy(idx, tmp, (n - n2) * sizeof(int32_t));
+}
+
+// The list rebuilt every frame comes out nearly as it was last time. Put
+// in last time's order (the same instances and layers keep their places,
+// new ones go last), an insertion sort has little left to do. The order is
+// total (instance and layer IDs are unique), so any sort gives this result.
+static uint32_t drawRankStamp = 1;
+static struct { int32_t id, rank; } *layerRanks = nullptr; // stb array
+static uint32_t layerRanksStamp = 0;
+
+static bool sortDrawablesFromLastOrder(Drawable* drawables, int32_t count, Drawable* scratch, int32_t* slot, int32_t* fresh) {
+    enum { maxShifts = 4096 };
+    // slot[rank] = index into drawables, or -1; fresh[] the new ones, in list order.
+    repeat(count, i) slot[i] = -1;
+    int32_t freshCount = 0;
+    repeat(count, i) {
+        Drawable* d = &drawables[i];
+        int32_t rank = -1;
+        if (d->type == DRAWABLE_INSTANCE && d->instance->drawRankStamp == drawRankStamp) {
+            rank = d->instance->drawRank;
+        } else if (d->type == DRAWABLE_LAYER && layerRanksStamp == drawRankStamp) {
+            repeat(arrlen(layerRanks), k) if (layerRanks[k].id == d->runtimeLayerId) { rank = layerRanks[k].rank; break; }
+        }
+        if (rank >= 0 && rank < count && slot[rank] == -1) slot[rank] = i;
+        else fresh[freshCount++] = i;
+    }
+    int32_t n = 0;
+    repeat(count, r) if (slot[r] >= 0) scratch[n++] = drawables[slot[r]];
+    repeat(freshCount, f) scratch[n++] = drawables[fresh[f]];
+    int32_t shifts = 0;
+    for (int32_t i = 1; i < count; i++) {
+        Drawable current = scratch[i];
+        DrawKey key = drawableKey(&current);
+        int32_t j = i;
+        while (j > 0) {
+            DrawKey prior = drawableKey(&scratch[j - 1]);
+            if (compareDrawKeys(&prior, &key) <= 0) break;
+            scratch[j] = scratch[j - 1];
+            j--;
+            if (++shifts > maxShifts) return false;
+        }
+        scratch[j] = current;
+    }
+    memcpy(drawables, scratch, (size_t) count * sizeof(Drawable));
+    return true;
+}
+
+static void recordDrawRanks(Drawable* drawables, int32_t count) {
+    if (++drawRankStamp == 0) drawRankStamp = 1;
+    arrsetlen(layerRanks, 0);
+    repeat(count, i) {
+        Drawable* d = &drawables[i];
+        if (d->type == DRAWABLE_INSTANCE) {
+            d->instance->drawRank = i;
+            d->instance->drawRankStamp = drawRankStamp;
+        } else if (d->type == DRAWABLE_LAYER) {
+            arraddnptr(layerRanks, 1);
+            arrlast(layerRanks).id = d->runtimeLayerId;
+            arrlast(layerRanks).rank = i;
+        }
+    }
+    layerRanksStamp = drawRankStamp;
+}
+
+static void sortDrawables(Drawable* drawables, int32_t count) {
+    static DrawKey* keys = nullptr;
+    static int32_t* order = nullptr;
+    static Drawable* copy = nullptr;
+    static int32_t capacity = 0;
+    if (count > capacity) {
+        int32_t grown = count + count / 2 + 16;
+        DrawKey* k = realloc(keys, (size_t) grown * sizeof(DrawKey));
+        if (k != nullptr) keys = k;
+        int32_t* o = k != nullptr ? realloc(order, (size_t) grown * 2 * sizeof(int32_t)) : nullptr;
+        if (o != nullptr) order = o;
+        Drawable* c = o != nullptr ? realloc(copy, (size_t) grown * sizeof(Drawable)) : nullptr;
+        if (c != nullptr) copy = c;
+        if (c == nullptr) {
+            qsort(drawables, count, sizeof(Drawable), compareDrawables);
+            return;
+        }
+        capacity = grown;
+    }
+    if (!sortDrawablesFromLastOrder(drawables, count, copy, order, order + capacity)) {
+        repeat(count, i) {
+            keys[i] = drawableKey(&drawables[i]);
+            order[i] = i;
+        }
+        mergeSortDrawKeys(order, order + capacity, (size_t) count, keys);
+        memcpy(copy, drawables, (size_t) count * sizeof(Drawable));
+        repeat(count, i) drawables[i] = copy[order[i]];
+    }
+    recordDrawRanks(drawables, count);
+}
+
 static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
     for (int32_t i = 1; count > i; i++) {
         DrawKey drawKey1 = drawableKey(&drawables[i - 1]);
@@ -808,6 +922,9 @@ static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
     return true;
 }
 
+static uint32_t elementPlaceStamp;
+static bool elementPlacesGathered = false;
+
 static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
     if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) return;
     if (d->type != DRAWABLE_INSTANCE && d->type != DRAWABLE_LAYER) return;
@@ -817,7 +934,13 @@ static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
     d->layerOrder = layer == nullptr ? 0 : layer->drawOrder;
     if (layer == nullptr) return;
     d->elementOrder = -1;
-    if (d->type == DRAWABLE_INSTANCE) {
+    if (d->type == DRAWABLE_INSTANCE && elementPlacesGathered) {
+        int32_t place = d->instance->elementPlace;
+        if (d->instance->elementPlaceStamp == elementPlaceStamp && place >= 0 && place < (int32_t) arrlen(layer->elements) &&
+            layer->elements[place].type == RuntimeLayerElementType_Instance &&
+            (uint32_t) layer->elements[place].instanceId == d->instance->instanceId)
+            d->elementOrder = place;
+    } else if (d->type == DRAWABLE_INSTANCE) {
         repeat(arrlen(layer->elements), i) {
             RuntimeLayerElement* el = &layer->elements[i];
             if (el->type == RuntimeLayerElementType_Instance && (uint32_t) el->instanceId == d->instance->instanceId) {
@@ -826,6 +949,52 @@ static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
             }
         }
     }
+}
+
+// Where each instance stands in its layer's elements, for a rebuild of the
+// whole list: one pass over the layers instead of a search of its layer per
+// instance (Deltarune's dancers room keeps some hundred in one layer).
+static uint32_t elementPlaceStamp = 0;
+
+static bool gatherElementPlaces(Runner* runner) {
+    if (++elementPlaceStamp == 0) elementPlaceStamp = 1;
+    // The instances by ID, in a table of their own: instancesById is a
+    // general hash map, many times slower to look a few hundred up in.
+    static Instance** table = nullptr;
+    static uint32_t tableSize = 0;
+    int32_t instanceCount = (int32_t) arrlen(runner->instances);
+    uint32_t wanted = 64;
+    while (wanted < (uint32_t) instanceCount * 2) wanted <<= 1;
+    if (wanted > tableSize) {
+        Instance** grown = realloc(table, wanted * sizeof(Instance*));
+        if (grown == nullptr) return false;
+        table = grown;
+        tableSize = wanted;
+    }
+    uint32_t mask = wanted - 1;
+    memset(table, 0, wanted * sizeof(Instance*));
+    repeat(instanceCount, i) {
+        Instance* inst = runner->instances[i];
+        uint32_t h = (inst->instanceId * 2654435761u) & mask;
+        while (table[h] != nullptr) h = (h + 1) & mask;
+        table[h] = inst;
+    }
+    size_t layerCount = arrlenu(runner->runtimeLayers);
+    repeat(layerCount, i) {
+        RuntimeLayer* layer = &runner->runtimeLayers[i];
+        // Last to first, so that an instance listed twice keeps its first place.
+        for (int32_t j = (int32_t) arrlen(layer->elements) - 1; j >= 0; j--) {
+            RuntimeLayerElement* el = &layer->elements[j];
+            if (el->type != RuntimeLayerElementType_Instance) continue;
+            uint32_t h = ((uint32_t) el->instanceId * 2654435761u) & mask;
+            Instance* inst;
+            while ((inst = table[h]) != nullptr && inst->instanceId != (uint32_t) el->instanceId) h = (h + 1) & mask;
+            if (inst == nullptr || inst->layer != (int32_t) layer->id) continue;
+            inst->elementPlace = j;
+            inst->elementPlaceStamp = elementPlaceStamp;
+        }
+    }
+    return true;
 }
 
 static void refreshDrawableDepths(Runner* runner, Drawable* drawables, int32_t count) {
@@ -932,6 +1101,8 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
         }
 
         int32_t instanceCount = (int32_t) arrlen(runner->instances);
+        elementPlacesGathered = !legacy && instanceCount >= 32;
+        if (elementPlacesGathered) elementPlacesGathered = gatherElementPlaces(runner);
         repeat(instanceCount, i) {
             Instance* inst = runner->instances[i];
             Drawable d;
@@ -942,6 +1113,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
             if (!legacy) refreshDrawableLayerOrder(runner, &d);
             arrput(runner->cachedDrawables, d);
         }
+        elementPlacesGathered = false;
 
         if (legacy) {
             repeat(room->tileCount, i) {
@@ -984,7 +1156,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
 
         int32_t count = (int32_t) arrlen(runner->cachedDrawables);
         if (count > 1) {
-            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawables);
+            sortDrawables(runner->cachedDrawables, count);
         }
         runner->drawableListStructureDirty = false;
         runner->drawableListSortDirty = false;
@@ -995,7 +1167,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
         int32_t count = (int32_t) arrlen(runner->cachedDrawables);
         refreshDrawableDepths(runner, runner->cachedDrawables, count);
         if (count > 1 && !isDrawableArraySorted(runner->cachedDrawables, count)) {
-            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawables);
+            sortDrawables(runner->cachedDrawables, count);
         }
         runner->drawableListSortDirty = false;
     }
@@ -1089,9 +1261,17 @@ void Runner_draw(Runner* runner) {
                 int32_t runEnd = i - 1;
                 arrsetlen(tileRunTiles, 0);
                 arrsetlen(tileRunOffsets, 0);
+                // A run's tiles mostly share a depth: look its layer up once per change.
+                bool haveRunDepth = false;
+                int32_t runDepth = 0;
+                ptrdiff_t runLayerIdx = -1;
                 while (drawableCount > runEnd && runner->cachedDrawables[runEnd].type == DRAWABLE_TILE) {
                     RoomTile* runTile = &room->tiles[runner->cachedDrawables[runEnd++].tileIndex];
-                    ptrdiff_t runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
+                    if (!haveRunDepth || runTile->tileDepth != runDepth) {
+                        runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
+                        runDepth = runTile->tileDepth;
+                        haveRunDepth = true;
+                    }
                     float runOffsetX = 0.0f, runOffsetY = 0.0f;
                     if (runLayerIdx >= 0) {
                         if (!runner->tileLayerMap[runLayerIdx].value.visible) continue;
@@ -1197,14 +1377,18 @@ void Runner_draw(Runner* runner) {
             float layerOffsetY = runtimeLayer->yOffset;
 
             size_t instanceElementCount = arrlenu(runtimeLayer->elements);
+            // Only a Draw event can move or remove the layer; look it up again after one.
+            bool layerStale = false;
             repeat(instanceElementCount, j) {
-                runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                if (layerStale) runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                layerStale = false;
                 if (runtimeLayer == nullptr || (size_t) j >= arrlenu(runtimeLayer->elements)) break;
                 RuntimeLayerElement* el = &runtimeLayer->elements[j];
                 if (el->type != RuntimeLayerElementType_Instance) continue;
                 Instance* inst = hmget(runner->instancesById, el->instanceId);
                 if (inst == nullptr || !inst->active || !inst->visible || inst->destroyed || inst->sequenceControlled) continue;
                 Runner_drawInstance(runner, inst);
+                layerStale = true;
             }
             runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
             if (runtimeLayer == nullptr) {
@@ -1217,12 +1401,16 @@ void Runner_draw(Runner* runner) {
                 float roomW = (float) runner->currentRoom->width;
                 float roomH = (float) runner->currentRoom->height;
                 size_t elementCount = arrlenu(runtimeLayer->elements);
+                // Only a sequence runs code that can move or remove the layer; look it up again after one.
+                bool elementsStale = false;
                 repeat(elementCount, j) {
-                    runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                    if (elementsStale) runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                    elementsStale = false;
                     if (runtimeLayer == nullptr || (size_t)j >= arrlenu(runtimeLayer->elements)) break;
                     RuntimeLayerElement* layerElement = &runtimeLayer->elements[j];
                     if (layerElement->type == RuntimeLayerElementType_Sequence) {
                         if (layerElement->visible) Sequence_draw(layerElement->sequenceElement);
+                        elementsStale = true;
                     } else if (layerElement->type == RuntimeLayerElementType_Background && layerElement->backgroundElement != nullptr) {
                         renderBackgroundElement(runner, layerElement->backgroundElement, roomW, roomH, layerOffsetX, layerOffsetY);
                     } else if (layerElement->type == RuntimeLayerElementType_Tile && layerElement->tileElement != nullptr && layerElement->tileElementOwned) {
@@ -1256,6 +1444,10 @@ void Runner_draw(Runner* runner) {
                 arrsetlen(layerCopies, 0);
                 if (data->legacyTileCount > 0) arrsetcap(layerCopies, data->legacyTileCount); // copies must not move
                 size_t searchFrom = 0;
+                // The layer's tiles mostly share a depth: look its tile layer up once per change.
+                bool haveTileDepth = false;
+                int32_t tileDepth = 0;
+                ptrdiff_t tileLayerIdx = -1;
                 repeat(data->legacyTileCount, j) {
                     if (runner->renderer != nullptr) {
                         RoomTile* tile = &data->legacyTiles[j];
@@ -1274,7 +1466,12 @@ void Runner_draw(Runner* runner) {
                         }
                         if (tileEl != nullptr && !tileEl->visible) continue;
                         // Check if this tile's layer is hidden via tile_layer_hide()
-                        ptrdiff_t layerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
+                        if (!haveTileDepth || tile->tileDepth != tileDepth) {
+                            tileLayerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
+                            tileDepth = tile->tileDepth;
+                            haveTileDepth = true;
+                        }
+                        ptrdiff_t layerIdx = tileLayerIdx;
                         if (layerIdx >= 0 && !runner->tileLayerMap[layerIdx].value.visible) continue;
                         float offsetX = 0.0f, offsetY = 0.0f;
                         if (layerIdx >= 0) {
@@ -4042,6 +4239,27 @@ static int sortInstancesByObjectIndexThenInstanceIdAscending(const void* element
     return 0;
 }
 
+// The target list, as qsort with that comparison would leave it (the order
+// is total: IDs are unique). It mostly comes in order already, and is short.
+static void sortCollisionTargets(Instance** list, int32_t count) {
+    int32_t i = 1;
+    while (i < count && sortInstancesByObjectIndexThenInstanceIdAscending(&list[i - 1], &list[i]) <= 0) i++;
+    if (i >= count) return;
+    if (count > 64) {
+        qsort(list, (size_t) count, sizeof(Instance*), sortInstancesByObjectIndexThenInstanceIdAscending);
+        return;
+    }
+    for (; i < count; i++) {
+        Instance* current = list[i];
+        int32_t j = i;
+        while (j > 0 && sortInstancesByObjectIndexThenInstanceIdAscending(&list[j - 1], &current) > 0) {
+            list[j] = list[j - 1];
+            j--;
+        }
+        list[j] = current;
+    }
+}
+
 #ifdef OF_COLLISION_WORK_PROFILE
 // qsort has no context argument and runs no game callbacks. Save/restore this
 // pointer around each sort so nested dispatch retains its runner's accounting.
@@ -4129,7 +4347,7 @@ static void dispatchCollisionEvents(Runner* runner) {
                 qsort(runner->instanceSnapshots + snapBase, targetCount, sizeof(Instance*), compareCollisionInstancesProfiled);
                 collisionSortRunner = savedSortRunner;
 #else
-                qsort(runner->instanceSnapshots + snapBase, snapEnd - snapBase, sizeof(Instance*), sortInstancesByObjectIndexThenInstanceIdAscending);
+                sortCollisionTargets(runner->instanceSnapshots + snapBase, snapEnd - snapBase);
 #endif
 
                 for (int32_t snapIdx = snapBase; snapEnd > snapIdx; snapIdx++) {
