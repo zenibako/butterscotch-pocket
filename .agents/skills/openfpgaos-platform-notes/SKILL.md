@@ -18,7 +18,9 @@ with the SDK's v0.7 runtime unless marked otherwise. Items marked
   boot-loops ("Booting..." / "Loading..." alternating) before the OS
   banner. The OS binary's own text says bitstream and `os.bin` must come
   from one build.
-- v0.9 os20 boots and runs the game at 320x240, but produced a garbage
+- (Superseded 2026-11-20: os20 from pocket-runtime-19d9d50 ran every
+  640x480 16-bit Undertale battle cleanly, and it is now the release
+  bitstream.) v0.9 os20 boots and runs the game at 320x240, but produced a garbage
   blue screen once the port had used 640x480 in 16-bit colour. Diablo
   uses 640x480 on os20 in 8-bit mode. *Inferred:* os20 mishandles
   640x480 at 16 bpp or the switch back from it.

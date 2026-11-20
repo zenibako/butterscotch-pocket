@@ -25,7 +25,7 @@ class RuntimePackaging(unittest.TestCase):
         self.base.mkdir()
         self.write(self.source / 'src/firmware/os/kernel/syscall.c', 'fsync source')
         self.write(self.source / 'src/firmware/os/bld/pocket/os.bin', 'fsync OS')
-        build = self.source / 'src/fpga/targets/pocket/bld/os25'
+        build = self.source / 'src/fpga/targets/pocket/bld/os20'
         self.write(build / 'ap_core.qsf', 'VERILOG_MACRO INCLUDE_SAVESTATE\n')
         self.write(build / 'output_files/ap_core.sta.summary', 'Slack : 0.5\n')
         # Only VCS ancestry is simulated: artifact validation and shell entrypoints are real.
@@ -42,7 +42,7 @@ esac
         self.write(self.source / 'Makefile', '''sdk:
 \tmkdir -p "$(DEST)/runtime/pocket"
 \tcp src/firmware/os/bld/pocket/os.bin "$(DEST)/runtime/pocket/os.bin"
-\tprintf bitstream > "$(DEST)/runtime/pocket/os25.rbf_r"
+\tprintf bitstream > "$(DEST)/runtime/pocket/os20.rbf_r"
 \tprintf loader > "$(DEST)/runtime/pocket/loader.bin"
 ''')
         # All tracked build inputs precede the built OS.
@@ -129,13 +129,13 @@ esac
         marker = json.loads((self.dest / 'runtime/pocket/SAVESTATES_RUNTIME.json').read_text())
         self.assertEqual(marker['capabilities'], ['save-slot-fsync'])
         self.assertEqual(marker['source_commit'], REQUIRED)
-        for name in ('os.bin', 'os25.rbf_r', 'loader.bin'):
+        for name in ('os.bin', 'os20.rbf_r', 'loader.bin'):
             expected = hashlib.sha256((self.dest / 'runtime/pocket' / name).read_bytes()).hexdigest()
             self.assertEqual(marker['sha256'][name], expected)
 
     def test_modified_runtime_files_are_rejected(self):
         self.valid_stage()
-        for name in ('os.bin', 'os25.rbf_r', 'loader.bin'):
+        for name in ('os.bin', 'os20.rbf_r', 'loader.bin'):
             with self.subTest(name=name):
                 path = self.dest / 'runtime/pocket' / name
                 original = path.read_bytes()
@@ -183,7 +183,7 @@ esac
     def test_missing_exports_cannot_recertify_base_binaries(self):
         path = self.source / 'Makefile'
         original = path.read_text()
-        for name in ('os25.rbf_r', 'loader.bin'):
+        for name in ('os20.rbf_r', 'loader.bin'):
             with self.subTest(name=name):
                 self.dest = self.root / f'dest-without-{name}'
                 self.write(self.base / 'runtime/pocket' / name, 'old inherited runtime')
@@ -195,7 +195,7 @@ esac
                 self.assertIn(name, result.stderr)
                 self.assertFalse((self.dest / 'runtime/pocket/SAVESTATES_RUNTIME.json').exists())
 
-    def test_native_card_pins_os25_for_image_script(self):
+    def test_native_card_pins_os20_for_image_script(self):
         self.valid_stage()
         self.write(self.dest / '.obj/undertale/app.elf', 'synthetic program')
         port = self.root / 'port'
@@ -203,7 +203,7 @@ esac
         called = self.root / 'image-variant'
         image = self.root / 'image.sh'
         self.write(image, f'#!/bin/bash\nprintf "%s" "$VARIANT" > "{called}"\nexit 91\n')
-        for variant in ('os20', 'os30', None, 'os25'):
+        for variant in ('os25', 'os30', None, 'os20'):
             with self.subTest(variant=variant):
                 called.unlink(missing_ok=True)
                 env = dict(self.env)
@@ -213,12 +213,12 @@ esac
                 result = subprocess.run(['bash', str(TOOLS / 'mkcard.sh'), str(image),
                                          str(self.dest), '/unused/dist', str(port)],
                                         env=env, text=True, capture_output=True)
-                if variant in ('os20', 'os30'):
+                if variant in ('os25', 'os30'):
                     self.assertFalse(called.exists())
-                    self.assertIn('requires VARIANT=os25', result.stderr)
+                    self.assertIn('requires VARIANT=os20', result.stderr)
                 else:
                     self.assertEqual(result.returncode, 91, result.stdout + result.stderr)
-                    self.assertEqual(called.read_text(), 'os25')
+                    self.assertEqual(called.read_text(), 'os20')
                     called.unlink()
 
     def test_dirty_source_is_rejected(self):

@@ -84,8 +84,9 @@ for an already-built ZIP and run the transfer for the user when they request
 installation. The card can be mounted on the session host or an authorized
 SSH host. Reuse the established host and mount. Keep the source ZIP frozen
 through verification. Progress saves live outside the build tree.
-Keep the SDK runtime and its os25 bitstream matched; switching that runtime to
-os20 boot-loops before the OS banner.
+Keep the runtime's `os.bin` and its bitstream matched (release: os20 from
+pocket-runtime-19d9d50). Pairing the old v0.7 SDK `os.bin` with os20
+boot-loops before the OS banner.
 
 ## Committing
 

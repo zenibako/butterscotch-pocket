@@ -7,7 +7,7 @@
   "source_commit": "19d9d50ceec15771b16386456c4a3a22c355f0a5",
   "sha256": {
     "os.bin": "da2cd963a38ee52460688c975433f55a0a5f84759db5237a583fda6c955c96f3",
-    "os25.rbf_r": "59df24f307692104f4f788af867e6b84bae0095eaf4131380b4d131fb3d0edaf",
+    "os20.rbf_r": "94d3f547d741a6929835e86dc73aa2ff46e069cddfaadb103206df49de5282c4",
     "loader.bin": "fc1f8d37eb0fb322006b4428f0b59d2801c9b74978bd3f24103f5f9bbfca3c99"
   }
 }

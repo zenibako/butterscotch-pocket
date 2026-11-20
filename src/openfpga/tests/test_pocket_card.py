@@ -63,7 +63,7 @@ class CardTest(unittest.TestCase):
         files = {
             f"{CORE}/core.json": json.dumps({"core": {"metadata": {"version": "test-rc"}}}),
             f"{CORE}/loader.bin": b"loader",
-            f"{CORE}/os25.rbf_r": b"fpga",
+            f"{CORE}/os20.rbf_r": b"fpga",
             ELF: b"new ELF",
             "Assets/butterscotch/common/bs_bullet_os.bin": b"runtime",
             "Platforms/butterscotch.json": b"{}",
@@ -112,12 +112,12 @@ class CardTest(unittest.TestCase):
         files = {
             f"{core}/core.json": json.dumps({"core": {"metadata": {"version": "standard-test-rc"}}}).encode(),
             f"{core}/loader.bin": b"standard loader",
-            f"{core}/os25.rbf_r": b"standard FPGA",
+            f"{core}/os20.rbf_r": b"standard FPGA",
             f"{common}/undertale.elf": b"new Undertale ELF",
             f"{common}/deltarune.elf": b"new Deltarune ELF",
             f"{common}/os.bin": b"new standard runtime",
-            f"{common}/undertale_os.ini": b"[os]\nELF=undertale.elf\nVARIANT=os25\n",
-            f"{common}/deltarune_os.ini": b"[os]\nELF=deltarune.elf\nVARIANT=os25\n",
+            f"{common}/undertale_os.ini": b"[os]\nELF=undertale.elf\nVARIANT=os20\n",
+            f"{common}/deltarune_os.ini": b"[os]\nELF=deltarune.elf\nVARIANT=os20\n",
             f"{instances}/Undertale.json": json.dumps({"instance": {"data_slots": [
                 {"id": 1, "filename": "os.bin"},
                 {"id": 2, "filename": "undertale_os.ini"},

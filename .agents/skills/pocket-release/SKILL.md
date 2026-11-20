@@ -26,7 +26,7 @@ skill needs an explicit update; a matching directory name alone is insufficient.
 
 ## Project contract
 
-Both games, pinned os25 runtime and the complete core/tools/source/license inventory remain required. Use this checkout's `release-pocket.yml` and `publish-pocket.yml`, with its explicit version and source provenance rules.
+Both games, pinned os20 runtime and the complete core/tools/source/license inventory remain required. Use this checkout's `release-pocket.yml` and `publish-pocket.yml`, with its explicit version and source provenance rules.
 
 Read the preserved [project procedures](references/project-release.md) for
 local commands, device checks and release recovery details.

@@ -78,11 +78,11 @@ class BulletPackageTest(unittest.TestCase):
                     self.assertEqual(core['core']['metadata']['shortname'], 'BsBullet')
                     self.assertEqual(core['core']['metadata']['version'], '1.2.3-rc.4')
                     self.assertFalse(core['core']['framework']['sleep_supported'])
-                    self.assertEqual(core['core']['cores'][0]['filename'], 'os25.rbf_r')
+                    self.assertEqual(core['core']['cores'][0]['filename'], 'os20.rbf_r')
                     self.assertEqual(core['core']['cores'][0]['chip32_vm'], 'loader.bin')
                 else:
                     self.assertEqual(actual, (CORE / name).read_bytes(), name)
-            for name in ('os25.rbf_r', 'loader.bin'):
+            for name in ('os20.rbf_r', 'loader.bin'):
                 self.assertEqual(archive.read(f'Cores/{CORE_ID}/{name}'), (RUNTIME / name).read_bytes())
             for name in ('butterscotch.json', '_images/butterscotch.bin'):
                 self.assertEqual(archive.read(f'Platforms/{name}'), (DIST / 'Platforms' / name).read_bytes())
@@ -113,7 +113,7 @@ class BulletPackageTest(unittest.TestCase):
                     self.assertEqual(slots[slot], f'bs_bullet_{slot - 10}.sav')
                 self.assertTrue(all(len(filename.encode('utf-8')) <= 23 for filename in slots.values()))
                 self.assertEqual(archive.read(f'Assets/butterscotch/common/{slots[2]}').decode(),
-                                 f'[os]\nELF=bs_bullet.elf\nARGS={arguments}\nVARIANT=os25\n')
+                                 f'[os]\nELF=bs_bullet.elf\nARGS={arguments}\nVARIANT=os20\n')
             self.assertEqual(len(set(instance_names)), 15)
 
     def test_repeated_packaging_is_byte_identical(self):

@@ -221,17 +221,17 @@ are described in [the dated results](https://github.com/zenibako/butterscotch-po
 
 ### Save states and sleep (experimental; Undertale and Deltarune Chapter 1)
 
-The save-state build requires a matching os25 runtime with
+The save-state build requires a matching os20 runtime with
 `INCLUDE_SAVESTATE`. The ordinary SDK runtime does not support it. Build the
-os25 variant from our openfpgaOS fork,
+os20 variant from our openfpgaOS fork,
 [zenibako/openfpgaCore](https://github.com/zenibako/openfpgaCore) (`52abf78bde0446bc4af8e23631f41ff950e5a535`,
 which includes the reviewed save-slot `fsync` fixes, or a descendant), then
 stage it into a separate SDK. The staging script refuses an OS checkout that does not contain
 that fsync-capable revision.
 
-There os25 runs the CPU and RAM at 100 MHz with the save-state controller
-(seed 1). That build misses setup timing at the slow 85C corner (WNS
--0.777 ns, about 92.8 MHz) but has been verified on a Pocket. Staging refuses
+There os20 runs its dual-issue CPU and RAM at 100 MHz with the save-state
+controller (seed 19 in pocket-runtime-19d9d50). That build misses setup
+timing at the slow 85C corner (WNS -0.597 ns). Staging refuses
 a build with negative slack unless you pass `--allow-timing-miss`, and prints
 the worst slack either way:
 
@@ -242,10 +242,10 @@ make SDK_ROOT=/path/to/new-SDK save-states
 
 Staging requires committed firmware/build inputs and a built Pocket `os.bin`
 no older than its tracked Pocket compile/link inputs (tests and docs are
-excluded). It verifies that SDK export copied that exact OS, then records SHA-256 hashes for `os.bin`, `os25.rbf_r`, and `loader.bin` in
+excluded). It verifies that SDK export copied that exact OS, then records SHA-256 hashes for `os.bin`, `os20.rbf_r`, and `loader.bin` in
 `SAVESTATES_RUNTIME.json`. Save-state packaging validates this marker and all
 three files before image assembly; legacy text markers require restaging.
-Native card assembly requires `VARIANT=os25`. This is a local provenance and corruption guard, not a signed build attestation.
+Native card assembly requires `VARIANT=os20`. This is a local provenance and corruption guard, not a signed build attestation.
 
 After an OS source change, rebuild its firmware and patch the matching bootloader into
 the bitstream before staging. The output is
@@ -642,7 +642,7 @@ read-ahead buffer, short ones are loaded whole on first use and cached. It
 applies pitch and gain, mixes the voices in software and writes the OS's
 output rate.
 
-Where openfpgaOS has the hardware mixer (os25), the voices are played by it
+Where openfpgaOS has the hardware mixer (os20 and os25), the voices are played by it
 instead: each is decoded into a ring of its own, and the mixer does the
 resampling, gain and mixing. `--sw-mixer` in `ARGS=` keeps the software mix,
 to compare the two. A Memory keeps what each voice's ring holds but has not
@@ -911,10 +911,11 @@ is hidden by then and writing to it is slow.
 - What is untested? (MiSTer; anything past the opening hours.)
 -->
 
-- Runs on an Analogue Pocket with the os25 bitstream: boots, plays the
-  intro, name entry works, and the first room and menu are playable.
-- Use the os25 bitstream. The SDK's runtime `os.bin` paired with os20
-  reboot-looped before the OS banner appeared.
+- Runs on an Analogue Pocket with the os20 bitstream of the pinned runtime
+  (os25 also works): boots, plays the intro, name entry works, and the first
+  room and menu are playable.
+- Pair each bitstream with the `os.bin` from the same runtime build. The old
+  SDK runtime's `os.bin` paired with os20 reboot-looped before the OS banner.
 - Music, sound effects and saves work on hardware, including a save
   imported from the desktop game.
 - Undertale save-state test builds passed Pocket save/load and repeated

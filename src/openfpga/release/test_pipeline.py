@@ -32,7 +32,7 @@ class ReleaseFixture(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("{}")
         core = self.dist / pipeline.CORE_JSON
-        core.write_text(json.dumps({"core":{"metadata":{}, "framework":{},"cores":[{"filename":"os25.rbf_r","chip32_vm":"loader.bin"}]}}))
+        core.write_text(json.dumps({"core":{"metadata":{}, "framework":{},"cores":[{"filename":"os20.rbf_r","chip32_vm":"loader.bin"}]}}))
         self.programs = self.root / "programs"
         self.programs.mkdir()
         for game in ("undertale", "deltarune"):
@@ -84,7 +84,7 @@ class PackageTests(ReleaseFixture):
             self.assertTrue(core["framework"]["sleep_supported"])
             self.assertEqual(core["metadata"]["version"], "0.2.0")
             self.assertIn("Assets/butterscotch/common/deltarune.elf", z.namelist())
-            self.assertEqual(z.read("Cores/zenibako.Butterscotch/os25.rbf_r"), (self.pocket/"release/runtime/os25.rbf_r").read_bytes())
+            self.assertEqual(z.read("Cores/zenibako.Butterscotch/os20.rbf_r"), (self.pocket/"release/runtime/os20.rbf_r").read_bytes())
 
     def test_packaged_updater_metadata_supports_disclosure_and_plugin_discovery(self):
         """Keep AI disclosure and companion plugin discovery in the installed core."""
@@ -511,7 +511,7 @@ class TestVersionTests(unittest.TestCase):
     def test_test_version_is_a_valid_core_version(self):
         version = pipeline.test_version(Path("."))
         core = json.loads(pipeline.release_core_json(json.dumps(
-            {"core": {"metadata": {}, "framework": {}, "cores": [{"filename": "os25.rbf_r"}]}}), version))
+            {"core": {"metadata": {}, "framework": {}, "cores": [{"filename": "os20.rbf_r"}]}}), version))
         self.assertEqual(core["core"]["metadata"]["version"], "0.7.9-rc.2")
 
 

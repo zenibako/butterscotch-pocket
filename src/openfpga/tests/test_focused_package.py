@@ -40,7 +40,7 @@ class FocusedPackageTest(unittest.TestCase):
                     for slot in range(10, 20):
                         self.assertEqual(slots[slot], f'deltarune_tiles_{slot-10}.sav')
                     ini = archive.read('Assets/butterscotch/common/' + slots[2]).decode()
-                    self.assertEqual(ini, f'[os]\nELF=deltarune_tiles.elf\nARGS=--focus-{mode}\nVARIANT=os25\n')
+                    self.assertEqual(ini, f'[os]\nELF=deltarune_tiles.elf\nARGS=--focus-{mode}\nVARIANT=os20\n')
             self.assertEqual(template.read_bytes(), original)
 
     def test_reject_non_elf_before_writing_zip(self):

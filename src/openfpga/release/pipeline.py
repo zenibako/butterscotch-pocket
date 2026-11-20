@@ -70,7 +70,7 @@ def verify_pins(lock=None):
     if not re.fullmatch(r"[0-9a-f]{40}", lock["sdk"]["base_commit"]):
         raise ValueError("SDK base must pin a full immutable commit")
     required = {"release/sdk.tar.gz", "release/runtime/SAVESTATES_RUNTIME.json"}
-    required.update("release/runtime/" + n for n in ("os.bin", "os25.rbf_r", "loader.bin"))
+    required.update("release/runtime/" + n for n in ("os.bin", "os20.rbf_r", "loader.bin"))
     if set(lock["sha256"]) != required:
         raise ValueError("lock must cover the complete SDK/runtime set")
     for path, expected in lock["sha256"].items():
@@ -185,7 +185,7 @@ def test_version(source, next_version=None):
 def release_core_json(contents, version):
     """Apply release metadata while preserving the checkout's core identifiers."""
     core = json.loads(contents)
-    if core["core"]["cores"][0]["filename"] != "os25.rbf_r":
+    if core["core"]["cores"][0]["filename"] != "os20.rbf_r":
         raise ValueError("core definition does not name the pinned runtime")
     core["core"]["metadata"]["version"] = version.removeprefix("v")
     epoch = int(git(REPO_ROOT, "log", "-1", "--format=%ct"))
@@ -193,7 +193,7 @@ def release_core_json(contents, version):
     core["core"]["metadata"]["url"] = "https://github.com/zenibako/butterscotch-pocket"
     core["core"]["metadata"]["description"] = "Undertale v1.08; Deltarune ch.1 (experimental, own data)"
     core["core"]["framework"]["sleep_supported"] = True
-    # The pinned os25 variant has no link peripheral; this runner does not
+    # The pinned os20 variant has no link peripheral; this runner does not
     # support cartridges. Do not inherit the SDK's generic hardware defaults.
     core["core"]["framework"].setdefault("hardware", {}).update(
         link_port=False, cartridge_adapter=-1)
@@ -232,7 +232,7 @@ def package_core(source, programs, output, version):
         elf = programs / f"{game}.elf"
         check_elf(elf)
         files[f"Assets/butterscotch/common/{game}.elf"] = elf.read_bytes()
-    for name in ("os25.rbf_r", "loader.bin"):
+    for name in ("os20.rbf_r", "loader.bin"):
         files[f"Cores/{CORE_ID}/{name}"] = (RELEASE_ROOT / "runtime" / name).read_bytes()
     files["Assets/butterscotch/common/os.bin"] = (RELEASE_ROOT / "runtime/os.bin").read_bytes()
     files[CORE_JSON] = release_core_json(files[CORE_JSON], version)
@@ -357,7 +357,7 @@ def verify_core_archive(source, output, lock, provenance):
     known[CORE_JSON] = release_core_json(known[CORE_JSON], version)
     known[f"Cores/{CORE_ID}/info.txt"] = (RELEASE_ROOT / "core-info.txt").read_bytes()
     known[f"Cores/{CORE_ID}/updaters.json"] = (RELEASE_ROOT / "updaters.json").read_bytes()
-    for filename in ("loader.bin", "os25.rbf_r"):
+    for filename in ("loader.bin", "os20.rbf_r"):
         known[f"Cores/{CORE_ID}/{filename}"] = (RELEASE_ROOT / "runtime" / filename).read_bytes()
     known["Assets/butterscotch/common/os.bin"] = (RELEASE_ROOT / "runtime/os.bin").read_bytes()
     expected = set(known) | {f"Assets/butterscotch/common/{game}.elf" for game in ("undertale", "deltarune")}
