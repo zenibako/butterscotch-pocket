@@ -37,6 +37,21 @@
 #endif
 
 // ===[ Runtime Layer Teardown Helpers ]===
+
+Instance* Runner_findInstanceByIdUncached(Runner* runner, int32_t id) {
+    return hmget(runner->instancesById, id);
+}
+
+static void instancesByIdPut(Runner* runner, int32_t id, Instance* inst) {
+    hmput(runner->instancesById, id, inst);
+    Runner_instancesByIdChanged(runner);
+}
+
+static void instancesByIdDel(Runner* runner, int32_t id) {
+    hmdel(runner->instancesById, id);
+    Runner_instancesByIdChanged(runner);
+}
+
 void Runner_freeRuntimeLayer(RuntimeLayer* runtimeLayer) {
     free(runtimeLayer->dynamicName);
     runtimeLayer->dynamicName = nullptr;
@@ -221,7 +236,7 @@ int32_t Runner_pushInstancesForTarget(Runner* runner, int32_t target) {
         return base;
     }
     if (target >= INSTANCE_ID_BASE) {
-        Instance* inst = hmget(runner->instancesById, target);
+        Instance* inst = Runner_findInstanceById(runner, target);
         if (inst != nullptr) arrput(runner->instanceSnapshots, inst);
         return base;
     }
@@ -340,7 +355,7 @@ static void Runner_executeCallLaterCallback(VMContext* ctx, RValue callback) {
     if (callback.type == RVALUE_METHOD && callback.method != nullptr) {
         GMLMethod* method = callback.method;
         if (method->boundInstanceId >= 0) {
-            Instance* bound = hmget(ctx->runner->instancesById, method->boundInstanceId);
+            Instance* bound = Runner_findInstanceById(ctx->runner, method->boundInstanceId);
             if (bound != nullptr) targetInstance = bound;
         }
         if (method->codeIndex >= 0 && (uint32_t) method->codeIndex < ctx->dataWin->code.count) {
@@ -798,6 +813,121 @@ void Runner_drawTileLayer(Runner* runner, RoomLayerTilesData* data, float layerO
     }
 }
 
+// Sorts drawables as qsort with compareDrawables would (a stable merge
+// sort, top down, halves of n/2 and n - n/2, as glibc's), with each key
+// worked out once rather than at every comparison. Depth layers made and
+// merged as instances change depth rebuild the list every frame in busy
+// rooms (Deltarune's dancers room has some 260 drawables).
+static void mergeSortDrawKeys(int32_t* idx, int32_t* tmp, size_t n, const DrawKey* keys) {
+    if (n <= 1) return;
+    size_t n1 = n / 2, n2 = n - n1;
+    int32_t* b1 = idx;
+    int32_t* b2 = idx + n1;
+    mergeSortDrawKeys(b1, tmp, n1, keys);
+    mergeSortDrawKeys(b2, tmp, n2, keys);
+    int32_t* out = tmp;
+    while (n1 > 0 && n2 > 0) {
+        if (compareDrawKeys(&keys[*b1], &keys[*b2]) <= 0) { *out++ = *b1++; n1--; }
+        else { *out++ = *b2++; n2--; }
+    }
+    if (n1 > 0) memcpy(out, b1, n1 * sizeof(int32_t));
+    memcpy(idx, tmp, (n - n2) * sizeof(int32_t));
+}
+
+// The list rebuilt every frame comes out nearly as it was last time. Put
+// in last time's order (the same instances and layers keep their places,
+// new ones go last), an insertion sort has little left to do. The order is
+// total (instance and layer IDs are unique), so any sort gives this result.
+static uint32_t drawRankStamp = 1;
+typedef struct { int32_t id, rank; } LayerRank;
+static LayerRank* layerRanks = nullptr; // stb array
+static uint32_t layerRanksStamp = 0;
+
+static bool sortDrawablesFromLastOrder(Drawable* drawables, int32_t count, Drawable* scratch, int32_t* slot, int32_t* fresh) {
+    enum { maxShifts = 4096 };
+    // slot[rank] = index into drawables, or -1; fresh[] the new ones, in list order.
+    repeat(count, s) slot[s] = -1;
+    int32_t freshCount = 0;
+    repeat(count, i) {
+        Drawable* d = &drawables[i];
+        int32_t rank = -1;
+        if (d->type == DRAWABLE_INSTANCE && d->instance->drawRankStamp == drawRankStamp) {
+            rank = d->instance->drawRank;
+        } else if (d->type == DRAWABLE_LAYER && layerRanksStamp == drawRankStamp) {
+            repeat(arrlen(layerRanks), k) if (layerRanks[k].id == d->runtimeLayerId) { rank = layerRanks[k].rank; break; }
+        }
+        if (rank >= 0 && rank < count && slot[rank] == -1) slot[rank] = i;
+        else fresh[freshCount++] = i;
+    }
+    int32_t n = 0;
+    repeat(count, r) if (slot[r] >= 0) scratch[n++] = drawables[slot[r]];
+    repeat(freshCount, f) scratch[n++] = drawables[fresh[f]];
+    int32_t shifts = 0;
+    for (int32_t m = 1; m < count; m++) {
+        Drawable current = scratch[m];
+        DrawKey key = drawableKey(&current);
+        int32_t j = m;
+        while (j > 0) {
+            DrawKey prior = drawableKey(&scratch[j - 1]);
+            if (compareDrawKeys(&prior, &key) <= 0) break;
+            scratch[j] = scratch[j - 1];
+            j--;
+            if (++shifts > maxShifts) return false;
+        }
+        scratch[j] = current;
+    }
+    memcpy(drawables, scratch, (size_t) count * sizeof(Drawable));
+    return true;
+}
+
+static void recordDrawRanks(Drawable* drawables, int32_t count) {
+    if (++drawRankStamp == 0) drawRankStamp = 1;
+    arrsetlen(layerRanks, 0);
+    repeat(count, i) {
+        Drawable* d = &drawables[i];
+        if (d->type == DRAWABLE_INSTANCE) {
+            d->instance->drawRank = i;
+            d->instance->drawRankStamp = drawRankStamp;
+        } else if (d->type == DRAWABLE_LAYER) {
+            arraddnptr(layerRanks, 1);
+            arrlast(layerRanks).id = d->runtimeLayerId;
+            arrlast(layerRanks).rank = i;
+        }
+    }
+    layerRanksStamp = drawRankStamp;
+}
+
+static void sortDrawables(Drawable* drawables, int32_t count) {
+    static DrawKey* keys = nullptr;
+    static int32_t* order = nullptr;
+    static Drawable* copy = nullptr;
+    static int32_t capacity = 0;
+    if (count > capacity) {
+        int32_t grown = count + count / 2 + 16;
+        DrawKey* k = (DrawKey*) realloc(keys, (size_t) grown * sizeof(DrawKey));
+        if (k != nullptr) keys = k;
+        int32_t* o = k != nullptr ? (int32_t*) realloc(order, (size_t) grown * 2 * sizeof(int32_t)) : nullptr;
+        if (o != nullptr) order = o;
+        Drawable* c = o != nullptr ? (Drawable*) realloc(copy, (size_t) grown * sizeof(Drawable)) : nullptr;
+        if (c != nullptr) copy = c;
+        if (c == nullptr) {
+            qsort(drawables, count, sizeof(Drawable), compareDrawables);
+            return;
+        }
+        capacity = grown;
+    }
+    if (!sortDrawablesFromLastOrder(drawables, count, copy, order, order + capacity)) {
+        repeat(count, i) {
+            keys[i] = drawableKey(&drawables[i]);
+            order[i] = i;
+        }
+        mergeSortDrawKeys(order, order + capacity, (size_t) count, keys);
+        memcpy(copy, drawables, (size_t) count * sizeof(Drawable));
+        repeat(count, r) drawables[r] = copy[order[r]];
+    }
+    recordDrawRanks(drawables, count);
+}
+
 static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
     for (int32_t i = 1; count > i; i++) {
         DrawKey drawKey1 = drawableKey(&drawables[i - 1]);
@@ -808,6 +938,12 @@ static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
     return true;
 }
 
+// Where each instance stands in its layer's elements, for a rebuild of the
+// whole list: one pass over the layers instead of a search of its layer per
+// instance (Deltarune's dancers room keeps some hundred in one layer).
+static uint32_t elementPlaceStamp = 0;
+static bool elementPlacesGathered = false;
+
 static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
     if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) return;
     if (d->type != DRAWABLE_INSTANCE && d->type != DRAWABLE_LAYER) return;
@@ -817,7 +953,13 @@ static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
     d->layerOrder = layer == nullptr ? 0 : layer->drawOrder;
     if (layer == nullptr) return;
     d->elementOrder = -1;
-    if (d->type == DRAWABLE_INSTANCE) {
+    if (d->type == DRAWABLE_INSTANCE && elementPlacesGathered) {
+        int32_t place = d->instance->elementPlace;
+        if (d->instance->elementPlaceStamp == elementPlaceStamp && place >= 0 && place < (int32_t) arrlen(layer->elements) &&
+            layer->elements[place].type == RuntimeLayerElementType_Instance &&
+            (uint32_t) layer->elements[place].instanceId == d->instance->instanceId)
+            d->elementOrder = place;
+    } else if (d->type == DRAWABLE_INSTANCE) {
         repeat(arrlen(layer->elements), i) {
             RuntimeLayerElement* el = &layer->elements[i];
             if (el->type == RuntimeLayerElementType_Instance && (uint32_t) el->instanceId == d->instance->instanceId) {
@@ -826,6 +968,47 @@ static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
             }
         }
     }
+}
+
+static bool gatherElementPlaces(Runner* runner) {
+    if (++elementPlaceStamp == 0) elementPlaceStamp = 1;
+    // The instances by ID, in a table of their own: instancesById is a
+    // general hash map, many times slower to look a few hundred up in.
+    static Instance** table = nullptr;
+    static uint32_t tableSize = 0;
+    int32_t instanceCount = (int32_t) arrlen(runner->instances);
+    uint32_t wanted = 64;
+    while (wanted < (uint32_t) instanceCount * 2) wanted <<= 1;
+    if (wanted > tableSize) {
+        Instance** grown = (Instance**) realloc(table, wanted * sizeof(Instance*));
+        if (grown == nullptr) return false;
+        table = grown;
+        tableSize = wanted;
+    }
+    uint32_t mask = wanted - 1;
+    memset(table, 0, wanted * sizeof(Instance*));
+    repeat(instanceCount, i) {
+        Instance* inst = runner->instances[i];
+        uint32_t h = (inst->instanceId * 2654435761u) & mask;
+        while (table[h] != nullptr) h = (h + 1) & mask;
+        table[h] = inst;
+    }
+    size_t layerCount = arrlenu(runner->runtimeLayers);
+    repeat(layerCount, l) {
+        RuntimeLayer* layer = &runner->runtimeLayers[l];
+        // Last to first, so that an instance listed twice keeps its first place.
+        for (int32_t j = (int32_t) arrlen(layer->elements) - 1; j >= 0; j--) {
+            RuntimeLayerElement* el = &layer->elements[j];
+            if (el->type != RuntimeLayerElementType_Instance) continue;
+            uint32_t h = ((uint32_t) el->instanceId * 2654435761u) & mask;
+            Instance* inst;
+            while ((inst = table[h]) != nullptr && inst->instanceId != (uint32_t) el->instanceId) h = (h + 1) & mask;
+            if (inst == nullptr || inst->layer != (int32_t) layer->id) continue;
+            inst->elementPlace = j;
+            inst->elementPlaceStamp = elementPlaceStamp;
+        }
+    }
+    return true;
 }
 
 static void refreshDrawableDepths(Runner* runner, Drawable* drawables, int32_t count) {
@@ -932,6 +1115,8 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
         }
 
         int32_t instanceCount = (int32_t) arrlen(runner->instances);
+        elementPlacesGathered = !legacy && instanceCount >= 32;
+        if (elementPlacesGathered) elementPlacesGathered = gatherElementPlaces(runner);
         repeat(instanceCount, i) {
             Instance* inst = runner->instances[i];
             Drawable d;
@@ -942,6 +1127,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
             if (!legacy) refreshDrawableLayerOrder(runner, &d);
             arrput(runner->cachedDrawables, d);
         }
+        elementPlacesGathered = false;
 
         if (legacy) {
             repeat(room->tileCount, i) {
@@ -984,7 +1170,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
 
         int32_t count = (int32_t) arrlen(runner->cachedDrawables);
         if (count > 1) {
-            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawables);
+            sortDrawables(runner->cachedDrawables, count);
         }
         runner->drawableListStructureDirty = false;
         runner->drawableListSortDirty = false;
@@ -995,7 +1181,7 @@ static void rebuildDrawableCacheIfDirty(Runner* runner) {
         int32_t count = (int32_t) arrlen(runner->cachedDrawables);
         refreshDrawableDepths(runner, runner->cachedDrawables, count);
         if (count > 1 && !isDrawableArraySorted(runner->cachedDrawables, count)) {
-            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawables);
+            sortDrawables(runner->cachedDrawables, count);
         }
         runner->drawableListSortDirty = false;
     }
@@ -1089,9 +1275,17 @@ void Runner_draw(Runner* runner) {
                 int32_t runEnd = i - 1;
                 arrsetlen(tileRunTiles, 0);
                 arrsetlen(tileRunOffsets, 0);
+                // A run's tiles mostly share a depth: look its layer up once per change.
+                bool haveRunDepth = false;
+                int32_t runDepth = 0;
+                ptrdiff_t runLayerIdx = -1;
                 while (drawableCount > runEnd && runner->cachedDrawables[runEnd].type == DRAWABLE_TILE) {
                     RoomTile* runTile = &room->tiles[runner->cachedDrawables[runEnd++].tileIndex];
-                    ptrdiff_t runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
+                    if (!haveRunDepth || runTile->tileDepth != runDepth) {
+                        runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
+                        runDepth = runTile->tileDepth;
+                        haveRunDepth = true;
+                    }
                     float runOffsetX = 0.0f, runOffsetY = 0.0f;
                     if (runLayerIdx >= 0) {
                         if (!runner->tileLayerMap[runLayerIdx].value.visible) continue;
@@ -1197,14 +1391,18 @@ void Runner_draw(Runner* runner) {
             float layerOffsetY = runtimeLayer->yOffset;
 
             size_t instanceElementCount = arrlenu(runtimeLayer->elements);
+            // Only a Draw event can move or remove the layer; look it up again after one.
+            bool layerStale = false;
             repeat(instanceElementCount, j) {
-                runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                if (layerStale) runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                layerStale = false;
                 if (runtimeLayer == nullptr || (size_t) j >= arrlenu(runtimeLayer->elements)) break;
                 RuntimeLayerElement* el = &runtimeLayer->elements[j];
                 if (el->type != RuntimeLayerElementType_Instance) continue;
-                Instance* inst = hmget(runner->instancesById, el->instanceId);
+                Instance* inst = Runner_findInstanceById(runner, el->instanceId);
                 if (inst == nullptr || !inst->active || !inst->visible || inst->destroyed || inst->sequenceControlled) continue;
                 Runner_drawInstance(runner, inst);
+                layerStale = true;
             }
             runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
             if (runtimeLayer == nullptr) {
@@ -1217,12 +1415,16 @@ void Runner_draw(Runner* runner) {
                 float roomW = (float) runner->currentRoom->width;
                 float roomH = (float) runner->currentRoom->height;
                 size_t elementCount = arrlenu(runtimeLayer->elements);
+                // Only a sequence runs code that can move or remove the layer; look it up again after one.
+                bool elementsStale = false;
                 repeat(elementCount, j) {
-                    runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                    if (elementsStale) runtimeLayer = Runner_findRuntimeLayerById(runner, d->runtimeLayerId);
+                    elementsStale = false;
                     if (runtimeLayer == nullptr || (size_t)j >= arrlenu(runtimeLayer->elements)) break;
                     RuntimeLayerElement* layerElement = &runtimeLayer->elements[j];
                     if (layerElement->type == RuntimeLayerElementType_Sequence) {
                         if (layerElement->visible) Sequence_draw(layerElement->sequenceElement);
+                        elementsStale = true;
                     } else if (layerElement->type == RuntimeLayerElementType_Background && layerElement->backgroundElement != nullptr) {
                         renderBackgroundElement(runner, layerElement->backgroundElement, roomW, roomH, layerOffsetX, layerOffsetY);
                     } else if (layerElement->type == RuntimeLayerElementType_Tile && layerElement->tileElement != nullptr && layerElement->tileElementOwned) {
@@ -1256,6 +1458,10 @@ void Runner_draw(Runner* runner) {
                 arrsetlen(layerCopies, 0);
                 if (data->legacyTileCount > 0) arrsetcap(layerCopies, data->legacyTileCount); // copies must not move
                 size_t searchFrom = 0;
+                // The layer's tiles mostly share a depth: look its tile layer up once per change.
+                bool haveTileDepth = false;
+                int32_t tileDepth = 0;
+                ptrdiff_t tileLayerIdx = -1;
                 repeat(data->legacyTileCount, j) {
                     if (runner->renderer != nullptr) {
                         RoomTile* tile = &data->legacyTiles[j];
@@ -1274,7 +1480,12 @@ void Runner_draw(Runner* runner) {
                         }
                         if (tileEl != nullptr && !tileEl->visible) continue;
                         // Check if this tile's layer is hidden via tile_layer_hide()
-                        ptrdiff_t layerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
+                        if (!haveTileDepth || tile->tileDepth != tileDepth) {
+                            tileLayerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
+                            tileDepth = tile->tileDepth;
+                            haveTileDepth = true;
+                        }
+                        ptrdiff_t layerIdx = tileLayerIdx;
                         if (layerIdx >= 0 && !runner->tileLayerMap[layerIdx].value.visible) continue;
                         float offsetX = 0.0f, offsetY = 0.0f;
                         if (layerIdx >= 0) {
@@ -1693,7 +1904,7 @@ static Instance* createAndInitInstance(Runner* runner, int32_t instanceId, int32
     inst->maskIndex = objDef->textureMaskId;
     Physics_initInstance(runner, inst);
 
-    hmput(runner->instancesById, instanceId, inst);
+    instancesByIdPut(runner, instanceId, inst);
     arrput(runner->instances, inst);
     Runner_addInstanceToObjectLists(runner, inst);
     runner->drawableListStructureDirty = true;
@@ -1742,7 +1953,7 @@ static Instance** takePersistentInstances(Runner* runner) {
             // accidentally dereference a stale pointer that remains in runner->instances during room transitions.
             Runner_executeCleanupEvent(runner, inst);
             runner->instances[i] = nullptr;
-            hmdel(runner->instancesById, inst->instanceId);
+            instancesByIdDel(runner, inst->instanceId);
             Runner_removeInstanceFromObjectLists(runner, inst);
             SpatialGrid_removeInstance(runner->spatialGrid, inst);
             Instance_free(inst);
@@ -1752,7 +1963,7 @@ static Instance** takePersistentInstances(Runner* runner) {
     for (int32_t carriedIndex = 0; carriedIndex < arrlen(carriedPersistent);) {
         Instance* inst = carriedPersistent[carriedIndex];
         if (inst->destroyed) {
-            hmdel(runner->instancesById, inst->instanceId);
+            instancesByIdDel(runner, inst->instanceId);
             Instance_free(inst);
             arrdel(carriedPersistent, carriedIndex);
         } else {
@@ -2148,7 +2359,7 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
         }
 
         // Skip if a persistent instance carried over from the previous room already owns this ID (re-entering the persistent instance's home room, don't create a duplicate!).
-        if (hmget(runner->instancesById, roomObj->instanceID) != nullptr) continue;
+        if (Runner_findInstanceById(runner, roomObj->instanceID) != nullptr) continue;
         if (isObjectDisabled(runner, roomObj->objectDefinition)) continue;
 
         Instance* inst = createAndInitInstance(runner, roomObj->instanceID, roomObj->objectDefinition, (GMLReal) roomObj->x, (GMLReal) roomObj->y);
@@ -2174,7 +2385,7 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
             if (layer->type != RoomLayerType_Instances || layer->instancesData == nullptr) continue;
             RoomLayerInstancesData* layerData = layer->instancesData;
             repeat(layerData->instanceCount, ii) {
-                Instance* inst = hmget(runner->instancesById, layerData->instanceIds[layerData->instanceCount - 1 - ii]);
+                Instance* inst = Runner_findInstanceById(runner, layerData->instanceIds[layerData->instanceCount - 1 - ii]);
                 if (inst != nullptr) {
                     inst->depth = layer->depth;
                     inst->layer = (int32_t) layer->id;
@@ -2204,7 +2415,7 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
         repeat(room->gameObjectCount, i) {
             RoomGameObject* roomObj = &room->gameObjects[i];
 
-            Instance* inst = hmget(runner->instancesById, roomObj->instanceID);
+            Instance* inst = Runner_findInstanceById(runner, roomObj->instanceID);
             if (inst == nullptr) continue;
 
             // Skip instances that already had their Create event fired (persistent carry-overs
@@ -2266,7 +2477,7 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
     runner->deferInstanceDepthChanges = false;
     {
     repeat(arrlen(runner->deferredInstanceDepthChanges), i) {
-        Instance* inst = hmget(runner->instancesById, runner->deferredInstanceDepthChanges[i]);
+        Instance* inst = Runner_findInstanceById(runner, runner->deferredInstanceDepthChanges[i]);
         if (inst == nullptr || inst->destroyed) continue;
         Runner_moveInstanceToDepthLayer(runner, inst, inst->depth);
     }
@@ -2289,7 +2500,7 @@ static void cleanupState(Runner* runner) {
 
     // Free all instances
     repeat(arrlen(runner->instances), i) {
-        hmdel(runner->instancesById, runner->instances[i]->instanceId);
+        instancesByIdDel(runner, runner->instances[i]->instanceId);
         Instance_free(runner->instances[i]);
     }
     arrfree(runner->instances);
@@ -2304,7 +2515,7 @@ static void cleanupState(Runner* runner) {
             SavedRoomState* state = &runner->savedRoomStates[i];
             int32_t savedCount = (int32_t) arrlen(state->instances);
             repeat(savedCount, j) {
-                hmdel(runner->instancesById, state->instances[j]->instanceId);
+                instancesByIdDel(runner, state->instances[j]->instanceId);
             }
             Runner_freeSavedRoomStateResources(state);
         }
@@ -2412,7 +2623,7 @@ static void cleanupState(Runner* runner) {
     {
     repeat(arrlen(runner->structInstances), i) {
         Instance* s = runner->structInstances[i];
-        hmdel(runner->instancesById, s->instanceId);
+        instancesByIdDel(runner, s->instanceId);
         s->structRegistryIndex = -1;
         Instance_freeContents(s);
     }
@@ -2427,6 +2638,7 @@ static void cleanupState(Runner* runner) {
 
     hmfree(runner->instancesById);
     runner->instancesById = nullptr;
+    Runner_instancesByIdChanged(runner);
     hmfree(runner->tileLayerMap);
     runner->tileLayerMap = nullptr;
     Runner_invalidateLayerElementLookup(runner);
@@ -2816,6 +3028,8 @@ Runner* Runner_create(DataWin* dataWin, VMContext* vm, Renderer* renderer, FileS
 
     Runner* runner = (Runner *)safeCalloc(1, sizeof(Runner));
     runner->dataWin = dataWin;
+    runner->instanceIdCache = (InstanceIdCacheSlot *)safeCalloc(INSTANCE_ID_CACHE_SLOTS, sizeof(InstanceIdCacheSlot));
+    runner->instancesByIdVersion = 1;
     runner->vmContext = vm;
     runner->renderer = renderer;
     runner->fileSystem = fileSystem;
@@ -2968,7 +3182,7 @@ static inline void dispatchInstanceCreationEvents(Runner* runner, Instance* inst
 
 Instance* Runner_createStruct(Runner* runner) {
     Instance* s = Instance_create(runner->nextInstanceId++, STRUCT_OBJECT_INDEX, 0, 0);
-    hmput(runner->instancesById, s->instanceId, s);
+    instancesByIdPut(runner, s->instanceId, s);
     s->structRegistryIndex = (int32_t) arrlen(runner->structInstances);
     arrput(runner->structInstances, s);
     s->refCount = 1;
@@ -3208,11 +3422,24 @@ RuntimeLayer* Runner_findRuntimeLayerByName(Runner* runner, char* name) {
     return nullptr;
 }
 
+// Layer ids are unique, so the index a search found last time for an id is
+// the answer again for as long as the layer there still has that id. A room
+// with a few dozen layers asks this several times per instance per frame.
+#define RUNTIME_LAYER_HINTS 64
+static struct { int32_t id; uint32_t index; } runtimeLayerHints[RUNTIME_LAYER_HINTS];
+
 RuntimeLayer* Runner_findRuntimeLayerById(Runner* runner, int32_t id) {
     size_t count = arrlenu(runner->runtimeLayers);
+    uint32_t slot = (uint32_t) id & (RUNTIME_LAYER_HINTS - 1);
+    uint32_t hint = runtimeLayerHints[slot].index;
+    if (runtimeLayerHints[slot].id == id && hint < count && (int32_t) runner->runtimeLayers[hint].id == id)
+        return &runner->runtimeLayers[hint];
     repeat(count, i) {
-        if ((int32_t) runner->runtimeLayers[i].id == id)
+        if ((int32_t) runner->runtimeLayers[i].id == id) {
+            runtimeLayerHints[slot].id = id;
+            runtimeLayerHints[slot].index = (uint32_t) i;
             return &runner->runtimeLayers[i];
+        }
     }
     return nullptr;
 }
@@ -3348,7 +3575,7 @@ void Runner_moveInstanceToDepthLayer(Runner* runner, Instance* inst, int32_t dep
             repeat(arrlen(other->elements), j) {
                 RuntimeLayerElement el = other->elements[j];
                 if (el.type == RuntimeLayerElementType_Instance) {
-                    Instance* member = hmget(runner->instancesById, el.instanceId);
+                    Instance* member = Runner_findInstanceById(runner, el.instanceId);
                     if (member != nullptr) member->layer = (int32_t) previous->id;
                 }
                 arrput(previous->elements, el);
@@ -3424,7 +3651,7 @@ static void Runner_sweepDeadStructs(Runner* runner) {
         require(s->refCount == 1);
 
         // Remove from runner->instancesById so future findInstanceByTarget(id) returns nullptr.
-        hmdel(runner->instancesById, s->instanceId);
+        instancesByIdDel(runner, s->instanceId);
 
         // O(1) swap-remove from structInstances, keeping structRegistryIndex in sync.
         int32_t lastIdx = (int32_t) arrlen(runner->structInstances) - 1;
@@ -3452,7 +3679,7 @@ void Runner_cleanupDestroyedInstances(Runner* runner) {
             Runner_removeInstanceFromObjectLists(runner, inst);
             SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
             Runner_removeInstanceLayerElement(runner, inst->instanceId);
-            hmdel(runner->instancesById, inst->instanceId);
+            instancesByIdDel(runner, inst->instanceId);
             Instance_free(inst);
             // Cached drawables hold raw Instance* that we just freed; force a rebuild before the next draw.
             runner->drawableListStructureDirty = true;
@@ -4029,6 +4256,27 @@ static int sortInstancesByObjectIndexThenInstanceIdAscending(const void* element
     return 0;
 }
 
+// The target list, as qsort with that comparison would leave it (the order
+// is total: IDs are unique). It mostly comes in order already, and is short.
+static void sortCollisionTargets(Instance** list, int32_t count) {
+    int32_t i = 1;
+    while (i < count && sortInstancesByObjectIndexThenInstanceIdAscending(&list[i - 1], &list[i]) <= 0) i++;
+    if (i >= count) return;
+    if (count > 64) {
+        qsort(list, (size_t) count, sizeof(Instance*), sortInstancesByObjectIndexThenInstanceIdAscending);
+        return;
+    }
+    for (; i < count; i++) {
+        Instance* current = list[i];
+        int32_t j = i;
+        while (j > 0 && sortInstancesByObjectIndexThenInstanceIdAscending(&list[j - 1], &current) > 0) {
+            list[j] = list[j - 1];
+            j--;
+        }
+        list[j] = current;
+    }
+}
+
 #ifdef OF_COLLISION_WORK_PROFILE
 // qsort has no context argument and runs no game callbacks. Save/restore this
 // pointer around each sort so nested dispatch retains its runner's accounting.
@@ -4055,6 +4303,28 @@ static bool collisionHasSolidTarget(Instance* const* targets, const Instance* se
 }
 #endif
 
+/* Collision dispatch tests each instance with a collision event against
+ * every instance of the event's object: Deltarune's dancers room has 23
+ * dancers, each against 14 walls, a box test for each pair. A wall's box is
+ * the same for all 23 until a collision is found (that is, until anything
+ * runs that could move it), so it is worked out once: an instance's
+ * collisionPassStamp equal to collisionPassStamp below means its
+ * bboxCache.bbox is its box now. The stamp moves on at the start of each
+ * dispatch and at each collision found. */
+static uint32_t collisionPassStamp = 0;
+
+static void collisionPassAdvance(void) {
+    if (++collisionPassStamp == 0) collisionPassStamp = 1;
+}
+
+static InstanceBBox collisionPassBBox(Runner* runner, Instance* inst) {
+    if (inst->collisionPassStamp == collisionPassStamp) return inst->bboxCache.bbox;
+    InstanceBBox bbox = Collision_computeBBox(runner, inst);
+    // A valid box is always the one Collision_computeBBox left in bboxCache.
+    if (bbox.valid) inst->collisionPassStamp = collisionPassStamp;
+    return bbox;
+}
+
 static void dispatchCollisionEvents(Runner* runner) {
     DataWin* dataWin = runner->dataWin;
     // Iterate only the objects that have any collision event in their parent chain.
@@ -4063,6 +4333,7 @@ static void dispatchCollisionEvents(Runner* runner) {
     if (selfObjects == nullptr) return;
     int32_t selfObjCount = (int32_t) arrlen(selfObjects);
     if (selfObjCount == 0) return;
+    collisionPassAdvance();
 
     repeat(selfObjCount, soIdx) {
         int32_t selfObjIdx = selfObjects[soIdx];
@@ -4116,7 +4387,7 @@ static void dispatchCollisionEvents(Runner* runner) {
                 qsort(runner->instanceSnapshots + snapBase, targetCount, sizeof(Instance*), compareCollisionInstancesProfiled);
                 collisionSortRunner = savedSortRunner;
 #else
-                qsort(runner->instanceSnapshots + snapBase, snapEnd - snapBase, sizeof(Instance*), sortInstancesByObjectIndexThenInstanceIdAscending);
+                sortCollisionTargets(runner->instanceSnapshots + snapBase, snapEnd - snapBase);
 #endif
 
                 for (int32_t snapIdx = snapBase; snapEnd > snapIdx; snapIdx++) {
@@ -4136,14 +4407,14 @@ static void dispatchCollisionEvents(Runner* runner) {
 #ifdef OF_COLLISION_WORK_PROFILE
                         runner->collisionWork.selfBoxes++;
 #endif
-                        bboxSelf = Collision_computeBBox(runner, self);
+                        bboxSelf = collisionPassBBox(runner, self);
                         sprSelf = Collision_getSprite(dataWin, self);
                         selfDirty = false;
                     }
 #ifdef OF_COLLISION_WORK_PROFILE
                     runner->collisionWork.otherBoxes++;
 #endif
-                    InstanceBBox bboxOther = Collision_computeBBox(runner, other);
+                    InstanceBBox bboxOther = collisionPassBBox(runner, other);
 
 #ifdef ENABLE_VM_TRACING
                     bool traceThisPair = shouldTraceCollisionPair(runner->vmContext, dataWin, self, other);
@@ -4183,6 +4454,7 @@ static void dispatchCollisionEvents(Runner* runner) {
                     }
 
                     // Collision detected! If either instance is solid, restore both to xprevious/yprevious.
+                    collisionPassAdvance(); // what follows can move anything
                     bool hadSolid = self->solid || other->solid;
                     if (hadSolid) {
 #ifdef ENABLE_VM_TRACING
@@ -4332,7 +4604,7 @@ static void updateViews(Runner* runner) {
 
         if (targetId >= INSTANCE_ID_BASE) {
             // It's an instance ID - look it up directly
-            target = hmget(runner->instancesById, targetId);
+            target = Runner_findInstanceById(runner, targetId);
             if (target != nullptr && (!target->active || target->destroyed)) {
                 target = nullptr;
             }
@@ -4479,7 +4751,7 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
     // Free any previously saved instances (from an earlier visit)
     int32_t prevSavedCount = (int32_t) arrlen(state->instances);
     repeat(prevSavedCount, i) {
-        hmdel(runner->instancesById, state->instances[i]->instanceId);
+        instancesByIdDel(runner, state->instances[i]->instanceId);
         Instance_free(state->instances[i]);
     }
     arrfree(state->instances);
@@ -4500,7 +4772,7 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
         } else if (inst->active) {
             arrput(state->instances, inst);
         } else {
-            hmdel(runner->instancesById, inst->instanceId);
+            instancesByIdDel(runner, inst->instanceId);
             Instance_free(inst);
         }
     }
@@ -5688,6 +5960,8 @@ void Runner_free(Runner* runner) {
     if (runner == nullptr) return;
 
     cleanupState(runner);
+    free(runner->instanceIdCache);
+    runner->instanceIdCache = nullptr;
 
     {
         uint32_t objectCount = runner->dataWin->objt.count;

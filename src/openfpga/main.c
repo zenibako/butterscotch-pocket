@@ -160,13 +160,14 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(floweyLive || floweySmooth);
             if (!ofBenchStartFloweyTour(floweyLive)) logWarn("Bench: this game has no Flowey tour\n");
         }
-        /* --bench-snow (accuracy) and --bench-snow-smooth (speed): the room 57 snow patch. */
-        bool snowSmooth = strcmp(argv[i], "--bench-snow-smooth") == 0;
-        if (snowSmooth || strcmp(argv[i], "--bench-snow") == 0) {
+        /* --bench-room (accuracy) and --bench-room-smooth (speed): the game's single-room benchmark,
+         * Undertale's room 57 snow patch or Deltarune's room 85 dancers. --bench-snow is the old name. */
+        bool roomSmooth = strcmp(argv[i], "--bench-room-smooth") == 0 || strcmp(argv[i], "--bench-snow-smooth") == 0;
+        if (roomSmooth || strcmp(argv[i], "--bench-room") == 0 || strcmp(argv[i], "--bench-snow") == 0) {
             args.seed = 7;
             args.hasSeed = true;
-            ofPlatformSetSmoothLowres(snowSmooth);
-            if (!ofBenchStartSnow()) logWarn("Bench: this game has no snow patch benchmark\n");
+            ofPlatformSetSmoothLowres(roomSmooth);
+            if (!ofBenchStartRoom()) logWarn("Bench: this game has no single-room benchmark\n");
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);

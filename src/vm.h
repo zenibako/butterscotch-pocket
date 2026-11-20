@@ -245,6 +245,8 @@ struct VMContext {
 
 // ===[ Public API ]===
 Instance* VM_findInstanceByTarget(VMContext* ctx, int32_t target);
+// array[index] = val as an array POP writes it: copy-on-write against ctx->currentArrayOwner, growing as needed. The caller keeps val.
+GMLArray* VM_arraySet(VMContext* ctx, RValue* slot, int32_t index, RValue val);
 VMContext* VM_create(DataWin* dataWin);
 void VM_reset(VMContext* ctx);
 

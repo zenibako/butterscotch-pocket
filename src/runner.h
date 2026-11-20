@@ -683,6 +683,9 @@ typedef struct {
 typedef struct { char* key; int32_t value; } AssetsByNameEntry;
 typedef struct { char* key; int value; } DisabledObjEntry;
 typedef struct { int key; Instance* value; } InstanceIdEntry;
+// One slot of the cache in front of instancesById (Runner_findInstanceById).
+typedef struct { int32_t id; uint32_t version; Instance* instance; } InstanceIdCacheSlot;
+#define INSTANCE_ID_CACHE_SLOTS 256
 
 #ifdef OF_COLLISION_WORK_PROFILE
 // Derived diagnostics only; absent from ordinary builds and snapshot payloads.
@@ -831,6 +834,13 @@ struct Runner {
     int32_t viewportH;   // Scaled game height in window
     DisabledObjEntry* disabledObjects; // stb_ds string hashmap, nullptr = no filtering
     InstanceIdEntry* instancesById;
+    // A small cache in front of instancesById, a general hash map that costs a
+    // couple of hundred instructions a lookup (the collision grid, the draw and
+    // the VM look a few hundred instances up a frame). Its slots hold while
+    // instancesByIdVersion is unchanged, and every write to the map moves it on
+    // (Runner_instancesByIdChanged). nullptr in hand-built runners: no cache.
+    uint32_t instancesByIdVersion;
+    InstanceIdCacheSlot* instanceIdCache;
     bool drawEnabled;
     bool forceDrawDepth;
     bool applyOffsetForPrimitives;
@@ -1107,6 +1117,30 @@ static inline GMLReal Runner_getEffectiveGameSpeed(Runner* runner) {
     if (runner->currentRoom != nullptr && runner->currentRoom->speed > 0) return (GMLReal) runner->currentRoom->speed;
     if (runner->dataWin != nullptr && runner->dataWin->gen8.gms2FPS > 0.0f) return (GMLReal) runner->dataWin->gen8.gms2FPS;
     return 30.0;
+}
+
+
+Instance* Runner_findInstanceByIdUncached(Runner* runner, int32_t id);
+
+// hmget(runner->instancesById, id), through the cache.
+static inline Instance* Runner_findInstanceById(Runner* runner, int32_t id) {
+    InstanceIdCacheSlot* cache = runner->instanceIdCache;
+    if (cache == nullptr) return Runner_findInstanceByIdUncached(runner, id);
+    InstanceIdCacheSlot* slot = &cache[((uint32_t) id * 2654435761u) >> 24];
+    if (slot->version == runner->instancesByIdVersion && slot->id == id) return slot->instance;
+    Instance* instance = Runner_findInstanceByIdUncached(runner, id);
+    slot->id = id;
+    slot->version = runner->instancesByIdVersion;
+    slot->instance = instance;
+    return instance;
+}
+
+// Call after any change to instancesById: every cached lookup is forgotten.
+static inline void Runner_instancesByIdChanged(Runner* runner) {
+    if (++runner->instancesByIdVersion == 0) {
+        if (runner->instanceIdCache != nullptr) memset(runner->instanceIdCache, 0, INSTANCE_ID_CACHE_SLOTS * sizeof(InstanceIdCacheSlot));
+        runner->instancesByIdVersion = 1;
+    }
 }
 
 #endif /* _BS_RUNNER_H_ */

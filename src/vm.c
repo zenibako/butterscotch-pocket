@@ -272,6 +272,11 @@ static GMLArray* VM_arraySetWithCoW(VMContext* ctx, RValue* slot, int32_t index,
     return arr;
 }
 
+// VM_arraySetWithCoW for native stand-ins, which set ctx->currentArrayOwner as the bytecode's setowner would first.
+GMLArray* VM_arraySet(VMContext* ctx, RValue* slot, int32_t index, RValue val) {
+    return VM_arraySetWithCoW(ctx, slot, index, val);
+}
+
 // Creates a copy of "name"
 int32_t VM_getOrAllocateVarID(VMContext* ctx, const char* name) {
     ptrdiff_t slot = shgeti(ctx->varNameMap, name);
@@ -461,7 +466,7 @@ Instance* VM_findInstanceByTarget(VMContext* ctx, int32_t target) {
 
     if (target >= INSTANCE_ID_BASE) {
         // Instance ID - find specific instance
-        return hmget(runner->instancesById, target);
+        return Runner_findInstanceById(runner, target);
     }
 
     // Object index - find first active matching instance via the descendant-inclusive bucket. Pure read, no user code, so we walk the bucket directly without an arena snapshot.
@@ -2412,7 +2417,7 @@ static void handlePushEnv(VMContext* ctx, OpWord opword, uint32_t instrAddr) {
 
     if (target >= INSTANCE_ID_BASE) {
         // Instance ID - find specific instance
-        Instance* inst = hmget(runner->instancesById, target);
+        Instance* inst = Runner_findInstanceById(runner, target);
         if (inst != nullptr && inst->active) {
             switchToInstance(ctx, inst);
             return;

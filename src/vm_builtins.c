@@ -4474,7 +4474,7 @@ static RValue variableScopedGet(VMContext* ctx, int32_t id, const char* name, bo
     Runner* runner = ctx->runner;
 
     if (id >= INSTANCE_ID_BASE) {
-        Instance* inst = hmget(runner->instancesById, id);
+        Instance* inst = Runner_findInstanceById(runner, id);
         if (inst != nullptr && variableScopedMatches(inst, structOnly)) return variableInstanceGetOn(ctx, inst, name, originBuiltin);
         return RValue_makeUndefined();
     } else if (id == INSTANCE_GLOBAL) {
@@ -4502,7 +4502,7 @@ static void variableScopedSet(VMContext* ctx, int32_t id, const char* name, RVal
     Runner* runner = ctx->runner;
 
     if (id >= INSTANCE_ID_BASE) {
-        Instance* inst = hmget(runner->instancesById, id);
+        Instance* inst = Runner_findInstanceById(runner, id);
         if (inst != nullptr && variableScopedMatches(inst, structOnly)) variableInstanceSetOn(ctx, inst, name, val, originBuiltin);
         return;
     } else if (id == INSTANCE_GLOBAL) {
@@ -4525,7 +4525,7 @@ static bool variableScopedExists(VMContext* ctx, int32_t id, const char* name, b
     Runner* runner = ctx->runner;
 
     if (id >= INSTANCE_ID_BASE) {
-        Instance* inst = hmget(runner->instancesById, id);
+        Instance* inst = Runner_findInstanceById(runner, id);
         if (inst != nullptr && variableScopedMatches(inst, structOnly)) return variableInstanceExistsOn(ctx, inst, name);
         return false;
     } else if (id == INSTANCE_GLOBAL) {
@@ -4553,7 +4553,7 @@ static Instance* resolveInstanceValue(Runner* runner, RValue value) {
 
     int32_t id = RValue_toInt32(value);
     if (id >= INSTANCE_ID_BASE) {
-        return hmget(runner->instancesById, id);
+        return Runner_findInstanceById(runner, id);
     }
 
     return nullptr;
@@ -4780,7 +4780,7 @@ static RValue builtin_variable_instance_names_count(VMContext* ctx, RValue* args
         if (targetInstanceId == INSTANCE_GLOBAL) {
             targetInstance = ctx->globalScopeInstance;
         } else if (targetInstanceId >= INSTANCE_ID_BASE) {
-            targetInstance = hmget(ctx->runner->instancesById, targetInstanceId);
+            targetInstance = Runner_findInstanceById(ctx->runner, targetInstanceId);
         } else {
             int32_t snapBase = Runner_pushInstancesOfObject(ctx->runner, targetInstanceId);
             int32_t snapEnd = (int32_t) arrlen(ctx->runner->instanceSnapshots);
@@ -4910,7 +4910,7 @@ static RValue builtin_script_execute(VMContext* ctx, RValue* args, int32_t argCo
 #if IS_WAD17_OR_HIGHER_ENABLED
     if (args[0].type == RVALUE_METHOD && args[0].method->boundInstanceId >= 0) {
         Runner* runner = ctx->runner;
-        Instance* bound = hmget(runner->instancesById, args[0].method->boundInstanceId);
+        Instance* bound = Runner_findInstanceById(runner, args[0].method->boundInstanceId);
         if (bound != nullptr) savedInstance = bound;
     }
 #endif
@@ -7417,7 +7417,7 @@ static RValue builtin_array_sort(MAYBE_UNUSED VMContext* ctx, RValue* args, int3
             return RValue_makeUndefined();
         }
         if (args[1].method->boundInstanceId >= 0) {
-            Instance* bound = hmget(ctx->runner->instancesById, args[1].method->boundInstanceId);
+            Instance* bound = Runner_findInstanceById(ctx->runner, args[1].method->boundInstanceId);
             if (bound != nullptr) g_arraySortSelf = bound;
         }
     }
@@ -10181,7 +10181,7 @@ static RValue builtin_instance_exists(VMContext* ctx, RValue* args, int32_t argC
         Runner_popInstanceSnapshot(runner, snapBase);
     } else {
         // Instance ID: search for a specific instance
-        Instance* inst = hmget(runner->instancesById, id);
+        Instance* inst = Runner_findInstanceById(runner, id);
         found = (inst != nullptr && inst->active);
     }
     return RValue_makeBool(found);
@@ -10208,7 +10208,7 @@ static RValue builtin_instance_destroy(VMContext* ctx, RValue* args, int32_t arg
         }
         Runner_popInstanceSnapshot(runner, snapBase);
     } else {
-        Instance* inst = hmget(runner->instancesById, id);
+        Instance* inst = Runner_findInstanceById(runner, id);
         if (inst != nullptr && inst->active) Runner_destroyInstance(runner, inst, runDestroyEvent);
     }
     return RValue_makeUndefined();
@@ -14368,7 +14368,7 @@ static RValue builtin_collision_rectangle(VMContext* ctx, RValue* args, int32_t 
         candidates = runner->instances;
         candidateCount = (int32_t) arrlen(candidates);
     } else if (targetObjIndex >= INSTANCE_ID_BASE) {
-        singleInstance = hmget(runner->instancesById, targetObjIndex);
+        singleInstance = Runner_findInstanceById(runner, targetObjIndex);
         candidates = &singleInstance;
         candidateCount = singleInstance != nullptr ? 1 : 0;
     }
@@ -16252,7 +16252,7 @@ static void instanceSetLayerActiveState(Runner* runner, int32_t layerId, bool is
         RoomLayerInstancesData* layerData = layer->instancesData;
 
         repeat(layerData->instanceCount, instanceIndex) {
-            Instance* inst = hmget(runner->instancesById, layerData->instanceIds[instanceIndex]);
+            Instance* inst = Runner_findInstanceById(runner, layerData->instanceIds[instanceIndex]);
             if (inst != nullptr && !inst->destroyed)
                 Runner_setActiveState(runner, inst, isActive);
         }
@@ -16514,7 +16514,7 @@ static RValue builtin_layer_destroy(VMContext* ctx, RValue* args, MAYBE_UNUSED i
     }
     repeat(arrlenu(sequenceIds), sequenceIndex) Sequence_destroy(runner, sequenceIds[sequenceIndex]);
     repeat(arrlenu(instanceIds), instanceIndex) {
-        Instance* inst = hmget(runner->instancesById, instanceIds[instanceIndex]);
+        Instance* inst = Runner_findInstanceById(runner, instanceIds[instanceIndex]);
         if (inst != nullptr && !inst->destroyed) Runner_destroyInstance(runner, inst, true);
     }
     arrfree(sequenceIds);
@@ -17070,7 +17070,7 @@ static RValue builtin_layer_get_all_elements(VMContext* ctx, RValue* args, MAYBE
         RuntimeLayerElement* el = &runtimeLayer->elements[elementIndex];
         if (el->type == RuntimeLayerElementType_Instance) {
             // Instances destroyed mid-frame are reaped lazily; don't report their elements.
-            Instance* elInst = hmget(runner->instancesById, el->instanceId);
+            Instance* elInst = Runner_findInstanceById(runner, el->instanceId);
             if (elInst == nullptr || elInst->destroyed) continue;
         }
         GMLArray_addOnArrayRef(&arr, RValue_makeReal((GMLReal) el->id));
@@ -19724,7 +19724,7 @@ static RValue builtin_json_parse(VMContext* ctx, RValue* args, int32_t argCount)
         }
 #if IS_WAD17_OR_HIGHER_ENABLED
         else if (args[1].type == RVALUE_METHOD && args[1].method != nullptr && args[1].method->boundInstanceId >= 0) {
-            reviver.boundInstance = hmget(ctx->runner->instancesById, args[1].method->boundInstanceId);
+            reviver.boundInstance = Runner_findInstanceById(ctx->runner, args[1].method->boundInstanceId);
         }
 #endif
     }

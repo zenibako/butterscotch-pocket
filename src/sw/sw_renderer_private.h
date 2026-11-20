@@ -317,6 +317,7 @@ typedef struct SWTilePictureKey {
     int left, top;
     int count; // 0: no tile picture recorded
     uintpixel_t clear;
+    uint32_t tint; // a translucent fill of the whole screen worked into the pictures: colour | alpha << 16, 0 if none
 } SWTilePictureKey;
 // The first draw after a buffer is cleared, when it is an untinted 1:1 opaque
 // sprite (a battle backdrop): everything that decides what it writes. When

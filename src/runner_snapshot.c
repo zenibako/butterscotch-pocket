@@ -2263,6 +2263,7 @@ void Runner_snapshotApply(Runner *r, RunnerSnapshot *s) {
         r->vertexFormats = s->vertexFormats; r->vertexBuffers = s->vertexBuffers;
     }
     r->instancesById = s->byId;
+    Runner_instancesByIdChanged(r);
     r->instancesByObject = s->byObject; r->instancesByExactObject = s->byExact;
     r->spatialGrid = s->grid; r->tileLayerMap = s->tileLayers;
     r->currentRoom = s->room;

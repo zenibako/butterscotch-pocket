@@ -190,16 +190,22 @@ static void guardCasesAndCaller(DrawableFixture *f) {
     tile.tileDepth = 100;
     f->room.tiles = &tile;
     f->room.tileCount = 1;
+    /* The general builder sorts with sortDrawables, which stamps the ranks it
+     * leaves; qsort is only its fallback when its buffers can't grow. */
+    uint32_t stampBefore = drawRankStamp;
     rebuildDrawableCacheIfDirty(&f->runner);
-    require(qsortCalls == 1 && arrlen(f->runner.cachedDrawables) == 9);
+    require(drawRankStamp != stampBefore && qsortCalls == 0);
+    require(arrlen(f->runner.cachedDrawables) == 9);
     require(f->runner.cachedDrawables[0].type == DRAWABLE_TILE);
     require(f->runner.cachedDrawables[0].tileIndex == 0);
     require(f->runner.cachedDrawables[0].depth == 100);
 
     resetFixture(f, 8);
     f->data.detectedFormat.major = 2;
+    stampBefore = drawRankStamp;
     rebuildDrawableCacheIfDirty(&f->runner);
-    require(qsortCalls == 1); /* GMS2 stays with its layer-aware general builder. */
+    /* GMS2 stays with its layer-aware general builder. */
+    require(drawRankStamp != stampBefore && qsortCalls == 0);
     checkOrder(&f->runner);
 }
 

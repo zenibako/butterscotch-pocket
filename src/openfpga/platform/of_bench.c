@@ -175,10 +175,10 @@ bool ofBenchStartFloweyTour(bool livePacing) {
     return true;
 }
 
-bool ofBenchStartSnow(void) {
-    if (ofGame.snowScript == NULL) return false;
-    benchStart(ofGame.snowTitle, ofGame.snowScript, ofGame.snowJumps, ofGame.snowJumpCount,
-               ofGame.snowSections, ofGame.snowSectionCount, true, false);
+bool ofBenchStartRoom(void) {
+    if (ofGame.roomScript == NULL) return false;
+    benchStart(ofGame.roomTitle, ofGame.roomScript, ofGame.roomJumps, ofGame.roomJumpCount,
+               ofGame.roomSections, ofGame.roomSectionCount, true, false);
     g_def.runProbes = false;
     return true;
 }

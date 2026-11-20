@@ -307,7 +307,7 @@ static void destroyNodeInstances(RuntimeSequence* seq, SequenceNode* nodes, uint
         repeat(node->stateCount, c) {
             SequenceChannelState* state = &node->states[c];
             if (state->instanceId >= 0) {
-                Instance* inst = hmget(seq->runner->instancesById, state->instanceId);
+                Instance* inst = Runner_findInstanceById(seq->runner, state->instanceId);
                 if (inst != nullptr && !inst->destroyed) Runner_destroyInstance(seq->runner, inst, true);
             }
             if (state->nested != nullptr && state->nested->nodes != nullptr) {
@@ -522,7 +522,7 @@ static void hideNodeInstances(RuntimeSequence* seq, SequenceNode* nodes, uint32_
         repeat(node->stateCount, c) {
             SequenceChannelState* state = &node->states[c];
             if (state->instanceId >= 0) {
-                Instance* inst = hmget(seq->runner->instancesById, state->instanceId);
+                Instance* inst = Runner_findInstanceById(seq->runner, state->instanceId);
                 if (inst != nullptr && !inst->destroyed) inst->visible = false;
             }
             if (state->nested != nullptr) {
@@ -561,7 +561,7 @@ static void evaluateNodes(RuntimeSequence* seq, SequenceNode* nodes, uint32_t co
                 const SequenceChannel* data = &current->channels[c];
                 bool active = (int32_t)k == selected;
                 if (track->type == SEQUENCE_TRACK_INSTANCE && state->instanceId >= 0) {
-                    Instance* inst = hmget(runner->instancesById, state->instanceId);
+                    Instance* inst = Runner_findInstanceById(runner, state->instanceId);
                     if (inst == nullptr || inst->destroyed) continue;
                     inst->visible = active && node->visible;
                     inst->sequenceControlled = true;
@@ -818,7 +818,7 @@ static void drawNodes(RuntimeSequence* seq, SequenceNode* nodes, uint32_t count,
                 const SequenceChannel* channel = &key->channels[c];
                 SequenceChannelState* state = &node->states[stateIndex + c];
                 if (track->type == SEQUENCE_TRACK_INSTANCE) {
-                    Instance* inst = hmget(seq->runner->instancesById, state->instanceId);
+                    Instance* inst = Runner_findInstanceById(seq->runner, state->instanceId);
                     if (inst != nullptr && inst->active && inst->visible && !inst->destroyed && inst->sequenceControlled) {
                         renderer->vtable->setMatrix(renderer, MATRIX_WORLD, *world);
                         Runner_drawInstance(seq->runner, inst);
