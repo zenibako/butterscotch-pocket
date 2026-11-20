@@ -16,7 +16,8 @@ including the existing release, build, performance, verification and platform
 notes. Claude discovers that same collection through the `.claude/skills`
 root symlink; individual skill-directory aliases are not used.
 Keep this thin route local; the maintained collector workflow lives in the
-private `zenibako/pocket-harness` checkout, alongside its implementation.
+private `zenibako/pocket-dev-tools` checkout (formerly `pocket-harness`),
+alongside its implementation.
 
 Use a harness path already established in the session or `POCKET_HARNESS_ROOT`.
 An adjacent checkout is only a candidate. Verify that it contains
@@ -25,7 +26,8 @@ the latter's canonical path, then read it and its linked `benchmarks/README.md`,
 `PLATFORMS.md` and `SELECTION.md`. Run the commands below from that harness root.
 Do not copy the harness skill body here. Missing access limits collection;
 applicable local correctness checks can continue. RV32 capture/replay/profiling
-routes separately to the harness's canonical `os25-harness` skill.
+routes separately to the harness's canonical `os25-harness` skill, which also
+covers the os20 release bitstream (see the perf skill's simulated-runs section).
 
 ## Plan this project's evaluation
 

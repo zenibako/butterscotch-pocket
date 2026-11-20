@@ -51,7 +51,9 @@ This is the experimental os20 save-state runtime at 100 MHz from
 64 KB data cache; on the Pocket it ran both benchmarks 6 to 7% faster than
 the same release's os25. It drops only GPU span features Butterscotch does not
 use. Its FPU uses reduced-accuracy fused multiply-add, so float results can
-differ from os25 and from the os25 harness in the last bits. The release's
+in principle differ from os25 in the last bits; replays of Undertale and
+Deltarune battle frames on the 19d9d50 os20 and os25 CPU netlists gave
+identical game state, pixels and audio (2026-11-20, simulated). The release's
 `SAVESTATES_RUNTIME.json` names os25; this repository's copy is regenerated
 by `tools/runtime-provenance.py` for `os20.rbf_r` from the same release. Its mixer divides the final mix by
 4 rather than 16, so audio is 12 dB louder than with the earlier `902a8adc`
