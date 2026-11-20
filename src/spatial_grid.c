@@ -178,7 +178,7 @@ void SpatialGrid_syncGrid(Runner* runner, SpatialGrid* grid) {
 
     repeat(arrlen(grid->dirtyInstances), i) {
         int32_t instanceId = grid->dirtyInstances[i];
-        Instance* instance = hmget(runner->instancesById, instanceId);
+        Instance* instance = Runner_findInstanceById(runner, instanceId);
 
         // We do not care about removed/inactive/destroyed instances, because they would've been already been removed from the grid on the "SpatialGrid_markInstanceAsDirty" call
         // We also do not care if the spatial grid is not dirty

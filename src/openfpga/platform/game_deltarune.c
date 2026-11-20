@@ -37,6 +37,7 @@ static bool isNumber(RValue value) {
 #include "game_deltarune_sentry.h"
 #include "game_deltarune_charbox.h"
 #include "game_deltarune_lightfairy.h"
+#include "game_deltarune_scissordancer.h"
 
 /* gml_Object_obj_purplegrass_Draw_0: the floor of the field, and
  * what is behind its battles. About 11,000 operations a frame for:
@@ -545,6 +546,7 @@ static const OfNativeCode g_natives[] = {
     { "gml_Object_obj_purplegrass_Draw_0", 348, 0x8cf611b685a27620ull, purpleGrassDraw },
     { "gml_Object_obj_lightfairy_Step_0", 144, 0x3641253c13a51fc1ull, lightFairyStep },
     { "gml_Object_obj_lightfairy_Draw_0", 204, 0x542b03812858eb62ull, lightFairyDraw },
+    { "gml_Object_obj_scissordancer_Step_0", 1336, 0x985e7ea17283d963ull, scissorDancerStep },
 };
 
 static void forgetVm(void) {
@@ -552,6 +554,7 @@ static void forgetVm(void) {
     writerResolved = 0;
     charboxResolved = 0;
     lightFairyResolved = false;
+    scissorDancerResolved = false;
     g_spriteMapVar = -1;
 }
 

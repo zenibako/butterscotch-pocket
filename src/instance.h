@@ -59,6 +59,9 @@ struct Instance {
     uint32_t elementPlaceStamp;
     int32_t drawRank;
     uint32_t drawRankStamp;
+    /* Collision dispatch scratch (runner.c), omitted too: bboxCache.bbox is
+     * this instance's box while this matches the dispatch's stamp. */
+    uint32_t collisionPassStamp;
     struct {
         InstanceBBox bbox;
         float x, y, xscale, yscale;

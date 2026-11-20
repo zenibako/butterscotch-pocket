@@ -461,7 +461,7 @@ Instance* VM_findInstanceByTarget(VMContext* ctx, int32_t target) {
 
     if (target >= INSTANCE_ID_BASE) {
         // Instance ID - find specific instance
-        return hmget(runner->instancesById, target);
+        return Runner_findInstanceById(runner, target);
     }
 
     // Object index - find first active matching instance via the descendant-inclusive bucket. Pure read, no user code, so we walk the bucket directly without an arena snapshot.
@@ -2412,7 +2412,7 @@ static void handlePushEnv(VMContext* ctx, OpWord opword, uint32_t instrAddr) {
 
     if (target >= INSTANCE_ID_BASE) {
         // Instance ID - find specific instance
-        Instance* inst = hmget(runner->instancesById, target);
+        Instance* inst = Runner_findInstanceById(runner, target);
         if (inst != nullptr && inst->active) {
             switchToInstance(ctx, inst);
             return;
