@@ -34,7 +34,7 @@ latest downloads are not external build inputs.
 |---|---|
 | Runner / Pocket platform / tools | Current clean `zenibako/butterscotch-pocket` checkout; actual full commit recorded in provenance |
 | SDK base | `openfpgaOS/openfpgaSDK` at `a408ddc12aed0dfaa4aa22c06af82f829db77126` |
-| Matched runtime and API source | `zenibako/openfpgaCore` at `902a8adc11309c50c8954af2864ddf893c8b1b0c` |
+| Matched runtime and API source | `zenibako/openfpgaCore` at `19d9d50ceec15771b16386456c4a3a22c355f0a5` |
 | Core compiler | GCC 13.2.0, Ubuntu 24.04 package `gcc-riscv64-unknown-elf=13.2.0-11ubuntu1+12` |
 
 The checked-in `release/sdk.tar.gz` is the SDK snapshot used by this pipeline,
@@ -44,9 +44,12 @@ The lock covers every snapshot/runtime input; validation fails on any hash
 or runtime provenance mismatch. Historical SDK trees remain in the preserved release history and original
 repository; they are not active build inputs in this fork.
 
-This is the previously tested experimental os25 sleep/clock runtime at
-100 MHz, with -0.777 ns worst setup slack in the slow 85°C corner. It misses
-that timing target. Do not describe it as a timing-clean FPGA build or swap
+This is the experimental os25 sleep/clock runtime at 100 MHz from
+[pocket-runtime-19d9d50](https://github.com/zenibako/openfpgaCore/releases/tag/pocket-runtime-19d9d50)
+(openfpgaOS API 0.9.1, seed 31), with -0.496 ns worst setup slack in the slow
+85°C corner. It misses that timing target. Its mixer divides the final mix by
+4 rather than 16, so audio is 12 dB louder than with the earlier `902a8adc`
+runtime; Butterscotch keeps that level. Do not describe it as a timing-clean FPGA build or swap
 in another runtime merely because it is newer. Local/private and public ELFs
 use the same metadata-and-bytecode Memory identity; local game files do not
 alter it. Use matching game data and a compatible snapshot format. Changes
@@ -92,7 +95,7 @@ compiler and Python. Use a clean checkout of this repository:
 
 ```sh
 git clone https://github.com/zenibako/openfpgaCore.git src/openfpga/out/runtime-source
-git -C src/openfpga/out/runtime-source checkout --detach 902a8adc11309c50c8954af2864ddf893c8b1b0c
+git -C src/openfpga/out/runtime-source checkout --detach 19d9d50ceec15771b16386456c4a3a22c355f0a5
 python3 src/openfpga/release/pipeline.py validate
 python3 -m unittest discover -s src/openfpga/release -p 'test_*.py'
 
