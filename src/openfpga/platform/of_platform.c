@@ -1660,6 +1660,22 @@ static bool menuVideo(int direction) {
     return false;
 }
 
+/* Aspect Ratio: 4:3, or 10:9 full screen (320x240 rooms drawn at 320x288,
+ * see ofPlatformSetFullScreen). The entry's --full-screen sets the starting
+ * value; it takes effect from the next frame drawn. The menu closes, so the
+ * change shows at once. */
+static const char *menuAspectValue(void) {
+    return g_fullScreen ? "10:9" : "4:3";
+}
+
+static bool menuAspect(int direction) {
+    (void) direction;
+    g_fullScreen = !g_fullScreen;
+    logInfo("Video: aspect ratio %s\n", g_fullScreen ? "10:9" : "4:3");
+    showNotice(g_fullScreen ? "Aspect ratio 10:9" : "Aspect ratio 4:3");
+    return true;
+}
+
 static const char *menuFrameTimesValue(void) {
     return onOff(ofPerfOverlayOn());
 }
@@ -1790,6 +1806,8 @@ static const OfMenuRow g_menuRows[] = {
       "Closes this menu and returns to the game." },
     { "Performance Mode", menuVideoValue, menuVideo, NULL,
       "Speed favors frame rate. Accuracy preserves visual detail." },
+    { "Aspect Ratio", menuAspectValue, menuAspect, NULL,
+      "10:9 fills the screen in most rooms. 4:3 keeps the original framing." },
     { "Debug", NULL, NULL, &g_debugPage,
       "Opens logs, performance tools and troubleshooting actions." },
 };
@@ -2019,7 +2037,7 @@ void ofPlatformSnapshotGet(uint32_t values[3]) {
 #else
     values[1] = 0;
 #endif
-    values[2] = g_smoothLowres ? 1u : 0u;
+    values[2] = (g_smoothLowres ? 1u : 0u) | (g_fullScreen ? 2u : 0u);
 }
 
 void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
@@ -2028,7 +2046,8 @@ void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
     /* The battle on screen may not be the one the size was chosen for. */
     g_wasBattle = false;
     g_scriptFrame = (int)values[0];
-    g_smoothLowres = values[2] != 0;
+    g_smoothLowres = (values[2] & 1u) != 0;
+    g_fullScreen = (values[2] & 2u) != 0;
 #ifdef OF_PC
     g_dumpFrame = (int)values[1];
     (void)runner;

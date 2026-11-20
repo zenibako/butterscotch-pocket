@@ -256,8 +256,11 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    /* Full screen: the runner grows each view to the framebuffer's shape (see loop.c). */
-    if (ofPlatformFullScreen()) args.widescreenAspect = -1.0f;
+    /* Views follow the framebuffer's shape (see loop.c): in 10:9 full screen
+     * they grow to 320x288, and at 4:3 nothing changes. The Select menu's
+     * Aspect Ratio switches between the two while the game runs, so this is
+     * set whatever the entry started with. */
+    if (args.widescreenAspect == 0.0f) args.widescreenAspect = -1.0f;
 
     int ret = loop(args, OF_GAME_NAME);
     freeCommandLineArgs(&args);

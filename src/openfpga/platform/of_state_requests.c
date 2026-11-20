@@ -243,7 +243,7 @@ static bool restoreState(Runner *r, const uint8_t *data, size_t size,
     uint32_t values[3];
     for (unsigned i = 0; i < 3; i++) values[i] = ofSnapGetU32(&platform);
     if (!platform.ok || platform.offset != platform.size || values[0] > INT_MAX ||
-        values[1] > INT_MAX || values[2] > 1) {
+        values[1] > INT_MAX || values[2] > 3) { /* bit 0 Speed, bit 1 10:9 */
         *reason = "Invalid platform state"; return false;
     }
     ofAudioSnapshotLock(true);
