@@ -28,6 +28,11 @@ if [ "${SAVESTATES:-0}" = 1 ]; then
     fi
     export VARIANT=os20
     python3 "$(dirname "$0")/runtime-provenance.py" check "$ROOT/runtime/pocket" || exit 1
+else
+    # The template core.json names the release's os20, but an ordinary build
+    # takes os.bin from the plain v0.7 SDK, whose os.bin boot-loops on os20.
+    # Keep that build on its own os25 unless a variant is asked for.
+    export VARIANT="${VARIANT:-os25}"
 fi
 
 first=""

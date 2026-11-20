@@ -221,6 +221,26 @@ esac
                     self.assertEqual(called.read_text(), 'os20')
                     called.unlink()
 
+    def test_ordinary_card_keeps_os25_for_the_plain_sdk(self):
+        self.write(self.dest / '.obj/undertale/app.elf', 'synthetic program')
+        port = self.root / 'port'
+        self.write(port / 'games/undertale/data.win', 'synthetic data')
+        called = self.root / 'image-variant'
+        image = self.root / 'image.sh'
+        self.write(image, f'#!/bin/bash\nprintf "%s" "$VARIANT" > "{called}"\nexit 91\n')
+        for variant, expected in ((None, 'os25'), ('os20', 'os20')):
+            with self.subTest(variant=variant):
+                env = dict(self.env, SAVESTATES='0')
+                env.pop('VARIANT', None)
+                if variant is not None:
+                    env['VARIANT'] = variant
+                result = subprocess.run(['bash', str(TOOLS / 'mkcard.sh'), str(image),
+                                         str(self.dest), '/unused/dist', str(port)],
+                                        env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 91, result.stdout + result.stderr)
+                self.assertEqual(called.read_text(), expected)
+                called.unlink()
+
     def test_dirty_source_is_rejected(self):
         self.env['DIRTY_SOURCE'] = '1'
         result = self.stage()
