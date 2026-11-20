@@ -509,7 +509,7 @@ static void swrBlendSolidRowTable(uintpixel_t* line, size_t count, uint32_t srcR
 #if __has_builtin(__builtin_assume_aligned)
     line = (uintpixel_t*) __builtin_assume_aligned(line, 4);
 #endif
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 7))
     line = (uintpixel_t*) __builtin_assume_aligned(line, 4);
 #endif
     uint32_t lastUnder = 0, lastResult = 0;

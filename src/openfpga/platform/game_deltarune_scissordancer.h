@@ -37,8 +37,12 @@ static void scissorDancerResolve(VMContext *ctx) {
     dancerInteract = VM_getOrAllocateVarID(ctx, "myinteract");
     dancerSndcon = VM_getOrAllocateVarID(ctx, "sndcon");
     dancerBullet = VM_getOrAllocateVarID(ctx, "bullet");
-    dancerInstanceExists = VM_findBuiltin(ctx, "instance_exists");
     scissorDancerResolved = true;
+    /* The depth formula below is scr_depth's: a different scr_depth leaves
+     * dancerInstanceExists unset, so the step stays with the bytecode. */
+    uint32_t length = 0;
+    if (VM_codeHash(ctx, "gml_Script_scr_depth", &length) != 0x43f8ea5a6de00411ull || length != 112) return;
+    dancerInstanceExists = VM_findBuiltin(ctx, "instance_exists");
 }
 
 static GMLReal dancerReal(RValue value) {

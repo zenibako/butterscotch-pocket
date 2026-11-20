@@ -557,6 +557,7 @@ static void forgetVm(void) {
     charboxResolved = 0;
     lightFairyResolved = false;
     scissorDancerResolved = false;
+    dancerInstanceExists = NULL;
     timeResolved = 0;
     g_spriteMapVar = -1;
 }

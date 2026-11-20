@@ -839,13 +839,14 @@ static void mergeSortDrawKeys(int32_t* idx, int32_t* tmp, size_t n, const DrawKe
 // new ones go last), an insertion sort has little left to do. The order is
 // total (instance and layer IDs are unique), so any sort gives this result.
 static uint32_t drawRankStamp = 1;
-static struct { int32_t id, rank; } *layerRanks = nullptr; // stb array
+typedef struct { int32_t id, rank; } LayerRank;
+static LayerRank* layerRanks = nullptr; // stb array
 static uint32_t layerRanksStamp = 0;
 
 static bool sortDrawablesFromLastOrder(Drawable* drawables, int32_t count, Drawable* scratch, int32_t* slot, int32_t* fresh) {
     enum { maxShifts = 4096 };
     // slot[rank] = index into drawables, or -1; fresh[] the new ones, in list order.
-    repeat(count, i) slot[i] = -1;
+    repeat(count, s) slot[s] = -1;
     int32_t freshCount = 0;
     repeat(count, i) {
         Drawable* d = &drawables[i];
@@ -862,10 +863,10 @@ static bool sortDrawablesFromLastOrder(Drawable* drawables, int32_t count, Drawa
     repeat(count, r) if (slot[r] >= 0) scratch[n++] = drawables[slot[r]];
     repeat(freshCount, f) scratch[n++] = drawables[fresh[f]];
     int32_t shifts = 0;
-    for (int32_t i = 1; i < count; i++) {
-        Drawable current = scratch[i];
+    for (int32_t m = 1; m < count; m++) {
+        Drawable current = scratch[m];
         DrawKey key = drawableKey(&current);
-        int32_t j = i;
+        int32_t j = m;
         while (j > 0) {
             DrawKey prior = drawableKey(&scratch[j - 1]);
             if (compareDrawKeys(&prior, &key) <= 0) break;
@@ -903,11 +904,11 @@ static void sortDrawables(Drawable* drawables, int32_t count) {
     static int32_t capacity = 0;
     if (count > capacity) {
         int32_t grown = count + count / 2 + 16;
-        DrawKey* k = realloc(keys, (size_t) grown * sizeof(DrawKey));
+        DrawKey* k = (DrawKey*) realloc(keys, (size_t) grown * sizeof(DrawKey));
         if (k != nullptr) keys = k;
-        int32_t* o = k != nullptr ? realloc(order, (size_t) grown * 2 * sizeof(int32_t)) : nullptr;
+        int32_t* o = k != nullptr ? (int32_t*) realloc(order, (size_t) grown * 2 * sizeof(int32_t)) : nullptr;
         if (o != nullptr) order = o;
-        Drawable* c = o != nullptr ? realloc(copy, (size_t) grown * sizeof(Drawable)) : nullptr;
+        Drawable* c = o != nullptr ? (Drawable*) realloc(copy, (size_t) grown * sizeof(Drawable)) : nullptr;
         if (c != nullptr) copy = c;
         if (c == nullptr) {
             qsort(drawables, count, sizeof(Drawable), compareDrawables);
@@ -922,7 +923,7 @@ static void sortDrawables(Drawable* drawables, int32_t count) {
         }
         mergeSortDrawKeys(order, order + capacity, (size_t) count, keys);
         memcpy(copy, drawables, (size_t) count * sizeof(Drawable));
-        repeat(count, i) drawables[i] = copy[order[i]];
+        repeat(count, r) drawables[r] = copy[order[r]];
     }
     recordDrawRanks(drawables, count);
 }
@@ -937,7 +938,10 @@ static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
     return true;
 }
 
-static uint32_t elementPlaceStamp;
+// Where each instance stands in its layer's elements, for a rebuild of the
+// whole list: one pass over the layers instead of a search of its layer per
+// instance (Deltarune's dancers room keeps some hundred in one layer).
+static uint32_t elementPlaceStamp = 0;
 static bool elementPlacesGathered = false;
 
 static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
@@ -966,11 +970,6 @@ static void refreshDrawableLayerOrder(Runner* runner, Drawable* d) {
     }
 }
 
-// Where each instance stands in its layer's elements, for a rebuild of the
-// whole list: one pass over the layers instead of a search of its layer per
-// instance (Deltarune's dancers room keeps some hundred in one layer).
-static uint32_t elementPlaceStamp = 0;
-
 static bool gatherElementPlaces(Runner* runner) {
     if (++elementPlaceStamp == 0) elementPlaceStamp = 1;
     // The instances by ID, in a table of their own: instancesById is a
@@ -981,7 +980,7 @@ static bool gatherElementPlaces(Runner* runner) {
     uint32_t wanted = 64;
     while (wanted < (uint32_t) instanceCount * 2) wanted <<= 1;
     if (wanted > tableSize) {
-        Instance** grown = realloc(table, wanted * sizeof(Instance*));
+        Instance** grown = (Instance**) realloc(table, wanted * sizeof(Instance*));
         if (grown == nullptr) return false;
         table = grown;
         tableSize = wanted;
@@ -995,8 +994,8 @@ static bool gatherElementPlaces(Runner* runner) {
         table[h] = inst;
     }
     size_t layerCount = arrlenu(runner->runtimeLayers);
-    repeat(layerCount, i) {
-        RuntimeLayer* layer = &runner->runtimeLayers[i];
+    repeat(layerCount, l) {
+        RuntimeLayer* layer = &runner->runtimeLayers[l];
         // Last to first, so that an instance listed twice keeps its first place.
         for (int32_t j = (int32_t) arrlen(layer->elements) - 1; j >= 0; j--) {
             RuntimeLayerElement* el = &layer->elements[j];
