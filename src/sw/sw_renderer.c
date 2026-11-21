@@ -2958,8 +2958,70 @@ static void swrRunsDrawOnto(SWTileRun* const* runs, int count, uintpixel_t* pixe
 // and the pictures go over them as swrRunsDrawOnto puts them over a colour.
 // The rest of the backdrop would only have been painted over. The port is the
 // whole main buffer (the caller has checked).
+// The same for one picture (the usual case: the room's layers flattened into
+// one), a row of the buffer at a time from left to right: each stretch of
+// solid blocks is one copy, each stretch of the others the held clear and
+// passes, then the picture's opaque pixels where it has any.
+static void swrRunDrawOverHeldRows(SWRenderer* swr, const SWTileRun* run, int left, int top, int width, int height)
+{
+    enum { SWR_OVER_HELD_ROW_BLOCKS = 1024 / SWR_TILE_RUN_BLOCK + 2 };
+    uint8_t kinds[SWR_OVER_HELD_ROW_BLOCKS];
+    int pitch = swr->mainWidth;
+    int right = left + width, bottom = top + height;
+    int firstBx = swrFloorToStep(left, SWR_TILE_RUN_BLOCK);
+    int runRight = run->x + run->width, runBottom = run->y + run->height;
+    int by;
+    for (by = swrFloorToStep(top, SWR_TILE_RUN_BLOCK); by < bottom; by += SWR_TILE_RUN_BLOCK)
+    {
+        int ty0 = by < top ? top : by, ty1 = by + SWR_TILE_RUN_BLOCK > bottom ? bottom : by + SWR_TILE_RUN_BLOCK;
+        int blocks = 0, bx, y;
+        for (bx = firstBx; bx < right; bx += SWR_TILE_RUN_BLOCK) kinds[blocks++] = swrRunBlockKind(run, bx, by);
+        for (y = ty0; y < ty1; y++)
+        {
+            uintpixel_t* dst = &swr->mainFb[(y - top) * pitch];
+            bool inRun = y >= run->y && y < runBottom;
+            const uintpixel_t* src = inRun ? &run->pixels[(y - run->y) * run->width] : NULL;
+            int b = 0;
+            while (b < blocks) {
+                bool solid = kinds[b] == SWR_BLOCK_SOLID;
+                int end = b + 1;
+                while (end < blocks && (kinds[end] == SWR_BLOCK_SOLID) == solid) end++;
+                int x0 = firstBx + b * SWR_TILE_RUN_BLOCK, x1 = firstBx + end * SWR_TILE_RUN_BLOCK;
+                if (x0 < left) x0 = left;
+                if (x1 > right) x1 = right;
+                if (solid) {
+                    // A solid block lies wholly inside the picture.
+                    memcpy(&dst[x0 - left], &src[x0 - run->x], (size_t) (x1 - x0) * sizeof(uintpixel_t));
+                } else {
+                    swrTiledHeldSpan(swr, y - top, x0 - left, x1 - left);
+                    int m;
+                    for (m = b; m < end && inRun; m++) {
+                        if (kinds[m] != SWR_BLOCK_MIXED) continue;
+                        int mx0 = firstBx + m * SWR_TILE_RUN_BLOCK, mx1 = mx0 + SWR_TILE_RUN_BLOCK;
+                        if (mx0 < x0) mx0 = x0;
+                        if (mx1 > x1) mx1 = x1;
+                        if (mx0 < run->x) mx0 = run->x;
+                        if (mx1 > runRight) mx1 = runRight;
+                        int x;
+                        for (x = mx0; x < mx1; x++) {
+                            uintpixel_t pixel = src[x - run->x];
+                            if (swrIsOpaque(pixel)) dst[x - left] = pixel;
+                        }
+                    }
+                }
+                b = end;
+            }
+        }
+    }
+}
+
 static void swrRunsDrawOverHeld(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, int width, int height)
 {
+    if (count == 1) {
+        swrRunDrawOverHeldRows(swr, runs[0], left, top, width, height);
+        swrTiledHeldSpanEnd(swr);
+        return;
+    }
     uintpixel_t* pixels = swr->mainFb;
     int pitch = swr->mainWidth;
     int right = left + width, bottom = top + height;
