@@ -20,7 +20,9 @@
 /* The bar: a thin line along the very bottom edge, the whole width across,
  * where other Pocket cores put theirs. Text keeps a margin. */
 #define OF_TEXT_MARGIN 24
+#ifndef OF_BAR_HEIGHT
 #define OF_BAR_HEIGHT 2
+#endif
 
 static int textLeft(int width) { return width * OF_TEXT_MARGIN / OF_LOADING_WIDTH; }
 static int barLeft(int width) { (void) width; return 0; }
@@ -28,12 +30,12 @@ static int barWidth(int width) { return width; }
 static int barHeight(int height) { return height * OF_BAR_HEIGHT / OF_LOADING_HEIGHT; }
 static int barTop(int height) { return height - barHeight(height); }
 
-/* A heart rides the front of the bar, the colour of a soul. Drawn here (it is
- * not taken from any game), 9x8 at 320x240, standing on the bar with a pixel
- * between them. */
+/* A heart rides the head of the bar, the colour of a soul, outlined in black
+ * so it reads over the fill and the track alike. Drawn here (it is not taken
+ * from any game), 9x8 at 320x240, centred on the bar's head and as low as the
+ * screen allows. */
 #define OF_HEART_W 9
 #define OF_HEART_H 8
-#define OF_HEART_GAP 1
 static const uint16_t g_heart[OF_HEART_H] = {
     0x0C6, /* .XX...XX. */
     0x1EF, /* XXXX.XXXX */
@@ -50,54 +52,71 @@ static int heartScale(int height) {
     return scale < 1 ? 1 : scale;
 }
 
-/* The rows the heart can take, above the bar. */
 static int heartTop(int height) {
-    return barTop(height) - (OF_HEART_H + OF_HEART_GAP) * heartScale(height);
+    int h = OF_HEART_H * heartScale(height);
+    int top = barTop(height) + barHeight(height) / 2 - h / 2;
+    return top + h > height ? height - h : top;
+}
+
+/* The rows the heart and its outline can take. */
+static int heartStripTop(int height) {
+    int top = heartTop(height) - 1;
+    return top < 0 ? 0 : top;
 }
 
 /* The heart's left edge for a bar filled `filled` pixels: centred on the
- * bar's front, kept on screen at either end. */
+ * bar's head, kept on screen (outline and all) at either end. */
 static int heartLeft(int width, int height, int filled) {
     int w = OF_HEART_W * heartScale(height);
     int x = barLeft(width) + filled - w / 2;
-    if (x < 0) x = 0;
-    if (x > width - w) x = width - w;
+    if (x < 1) x = 1;
+    if (x > width - w - 1) x = width - w - 1;
     return x;
 }
 
-static void drawHeart(uint16_t *fb, int width, int height, int left, uint16_t color) {
+static bool heartAt(int scale, int col, int row) {
+    if (col < 0 || row < 0 || col >= OF_HEART_W * scale || row >= OF_HEART_H * scale) return false;
+    return (g_heart[row / scale] & (1u << (OF_HEART_W - 1 - col / scale))) != 0;
+}
+
+static void drawHeart(uint16_t *fb, int width, int height, int left) {
     int scale = heartScale(height), top = heartTop(height);
-    for (int row = 0; row < OF_HEART_H * scale; row++) {
+    for (int row = -1; row <= OF_HEART_H * scale; row++) {
         int y = top + row;
         if (y < 0 || y >= height) continue;
-        uint16_t bits = g_heart[row / scale];
-        for (int col = 0; col < OF_HEART_W * scale; col++) {
+        for (int col = -1; col <= OF_HEART_W * scale; col++) {
             int x = left + col;
-            if ((bits & (1u << (OF_HEART_W - 1 - col / scale))) && x >= 0 && x < width) fb[y * width + x] = color;
+            if (x < 0 || x >= width) continue;
+            if (heartAt(scale, col, row)) {
+                fb[y * width + x] = OF_HEART;
+            } else if (heartAt(scale, col - 1, row) || heartAt(scale, col + 1, row) || heartAt(scale, col, row - 1) ||
+                       heartAt(scale, col, row + 1)) {
+                fb[y * width + x] = OF_BLACK;
+            }
         }
     }
 }
 
 /* The bar alone; returns how many pixels of it are filled. */
-static int drawBarLine(uint16_t *fb, int width, int height, int permille, uint16_t color) {
+static int drawBarLine(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track) {
     if (permille < 0) permille = 0;
     if (permille > 1000) permille = 1000;
     int left = barLeft(width), span = barWidth(width), top = barTop(height), rows = barHeight(height);
     int filled = span * permille / 1000;
     for (int y = top; y < top + rows; y++) {
         uint16_t *row = fb + y * width + left;
-        for (int x = 0; x < span; x++) row[x] = x < filled ? color : OF_TRACK;
+        for (int x = 0; x < span; x++) row[x] = x < filled ? fill : track;
     }
     return filled;
 }
 
-void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t color) {
-    int filled = drawBarLine(fb, width, height, permille, color), top = barTop(height);
-    /* The strip the heart moves along is cleared each time: the frame may be
-     * one of the display's other buffers, with the heart further back. */
-    for (int y = heartTop(height) < 0 ? 0 : heartTop(height); y < top; y++)
+void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track) {
+    /* The heart's strip is cleared each time: the frame may be one of the
+     * display's other buffers, with the heart further back. */
+    for (int y = heartStripTop(height); y < barTop(height); y++)
         for (int x = 0; x < width; x++) fb[y * width + x] = OF_BLACK;
-    drawHeart(fb, width, height, heartLeft(width, height, filled), OF_HEART);
+    int filled = drawBarLine(fb, width, height, permille, fill, track);
+    drawHeart(fb, width, height, heartLeft(width, height, filled));
 }
 
 /* Before data.win has loaded there is no game font: the text is then drawn
@@ -294,7 +313,7 @@ void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *
         drawWrapped(fb, width, height, left, barTop(height) - line / 2 - lines * line, right, error->footer, OF_LIGHT);
     }
     /* No heart here: the footer sits where it would ride. */
-    drawBarLine(fb, width, height, permille < 30 ? 30 : permille, OF_RED);
+    drawBarLine(fb, width, height, permille < 30 ? 30 : permille, OF_RED, OF_TRACK);
 }
 
 static bool mentions(const char *text, const char *what) {
@@ -377,7 +396,7 @@ static void present(void) {
     uint16_t *fb = ofPlatformLoadingSurface(&fresh);
     if (fb == NULL) return;
     if (fresh) for (int i = 0; i < OF_LOADING_WIDTH * OF_LOADING_HEIGHT; i++) fb[i] = OF_BLACK;
-    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, OF_WHITE);
+    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, OF_WHITE, OF_TRACK);
     ofPlatformLoadingFlip();
 }
 
