@@ -17,25 +17,33 @@
 #define OF_RED    0x7C00
 #define OF_HEART  0x7C00 /* a soul's red */
 
-/* The bar: along the very bottom edge, the whole width across, where other
- * Pocket cores put theirs, as tall as the heart so the heart sits centred on
- * it and whole. Text keeps a margin. */
+/* The bar: a thin line near the very bottom edge, the whole width across,
+ * where other Pocket cores put theirs, raised just enough for the heart to
+ * sit centred on it and whole. Text keeps a margin. */
 #define OF_TEXT_MARGIN 24
 #ifndef OF_BAR_HEIGHT
-#define OF_BAR_HEIGHT 8
+#define OF_BAR_HEIGHT 2
 #endif
 
 static int textLeft(int width) { return width * OF_TEXT_MARGIN / OF_LOADING_WIDTH; }
 static int barLeft(int width) { (void) width; return 0; }
 static int barWidth(int width) { return width; }
 static int barHeight(int height) { return height * OF_BAR_HEIGHT / OF_LOADING_HEIGHT; }
-static int barTop(int height) { return height - barHeight(height); }
+#define OF_HEART_H 8
+static int heartScale(int height) {
+    int scale = height / OF_LOADING_HEIGHT;
+    return scale < 1 ? 1 : scale;
+}
+/* The bar's middle is the heart's middle, with the heart on the bottom row. */
+static int barTop(int height) {
+    int below = OF_HEART_H * heartScale(height) / 2 - barHeight(height) / 2;
+    return height - barHeight(height) - (below > 0 ? below : 0);
+}
 
 /* A heart rides the head of the bar, the colour of a soul, outlined in black
  * so it reads over the fill and the track alike. Drawn here (it is not taken
  * from any game), 9x8 at 320x240, centred on the bar's head. */
 #define OF_HEART_W 9
-#define OF_HEART_H 8
 static const uint16_t g_heart[OF_HEART_H] = {
     0x0C6, /* .XX...XX. */
     0x1EF, /* XXXX.XXXX */
@@ -46,11 +54,6 @@ static const uint16_t g_heart[OF_HEART_H] = {
     0x038, /* ...XXX... */
     0x010, /* ....X.... */
 };
-
-static int heartScale(int height) {
-    int scale = height / OF_LOADING_HEIGHT;
-    return scale < 1 ? 1 : scale;
-}
 
 static int heartTop(int height) {
     int h = OF_HEART_H * heartScale(height);
@@ -113,7 +116,7 @@ static int drawBarLine(uint16_t *fb, int width, int height, int permille, uint16
 void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track) {
     /* The heart's strip is cleared each time: the frame may be one of the
      * display's other buffers, with the heart further back. */
-    for (int y = heartStripTop(height); y < barTop(height); y++)
+    for (int y = heartStripTop(height); y < height; y++)
         for (int x = 0; x < width; x++) fb[y * width + x] = OF_BLACK;
     int filled = drawBarLine(fb, width, height, permille, fill, track);
     drawHeart(fb, width, height, heartLeft(width, height, filled));
