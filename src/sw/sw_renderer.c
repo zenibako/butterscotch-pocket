@@ -3522,6 +3522,7 @@ static void swrTileRunShapeOf(const int32_t mode[2], RoomTile* const* tiles, con
 #define SWR_TILE_SHAPE_MEMOS 8
 typedef struct {
     uint32_t generation;    // 0: unused
+    uint32_t stamp;         // the runner's stamp for these arrays (Renderer.tileRunStamp), or 0
     int32_t mode[2];
     int32_t count, capacity;
     RoomTile** tiles;
@@ -3533,7 +3534,7 @@ typedef struct {
 static SWTileShapeMemo swrTileShapeMemos[SWR_TILE_SHAPE_MEMOS];
 static uint32_t swrTileShapeClock;
 
-static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile** tiles, const float* offsets, int32_t count, SWTileRunShape* out)
+static void swrTileRunShape(uint32_t generation, uint32_t stamp, const int32_t mode[2], RoomTile** tiles, const float* offsets, int32_t count, SWTileRunShape* out)
 {
     static int off = -1;
     if (off < 0) off = getenv("BS_NO_TILE_MEMO") != NULL;
@@ -3543,9 +3544,12 @@ static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile
     SWTileShapeMemo* spare = &swrTileShapeMemos[0];
     for (int m = 0; m < SWR_TILE_SHAPE_MEMOS; m++) {
         SWTileShapeMemo* memo = &swrTileShapeMemos[m];
+        // The same stamp under the same generation is the runner's word that the arrays are the ones compared before.
         if (memo->generation == generation && memo->count == count && memo->mode[0] == mode[0] && memo->mode[1] == mode[1] &&
-            memo->tiles[0] == tiles[0] && memcmp(memo->tiles, tiles, pointerBytes) == 0 &&
-            memcmp(memo->offsets, offsets, offsetBytes) == 0) {
+            ((stamp != 0 && memo->stamp == stamp) ||
+             (memo->tiles[0] == tiles[0] && memcmp(memo->tiles, tiles, pointerBytes) == 0 &&
+              memcmp(memo->offsets, offsets, offsetBytes) == 0))) {
+            memo->stamp = stamp;
             memo->lastUsed = swrTileShapeClock;
             *out = memo->shape;
             static int check = -1;
@@ -3578,6 +3582,7 @@ static void swrTileRunShape(uint32_t generation, const int32_t mode[2], RoomTile
     memcpy(spare->tiles, tiles, pointerBytes);
     memcpy(spare->offsets, offsets, offsetBytes);
     spare->generation = generation;
+    spare->stamp = stamp;
     spare->mode[0] = mode[0]; spare->mode[1] = mode[1];
     spare->count = count;
     spare->lastUsed = swrTileShapeClock;
@@ -3614,7 +3619,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
     int32_t mode[2] = { shift, swrFavorSpeed ? 1 : 0 };
     SWTileRunShape shape;
     SWR_NOTE_START(keyNote);
-    swrTileRunShape(renderer->tileRunGeneration, mode, tiles, offsets, count, &shape);
+    swrTileRunShape(renderer->tileRunGeneration, renderer->tileRunGeneration != 0 ? renderer->tileRunStamp : 0, mode, tiles, offsets, count, &shape);
     SWR_NOTE_END(keyNote, "  of which: tile run key");
     if (!shape.usable) return false;
     uint64_t key = shape.key;

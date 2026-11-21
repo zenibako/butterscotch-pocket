@@ -1097,6 +1097,116 @@ static bool rebuildLegacyInstanceDrawables(Runner* runner) {
     return true;
 }
 
+// The tiles and offsets of a run of tile drawables, gathered for drawTileRun,
+// kept for the next frame: a room draws the same runs frame after frame, and
+// gathering one (and the renderer comparing it with the last) costs a step per
+// tile of the room, in view or not. A kept run is used again only while the
+// drawables it came from, the room's tiles (RoomTile_generation) and the
+// layers it looked up (visibility and offsets) are all unchanged.
+#define TILE_RUN_GATHERS 6
+#define TILE_RUN_GATHER_LAYERS 4
+typedef struct {
+    Room* room;                 // nullptr: unused
+    int32_t start, end;         // the drawables, [start, end)
+    int32_t* tileIndices;       // their tile indices (stb array)
+    RoomTile** tiles;           // what was handed over (stb arrays)
+    float* offsets;
+    int32_t layerCount;         // -1: too many layers to check, not kept
+    int32_t layerDepth[TILE_RUN_GATHER_LAYERS];
+    bool layerFound[TILE_RUN_GATHER_LAYERS], layerVisible[TILE_RUN_GATHER_LAYERS];
+    float layerX[TILE_RUN_GATHER_LAYERS], layerY[TILE_RUN_GATHER_LAYERS];
+    uint32_t generation, stamp, lastUsed;
+} TileRunGather;
+
+static TileRunGather tileRunGathers[TILE_RUN_GATHERS];
+static uint32_t tileRunGatherStamp, tileRunGatherClock;
+
+static bool tileRunGatherStillHolds(Runner* runner, const TileRunGather* g, Room* room, int32_t start, int32_t drawableCount) {
+    if (g->room != room || g->start != start || g->generation != RoomTile_generation || g->layerCount < 0) return false;
+    if (g->end > drawableCount || (g->end < drawableCount && runner->cachedDrawables[g->end].type == DRAWABLE_TILE)) return false;
+    for (int32_t k = start; k < g->end; k++) {
+        const Drawable* d = &runner->cachedDrawables[k];
+        if (d->type != DRAWABLE_TILE || d->tileIndex != g->tileIndices[k - start]) return false;
+    }
+    for (int32_t l = 0; l < g->layerCount; l++) {
+        ptrdiff_t idx = hmgeti(runner->tileLayerMap, g->layerDepth[l]);
+        if ((idx >= 0) != g->layerFound[l]) return false;
+        if (idx >= 0) {
+            const TileLayerState* layer = &runner->tileLayerMap[idx].value;
+            if (layer->visible != g->layerVisible[l] || layer->offsetX != g->layerX[l] || layer->offsetY != g->layerY[l]) return false;
+        }
+    }
+    return true;
+}
+
+// The run of tile drawables from `start`: one kept from an earlier frame if it still holds, else gathered afresh.
+static TileRunGather* tileRunGather(Runner* runner, Room* room, int32_t start, int32_t drawableCount) {
+    ++tileRunGatherClock;
+    TileRunGather* spare = &tileRunGathers[0];
+    for (int32_t e = 0; e < TILE_RUN_GATHERS; e++) {
+        TileRunGather* g = &tileRunGathers[e];
+        if (tileRunGatherStillHolds(runner, g, room, start, drawableCount)) {
+            g->lastUsed = tileRunGatherClock;
+            return g;
+        }
+        if (g->room == nullptr ? spare->room != nullptr : (spare->room != nullptr && g->lastUsed < spare->lastUsed)) spare = g;
+    }
+    TileRunGather* g = spare;
+    g->room = room;
+    g->start = start;
+    g->generation = RoomTile_generation;
+    g->lastUsed = tileRunGatherClock;
+    g->layerCount = 0;
+    if (++tileRunGatherStamp == 0) tileRunGatherStamp = 1;
+    g->stamp = tileRunGatherStamp;
+    arrsetlen(g->tileIndices, 0);
+    arrsetlen(g->tiles, 0);
+    arrsetlen(g->offsets, 0);
+    // A run's tiles mostly share a depth: look its layer up once per change.
+    bool haveRunDepth = false;
+    int32_t runDepth = 0;
+    ptrdiff_t runLayerIdx = -1;
+    int32_t runEnd = start;
+    while (drawableCount > runEnd && runner->cachedDrawables[runEnd].type == DRAWABLE_TILE) {
+        int32_t tileIndex = runner->cachedDrawables[runEnd++].tileIndex;
+        RoomTile* runTile = &room->tiles[tileIndex];
+        arrput(g->tileIndices, tileIndex);
+        if (!haveRunDepth || runTile->tileDepth != runDepth) {
+            runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
+            runDepth = runTile->tileDepth;
+            haveRunDepth = true;
+            if (g->layerCount >= 0) {
+                int32_t l = 0;
+                while (l < g->layerCount && g->layerDepth[l] != runDepth) l++;
+                if (l == g->layerCount) {
+                    if (l == TILE_RUN_GATHER_LAYERS) g->layerCount = -1;
+                    else {
+                        g->layerDepth[l] = runDepth;
+                        g->layerFound[l] = runLayerIdx >= 0;
+                        if (runLayerIdx >= 0) {
+                            g->layerVisible[l] = runner->tileLayerMap[runLayerIdx].value.visible;
+                            g->layerX[l] = runner->tileLayerMap[runLayerIdx].value.offsetX;
+                            g->layerY[l] = runner->tileLayerMap[runLayerIdx].value.offsetY;
+                        }
+                        g->layerCount++;
+                    }
+                }
+            }
+        }
+        float runOffsetX = 0.0f, runOffsetY = 0.0f;
+        if (runLayerIdx >= 0) {
+            if (!runner->tileLayerMap[runLayerIdx].value.visible) continue;
+            runOffsetX = runner->tileLayerMap[runLayerIdx].value.offsetX;
+            runOffsetY = runner->tileLayerMap[runLayerIdx].value.offsetY;
+        }
+        arrput(g->tiles, runTile);
+        arrput(g->offsets, runOffsetX);
+        arrput(g->offsets, runOffsetY);
+    }
+    g->end = runEnd;
+    return g;
+}
+
 static void rebuildDrawableCacheIfDirty(Runner* runner) {
     if (runner->drawableListStructureDirty) {
         arrsetlen(runner->cachedDrawables, 0);
@@ -1215,8 +1325,6 @@ void Runner_draw(Runner* runner) {
     DrawKey lastProcessedDrawKey;
     // Tiles before this index belong to a run the renderer declined to draw as one (see drawTileRun).
     int32_t tileRunDeclinedUntil = 0;
-    static RoomTile** tileRunTiles = nullptr;
-    static float* tileRunOffsets = nullptr;
 
     while (true) {
         if (runner->drawableListSortDirty || runner->drawableListStructureDirty) {
@@ -1272,33 +1380,13 @@ void Runner_draw(Runner* runner) {
             tracingTiles = shlen(runner->vmContext->tilesToBeTraced) > 0;
 #endif
             if (runner->renderer != nullptr && runner->renderer->vtable->drawTileRun != nullptr && i > tileRunDeclinedUntil && !tracingTiles) {
-                int32_t runEnd = i - 1;
-                arrsetlen(tileRunTiles, 0);
-                arrsetlen(tileRunOffsets, 0);
-                // A run's tiles mostly share a depth: look its layer up once per change.
-                bool haveRunDepth = false;
-                int32_t runDepth = 0;
-                ptrdiff_t runLayerIdx = -1;
-                while (drawableCount > runEnd && runner->cachedDrawables[runEnd].type == DRAWABLE_TILE) {
-                    RoomTile* runTile = &room->tiles[runner->cachedDrawables[runEnd++].tileIndex];
-                    if (!haveRunDepth || runTile->tileDepth != runDepth) {
-                        runLayerIdx = hmgeti(runner->tileLayerMap, runTile->tileDepth);
-                        runDepth = runTile->tileDepth;
-                        haveRunDepth = true;
-                    }
-                    float runOffsetX = 0.0f, runOffsetY = 0.0f;
-                    if (runLayerIdx >= 0) {
-                        if (!runner->tileLayerMap[runLayerIdx].value.visible) continue;
-                        runOffsetX = runner->tileLayerMap[runLayerIdx].value.offsetX;
-                        runOffsetY = runner->tileLayerMap[runLayerIdx].value.offsetY;
-                    }
-                    arrput(tileRunTiles, runTile);
-                    arrput(tileRunOffsets, runOffsetX);
-                    arrput(tileRunOffsets, runOffsetY);
-                }
+                TileRunGather* gathered = tileRunGather(runner, room, i - 1, drawableCount);
+                int32_t runEnd = gathered->end;
                 runner->renderer->tileRunGeneration = RoomTile_generation;
-                bool runDrawn = runner->renderer->vtable->drawTileRun(runner->renderer, tileRunTiles, tileRunOffsets, (int32_t) arrlen(tileRunTiles));
+                runner->renderer->tileRunStamp = gathered->stamp;
+                bool runDrawn = runner->renderer->vtable->drawTileRun(runner->renderer, gathered->tiles, gathered->offsets, (int32_t) arrlen(gathered->tiles));
                 runner->renderer->tileRunGeneration = 0;
+                runner->renderer->tileRunStamp = 0;
                 if (runDrawn) {
                     i = runEnd;
                     lastProcessedDrawKey = drawableKey(&runner->cachedDrawables[runEnd - 1]);
