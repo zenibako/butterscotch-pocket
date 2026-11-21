@@ -656,6 +656,21 @@ int swrPlanItem(SWRenderer* swr, int32_t tpagIndex, SwrPackSpan* spans, int max)
     return count < 0 ? -2 : count;
 }
 
+bool swrTextureForItemIsIn(SWRenderer* swr, int32_t tpagIndex)
+{
+    DataWin* dw = swr->base.dataWin;
+    if (tpagIndex < 0 || (uint32_t) tpagIndex >= dw->tpag.count) return true; // nothing to load: the draw does nothing
+    const TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
+    int16_t pageId = tpag->texturePageId;
+    if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) return true;
+    if (swr->textures[pageId] != NULL) return true;
+    // An item stored at another size than it is drawn takes the whole page.
+    if (tpag->sourceWidth != tpag->targetWidth || tpag->sourceHeight != tpag->targetHeight) return false;
+    int pageW, pageH;
+    if (!packedItem(swr, tpagIndex, &tpag, &pageW, &pageH)) return false;
+    return swr->itemTextures != NULL && swr->itemTextures[tpagIndex] != NULL;
+}
+
 SWTexture* swrTextureForItem(SWRenderer* swr, int32_t tpagIndex)
 {
     DataWin* dw = swr->base.dataWin;

@@ -16,7 +16,7 @@ static unsigned checks, workFailures;
 static void check(int pattern, int rx, int ry, int left, int top, bool clear, bool underOnly) {
     SWTileRun run = {.x=rx,.y=ry};
     int rw=pattern==4 ? 93 : W, rh=pattern==4 ? 61 : H;
-    assert(swrRunAllocate(&run,rw,rh));
+    assert(swrRunAllocate(&run,rw,rh,false));
     for (int y=0;y<rh;++y) for (int x=0;x<rw;++x) {
         bool opaque = pattern==0 || pattern==4 || (pattern==1 && (x/16)%3!=1) || (pattern==2 && (x+y)%5!=0);
         run.pixels[y*rw+x] = opaque ? (uintpixel_t)(0x8000 | ((x*13+y*73)&0x7fff)) : 0;
