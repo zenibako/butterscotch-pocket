@@ -1158,7 +1158,14 @@ static void swrMirrorFlush(SWRenderer* swr)
     // Quarters of a layer that was never completed are ordinary draws.
     for (int quarter = 0; quarter < stage; quarter++)
         swrMirrorReplay(swr, &swr->mirrorStack[layers].calls[quarter]);
-    swrOverlayFlushHeld(swr);
+    // An ordinary draw that came out as a held overlay stays held when it is on the target and port
+    // that are about to be restored: the next draw can still fold into it. Undertale's door adds a
+    // full-screen fade a frame, each first taken as a possible mirrored quarter (one partial-alpha
+    // draw, unflipped), and letting each out here blended the dozen of them one by one again.
+    bool sameTarget = layers == 0 && swr->fb == fb && swr->fbPitch == pitch && swr->portX == port[0] &&
+                      swr->portY == port[1] && swr->portW == port[2] && swr->portH == port[3] &&
+                      swr->maxX == port[4] && swr->maxY == port[5];
+    if (!sameTarget) swrOverlayFlushHeld(swr);
     
     swr->fb = fb;
     swr->fbPitch = pitch;
