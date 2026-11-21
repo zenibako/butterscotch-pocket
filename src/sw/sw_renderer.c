@@ -2975,7 +2975,8 @@ static void swrRunsDrawOverHeld(SWRenderer* swr, SWTileRun* const* runs, int cou
                 if (swrRunBlockKind(runs[i], bx, by) == SWR_BLOCK_SOLID) { firsts[blocks] = (int8_t) i; break; }
         }
         // The held clear and passes under each stretch of blocks without one.
-        for (int b = 0; b < blocks; ) {
+        int b; // one declaration for both loops (MSVC 4.0 scopes a for's int to the block)
+        for (b = 0; b < blocks; ) {
             if (firsts[b] >= 0) { b++; continue; }
             int end = b;
             while (end < blocks && firsts[end] < 0) end++;
@@ -2986,7 +2987,7 @@ static void swrRunsDrawOverHeld(SWRenderer* swr, SWTileRun* const* runs, int cou
             b = end;
         }
         // Then the pictures.
-        for (int b = 0; b < blocks; b++) {
+        for (b = 0; b < blocks; b++) {
             int bx = firstBx + b * SWR_TILE_RUN_BLOCK;
             int tx0 = bx < left ? left : bx, tx1 = bx + SWR_TILE_RUN_BLOCK > right ? right : bx + SWR_TILE_RUN_BLOCK;
             swrRunsDrawBlock(runs, count, firsts[b] < 0 ? 0 : firsts[b], pixels, pitch, left, top, bx, by, tx0, tx1, ty0, ty1);
