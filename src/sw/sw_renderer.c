@@ -2795,6 +2795,40 @@ static uint64_t swrTileRunHash(uint64_t hash, const void* data, size_t bytes)
 static void swrRunClassify(SWTileRun* run)
 {
     int blocksX = (run->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK, blocksY = (run->height + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
+#if PIXEL_SIZE == 16 && defined SW_NO_SEMI_TRANSPARENT_TEXTURE_SUPPORT
+    // A pixel is opaque by its top bit alone: a block's pixels ANDed together have it when all are,
+    // ORed together when any is. A row of the picture at a time, every block of it, so that the
+    // picture is read through once in order (building a room's took most of 150 ms simulated
+    // counting pixel by pixel, block by block).
+    if (blocksX <= SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK) {
+        uint16_t ands[SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK], ors[SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK];
+        int fullX = run->width / SWR_TILE_RUN_BLOCK;
+        int by, bx, y, x;
+        for (by = 0; by < blocksY; by++) {
+            int y0 = by * SWR_TILE_RUN_BLOCK, y1 = y0 + SWR_TILE_RUN_BLOCK;
+            if (y1 > run->height) y1 = run->height;
+            for (bx = 0; bx < blocksX; bx++) { ands[bx] = 0xFFFF; ors[bx] = 0; }
+            for (y = y0; y < y1; y++) {
+                const uint16_t* row = &run->pixels[y * run->width];
+                for (bx = 0; bx < fullX; bx++) {
+                    const uint16_t* at = &row[bx * SWR_TILE_RUN_BLOCK];
+                    uint16_t a = ands[bx], o = ors[bx];
+                    for (x = 0; x < SWR_TILE_RUN_BLOCK; x++) { a &= at[x]; o |= at[x]; }
+                    ands[bx] = a; ors[bx] = o;
+                }
+                for (x = fullX * SWR_TILE_RUN_BLOCK; x < run->width; x++) { ands[fullX] &= row[x]; ors[fullX] |= row[x]; }
+            }
+            // Solid means the whole block: one cut short by the picture's edge is not.
+            bool wholeRow = y1 - y0 == SWR_TILE_RUN_BLOCK;
+            for (bx = 0; bx < blocksX; bx++) {
+                bool whole = wholeRow && bx < fullX;
+                run->blocks[by * blocksX + bx] = (ors[bx] & TRANSPARENT_MASK) == 0 ? SWR_BLOCK_EMPTY :
+                                                 ((ands[bx] & TRANSPARENT_MASK) != 0 && whole) ? SWR_BLOCK_SOLID : SWR_BLOCK_MIXED;
+            }
+        }
+        return;
+    }
+#endif
     for (int by = 0; by < blocksY; by++) {
         for (int bx = 0; bx < blocksX; bx++) {
             int x1 = bx * SWR_TILE_RUN_BLOCK + SWR_TILE_RUN_BLOCK, y1 = by * SWR_TILE_RUN_BLOCK + SWR_TILE_RUN_BLOCK;
