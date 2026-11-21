@@ -397,12 +397,8 @@ static void present(void) {
     uint16_t *fb = ofPlatformLoadingSurface(&fresh);
     if (fb == NULL) return;
     if (fresh) for (int i = 0; i < OF_LOADING_WIDTH * OF_LOADING_HEIGHT; i++) fb[i] = OF_BLACK;
-    uint16_t fill = OF_WHITE, track = OF_TRACK;
-    if (ofGame.loadingFill != 0 || ofGame.loadingTrack != 0) {
-        fill = ofGame.loadingFill;
-        track = ofGame.loadingTrack;
-    }
-    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, fill, track);
+    uint16_t fill = ofGame.loadingFill != 0 ? ofGame.loadingFill : OF_WHITE;
+    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, fill, OF_TRACK);
     ofPlatformLoadingFlip();
 }
 
