@@ -292,12 +292,14 @@ static bool battleUiActive(Runner *runner) {
 
 /* The battles Speed mode keeps at half size (speedHalfBattle): those estimated
  * from the battle-tour measurements of 2026-11-13 to need more than a frame's
- * 33 ms on the Pocket at full size, even drawing every other frame. They are
- * global.battlegroup values. Battles in the other battle rooms (Flowey's) keep
- * half size, as they had. */
+ * 33 ms on the Pocket at full size, even drawing every other frame. On the os20
+ * 100 MHz release core (device, 2026-11-21) 13 of them held 27.5-29.3 updates/s
+ * at full size and moved off the list: 25, 31, 48, 49, 50, 52, 55, 59, 60, 64,
+ * 81, 120, 132. They are global.battlegroup values. Battles in the other battle
+ * rooms follow g_speedFullBattleRooms below. */
 static const int16_t g_speedHalfBattles[] = {
-    2, 5, 6, 25, 31, 36, 41, 48, 49, 50, 51, 52, 55, 56, 57, 58, 59, 60, 64, 65, 67, 68, 76, 77,
-    78, 79, 80, 81, 83, 85, 87, 88, 89, 90, 92, 93, 94, 101, 120, 121, 123, 124, 128, 129, 132, 133, 134, 135, 256,
+    2, 5, 6, 36, 41, 51, 56, 57, 58, 65, 67, 68, 76, 77, 78, 79, 80, 83, 85, 87, 88, 89, 90, 92, 93,
+    94, 101, 121, 123, 124, 128, 129, 133, 134, 135, 256,
 };
 
 /* The ids those decisions read, found again for each VM (forgetNativeVm) and data file. */
@@ -325,9 +327,20 @@ static void resolveSpeedVars(Runner *runner) {
     }
 }
 
+/* Battle rooms other than room_battle that Speed draws at full size: Flowey's
+ * first fight (and the lab/quiz encounters that share its room), New Home's
+ * story battles and the overworld hazards' quick hits. All are light; the first
+ * Flowey fight is 12.8 ms a frame at full size on os20 (simulated). The rest,
+ * room_floweyx (Photoshop Flowey) above all, stay at half size. */
+static const char *const g_speedFullBattleRooms[] = {
+    "room_floweybattle", "room_storybattle", "room_fastbattle",
+};
+
 static bool speedHalfBattle(Runner *runner) {
-    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL ||
-        strcmp(runner->currentRoom->name, "room_battle") != 0 || runner->dataWin == NULL)
+    if (runner->currentRoom == NULL || runner->currentRoom->name == NULL) return true;
+    for (unsigned i = 0; i < sizeof(g_speedFullBattleRooms) / sizeof(g_speedFullBattleRooms[0]); ++i)
+        if (strcmp(runner->currentRoom->name, g_speedFullBattleRooms[i]) == 0) return false;
+    if (strcmp(runner->currentRoom->name, "room_battle") != 0 || runner->dataWin == NULL)
         return true;
     VMContext *ctx = runner->vmContext;
     if (ctx == NULL || ctx->globalScopeInstance == NULL) return true;
