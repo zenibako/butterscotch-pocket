@@ -4219,6 +4219,24 @@ FORCE_INLINE void swrTiledPassRow(const SWTiledPass* pass, int y, uintpixel_t* d
         if (x1 <= pass->minX) continue;
         if (x0 < pass->minX) x0 = pass->minX;
         if (x1 > pass->maxX) x1 = pass->maxX;
+        if (covline == NULL && pass->alpha > 253) {
+            // At full alpha an opaque texel is what swrTiledPixel leaves, whatever was under it, and a
+            // transparent one leaves the pixel alone: runs of opaque texels are copied, without reading
+            // the row they go over. (Snowdin Town's backdrop, a whole screen of them a frame, cost 21 ms
+            // simulated pixel by pixel through the memo.)
+            const uintpixel_t* src = &srcline[x0 - left];
+            int x = x0;
+            while (x < x1) {
+                while (x < x1 && !swrIsOpaque(*src)) { x++; src++; }
+                int run = x;
+                while (x < x1 && swrIsOpaque(*src)) { x++; src++; }
+                if (x == run) continue;
+                memcpy(&dstline[run], &srcline[run - left], (size_t) (x - run) * sizeof(uintpixel_t));
+                if (filled != NULL)
+                    for (int f = run; f < x; f++) filled[f] = swrFilled(filledMemo, fills, dstline[f]);
+            }
+            continue;
+        }
         for (int x = x0; x < x1; x++) {
             const uint8_t* covered = covline != NULL ? &covline[x - left] : NULL;
             if (covered != NULL ? *covered != 0 : swrIsOpaque(srcline[x - left])) {
