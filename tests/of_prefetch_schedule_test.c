@@ -55,6 +55,7 @@ void ofBgReadSettle(void) {}
 bool ofBgReadStart(const char*p,uint32_t o,uint32_t n,void*d) { (void)p;(void)o;(void)n;(void)d;return false; }
 void SWRenderer_takeItemLoads(unsigned*n,uint64_t*t) { *n=0;*t=0; }
 void ofBenchNoteBattleLoads(unsigned n,uint64_t t) { (void)n;(void)t; }
+void ofBenchNoteItemLoads(unsigned n,uint64_t t) { (void)n;(void)t; }
 void swrTexturePackPlanReset(void) {}
 int ofAudioPreloadSound(int32_t s) { (void)s;return 0; }
 void ofBgReadTotals(uint32_t*r,uint64_t*n,uint64_t*s) { *r=0;*n=0;*s=0; }

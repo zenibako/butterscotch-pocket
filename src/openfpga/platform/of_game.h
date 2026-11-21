@@ -55,7 +55,7 @@ typedef struct {
     bool (*endValid)(const Runner *runner);
 } OfBenchSection;
 
-#define OF_BENCH_MAX_SECTIONS 8
+#define OF_BENCH_MAX_SECTIONS 9
 #define OF_BENCH_MAX_OPENING_WINDOWS 8
 
 /* A window in scripted update numbers, including updates with no swap. */
@@ -163,6 +163,13 @@ typedef struct {
     int roomJumpCount;
     const OfBenchSection *roomSections;
     int roomSectionCount;
+    /* Optional town walk ("--bench-town"): Undertale's room 68 Snowdin Town, left to right. */
+    const char *townTitle;
+    const char *townScript;
+    const OfJump *townJumps;
+    int townJumpCount;
+    const OfBenchSection *townSections;
+    int townSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

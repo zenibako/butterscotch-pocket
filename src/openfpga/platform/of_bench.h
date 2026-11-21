@@ -29,6 +29,8 @@ bool ofBenchStartFloweyTour(bool livePacing);
 /* "--bench-room" (or "--bench-snow"): the game's single-room benchmark, if it has one: Undertale's
  * room 57 snow patch, Deltarune's room 85 dancers. */
 bool ofBenchStartRoom(void);
+/* "--bench-town": the game's town walk, if it has one: Undertale's room 68 Snowdin Town. */
+bool ofBenchStartTown(void);
 bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);
@@ -100,6 +102,8 @@ void ofBenchNoteRead(int kind, int after, uint64_t nanos);
 void ofBenchNotePrefetch(unsigned items, unsigned noRoom, unsigned left, unsigned updates, unsigned reads,
                          uint64_t readNanos, uint64_t nanos);
 void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos);
+/* Texture items loaded at a draw, anywhere (the town walk's frame table). */
+void ofBenchNoteItemLoads(unsigned items, uint64_t nanos);
 /* What a call costs on this machine, in nanoseconds, each averaged over a few
  * thousand: reading the clock; a sprite draw on a skipped frame, which goes
  * through everything a draw does up to the first pixel and stops there; the

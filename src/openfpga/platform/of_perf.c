@@ -29,6 +29,7 @@
 static bool g_enabled = false;
 static bool g_logEnabled = false;
 static uint64_t g_lastFrame = 0;
+static uint64_t g_lastWorkNanos = 0; /* ofPerfLastWorkNanos */
 static uint64_t g_sleepNanos = 0;
 static unsigned g_worstWork = 0, g_worstPeriod = 0, g_totalWork = 0;
 static unsigned g_shownWork = 0, g_shownPeriod = 0, g_shownAverage = 0;
@@ -339,6 +340,10 @@ void ofPerfDrawMode(uint16_t *fb, int width, int height, const char *label) {
     ofFontDraw(fb, width, height, left + pad, pad, label, 0x7FFF, scale);
 }
 
+uint64_t ofPerfLastWorkNanos(void) {
+    return g_lastWorkNanos;
+}
+
 bool ofPerfFrame(uint16_t *fb, int width, int height) {
     /* The frame ends here: whatever follows (overlays, copy, flip) is "out"
      * and is reported with the next frame. */
@@ -348,6 +353,7 @@ bool ofPerfFrame(uint16_t *fb, int width, int height) {
     if (g_lastFrame != 0) {
         uint64_t period = now - g_lastFrame;
         uint64_t work = period > g_sleepNanos ? period - g_sleepNanos : 0;
+        g_lastWorkNanos = work;
         unsigned periodMs = (unsigned) (period / 1000000u);
         unsigned workMs = (unsigned) (work / 1000000u);
         if (periodMs > g_worstPeriod) g_worstPeriod = periodMs;

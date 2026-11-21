@@ -1293,10 +1293,6 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
 {
     if (SWR_SKIPPED((SWRenderer*) renderer)) return;
     SWRenderer* swr = (SWRenderer*) renderer;
-    // A clear of the whole main buffer still held, with nothing over it but
-    // tiled passes held already: this one can be held with them.
-    bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
-                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
     DataWin* dwin = renderer->dataWin;
 
     if (0 > tpagIndex || dwin->tpag.count <= (uint32_t) tpagIndex) return;
@@ -1306,6 +1302,12 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
     if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) return;
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);
     if (!texture) return;
+    // A clear of the whole main buffer still held, with nothing over it but
+    // tiled passes held already: this one can be held with them. Worked out
+    // after the texture is in, because loading it can evict another and
+    // settle the clear.
+    bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
+                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
 
     float axScale = fabsf(xscale);
     float ayScale = fabsf(yscale);
@@ -2887,6 +2889,38 @@ static void swrRunDrawStripes(const SWTileRun* run, uintpixel_t* pixels, int pit
     }
 }
 
+// The pictures from `first` up, over block (bx, by), cut to (tx0, ty0)-(tx1, ty1).
+static void swrRunsDrawBlock(SWTileRun* const* runs, int count, int first, uintpixel_t* pixels, int pitch, int left, int top,
+                             int bx, int by, int tx0, int tx1, int ty0, int ty1)
+{
+    for (int r = first; r < count; r++)
+    {
+        const SWTileRun* run = runs[r];
+        uint8_t kind = swrRunBlockKind(run, bx, by);
+        if (kind == SWR_BLOCK_EMPTY) continue;
+        
+        // And to the picture.
+        int x0 = tx0, x1 = tx1, y0 = ty0, y1 = ty1;
+        if (x0 < run->x) x0 = run->x;
+        if (y0 < run->y) y0 = run->y;
+        if (x1 > run->x + run->width) x1 = run->x + run->width;
+        if (y1 > run->y + run->height) y1 = run->y + run->height;
+        if (x0 >= x1 || y0 >= y1) continue;
+        
+        for (int y = y0; y < y1; y++)
+        {
+            const uintpixel_t* src = &run->pixels[(y - run->y) * run->width + (x0 - run->x)];
+            uintpixel_t* dst = &pixels[(y - top) * pitch + (x0 - left)];
+            if (kind == SWR_BLOCK_SOLID)
+                memcpy(dst, src, (size_t) (x1 - x0) * sizeof(uintpixel_t));
+            else for (int x = 0; x < x1 - x0; x++) {
+                uintpixel_t pixel = src[x];
+                if (swrIsOpaque(pixel)) dst[x] = pixel;
+            }
+        }
+    }
+}
+
 static void swrRunsDrawOnto(SWTileRun* const* runs, int count, uintpixel_t* pixels, int pitch, int left, int top, int width, int height, const uintpixel_t* under, bool underOnly)
 {
     // One picture (including flattened layers) can copy adjacent solid blocks
@@ -2913,34 +2947,55 @@ static void swrRunsDrawOnto(SWTileRun* const* runs, int count, uintpixel_t* pixe
                     swrFillPixels(&pixels[(y - top) * pitch + (tx0 - left)], (size_t) (tx1 - tx0), *under);
             }
             if (underOnly) continue; // the pictures themselves come in a second pass
-            for (int r = first; r < count; r++)
-            {
-                const SWTileRun* run = runs[r];
-                uint8_t kind = swrRunBlockKind(run, bx, by);
-                if (kind == SWR_BLOCK_EMPTY) continue;
-                
-                // And to the picture.
-                int x0 = tx0, x1 = tx1, y0 = ty0, y1 = ty1;
-                if (x0 < run->x) x0 = run->x;
-                if (y0 < run->y) y0 = run->y;
-                if (x1 > run->x + run->width) x1 = run->x + run->width;
-                if (y1 > run->y + run->height) y1 = run->y + run->height;
-                if (x0 >= x1 || y0 >= y1) continue;
-                
-                for (int y = y0; y < y1; y++)
-                {
-                    const uintpixel_t* src = &run->pixels[(y - run->y) * run->width + (x0 - run->x)];
-                    uintpixel_t* dst = &pixels[(y - top) * pitch + (x0 - left)];
-                    if (kind == SWR_BLOCK_SOLID)
-                        memcpy(dst, src, (size_t) (x1 - x0) * sizeof(uintpixel_t));
-                    else for (int x = 0; x < x1 - x0; x++) {
-                        uintpixel_t pixel = src[x];
-                        if (swrIsOpaque(pixel)) dst[x] = pixel;
-                    }
-                }
-            }
+            swrRunsDrawBlock(runs, count, first, pixels, pitch, left, top, bx, by, tx0, tx1, ty0, ty1);
         }
     }
+}
+
+// Pictures over a held clear with tiled passes held over it (a room's backdrop,
+// Snowdin Town's bg_tb): the clear and the passes are worked out only in the
+// blocks no picture is solid over, a row's stretch of such blocks at a time,
+// and the pictures go over them as swrRunsDrawOnto puts them over a colour.
+// The rest of the backdrop would only have been painted over. The port is the
+// whole main buffer (the caller has checked).
+static void swrRunsDrawOverHeld(SWRenderer* swr, SWTileRun* const* runs, int count, int left, int top, int width, int height)
+{
+    uintpixel_t* pixels = swr->mainFb;
+    int pitch = swr->mainWidth;
+    int right = left + width, bottom = top + height;
+    int firstBx = swrFloorToStep(left, SWR_TILE_RUN_BLOCK);
+    enum { SWR_OVER_HELD_BLOCKS = 1024 / SWR_TILE_RUN_BLOCK + 2 };
+    int8_t firsts[SWR_OVER_HELD_BLOCKS];
+    for (int by = swrFloorToStep(top, SWR_TILE_RUN_BLOCK); by < bottom; by += SWR_TILE_RUN_BLOCK)
+    {
+        int ty0 = by < top ? top : by, ty1 = by + SWR_TILE_RUN_BLOCK > bottom ? bottom : by + SWR_TILE_RUN_BLOCK;
+        // Which blocks of this row a picture is solid over (the topmost such picture, or -1).
+        int blocks = 0;
+        for (int bx = firstBx; bx < right; bx += SWR_TILE_RUN_BLOCK, blocks++) {
+            firsts[blocks] = -1;
+            for (int i = count - 1; i >= 0; i--)
+                if (swrRunBlockKind(runs[i], bx, by) == SWR_BLOCK_SOLID) { firsts[blocks] = (int8_t) i; break; }
+        }
+        // The held clear and passes under each stretch of blocks without one.
+        int b; // one declaration for both loops (MSVC 4.0 scopes a for's int to the block)
+        for (b = 0; b < blocks; ) {
+            if (firsts[b] >= 0) { b++; continue; }
+            int end = b;
+            while (end < blocks && firsts[end] < 0) end++;
+            int x0 = firstBx + b * SWR_TILE_RUN_BLOCK, x1 = firstBx + end * SWR_TILE_RUN_BLOCK;
+            if (x0 < left) x0 = left;
+            if (x1 > right) x1 = right;
+            for (int y = ty0; y < ty1; y++) swrTiledHeldSpan(swr, y - top, x0 - left, x1 - left);
+            b = end;
+        }
+        // Then the pictures.
+        for (b = 0; b < blocks; b++) {
+            int bx = firstBx + b * SWR_TILE_RUN_BLOCK;
+            int tx0 = bx < left ? left : bx, tx1 = bx + SWR_TILE_RUN_BLOCK > right ? right : bx + SWR_TILE_RUN_BLOCK;
+            swrRunsDrawBlock(runs, count, firsts[b] < 0 ? 0 : firsts[b], pixels, pitch, left, top, bx, by, tx0, tx1, ty0, ty1);
+        }
+    }
+    swrTiledHeldSpanEnd(swr);
 }
 
 // The pictures being held flattened into one, or NULL: when they have not
@@ -3181,9 +3236,23 @@ static void swrTileRunsDrawPending(SWRenderer* swr)
     int shift = swrPendingRuns[0]->shift;
     int32_t viewX = (int32_t) swr->viewX, viewY = (int32_t) swr->viewY;
     int left = shift == 0 ? viewX : (viewX + 1) >> 1, top = shift == 0 ? viewY : (viewY + 1) >> 1;
-    if (swr->tiledHeldCount > 0) swrClearSettle(swr); // a clear with tiled passes over it is written as it is, not worked in below
     uintpixel_t* target = &swr->fb[swr->portY * swr->fbPitch + swr->portX];
     int width = swr->maxX - swr->portX, height = swr->maxY - swr->portY;
+    // A clear with tiled passes over it, under pictures that cover the whole of it with nothing
+    // else held: worked in below them where they are not solid (swrRunsDrawOverHeld).
+    if (swr->tiledHeldCount > 0 && swrGrid.count == 0 && swrPendingTint == 0 && swr->fb == swr->mainFb &&
+        swr->fbPitch == swr->mainWidth && swr->portX == 0 && swr->portY == 0 && width == swr->mainWidth &&
+        height == swr->mainHeight && swr->mainWidth <= 1024 && swrTiledHeldSpanBegin(swr)) {
+        swr->tilePictureView.width = 0; // as swrTilePictureCanKeep does for a frame it cannot keep
+        SWTileRun* flat;
+        SWR_NOTED("  of which: tile pictures flattened", flat = swrPendingCount > 1 ? swrPendingFlattened(swr, 0) : NULL);
+        SWR_NOTE_START(overNote);
+        SWTileRun* const one[1] = { flat };
+        swrRunsDrawOverHeld(swr, flat != NULL ? one : swrPendingRuns, flat != NULL ? 1 : swrPendingCount, left, top, width, height);
+        SWR_NOTE_END(overNote, "  of which: pictures over held backdrop");
+        return;
+    }
+    if (swr->tiledHeldCount > 0) swrClearSettle(swr); // a clear with tiled passes over it is written as it is, not worked in below
     bool canKeep = swrTilePictureCanKeep(swr, width, height, shift);
     if (!canKeep) {
         // Pictures over what is there already write only where they have
@@ -3994,6 +4063,12 @@ int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)
         spans[i][1] = planned[i].size;
     }
     return count;
+}
+
+unsigned SWRenderer_textureEvictions(void)
+{
+    extern unsigned swrTextureEvictions;
+    return swrTextureEvictions;
 }
 
 void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos)

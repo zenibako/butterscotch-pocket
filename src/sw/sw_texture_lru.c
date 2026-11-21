@@ -53,10 +53,14 @@ static size_t cachedBytes(const SWRenderer* swr)
     return total;
 }
 
+unsigned swrTextureEvictions; // pages and items given up, for the benchmark (SWRenderer_textureEvictions)
+
 void swrEvictTextureFromCache(SWRenderer* swr, int textureIndex)
 {
+    swrTextureEvictions++;
     swrOverlayFlush(swr); // held draws may still point at it
     SWTexture* texture = swr->textures[textureIndex];
+    if (texture != NULL && swrTiledHeldUses(swr, texture)) swrClearSettle(swr); // held while a tile picture is built
     swr->textures[textureIndex] = NULL;
     
     swrFreeTexture(texture);
@@ -64,8 +68,10 @@ void swrEvictTextureFromCache(SWRenderer* swr, int textureIndex)
 
 static void evictItem(SWRenderer* swr, size_t index)
 {
+    swrTextureEvictions++;
     swrOverlayFlush(swr); // held draws may still point at it
     SWTexture* texture = swr->itemTextures[index];
+    if (swrTiledHeldUses(swr, texture)) swrClearSettle(swr); // held while a tile picture is built
     swr->itemTextures[index] = NULL;
     swr->itemBytes -= pageBytes(texture);
     swrFreeTexture(texture);

@@ -1158,7 +1158,14 @@ static void swrMirrorFlush(SWRenderer* swr)
     // Quarters of a layer that was never completed are ordinary draws.
     for (int quarter = 0; quarter < stage; quarter++)
         swrMirrorReplay(swr, &swr->mirrorStack[layers].calls[quarter]);
-    swrOverlayFlushHeld(swr);
+    // An ordinary draw that came out as a held overlay stays held when it is on the target and port
+    // that are about to be restored: the next draw can still fold into it. Undertale's door adds a
+    // full-screen fade a frame, each first taken as a possible mirrored quarter (one partial-alpha
+    // draw, unflipped), and letting each out here blended the dozen of them one by one again.
+    bool sameTarget = layers == 0 && swr->fb == fb && swr->fbPitch == pitch && swr->portX == port[0] &&
+                      swr->portY == port[1] && swr->portW == port[2] && swr->portH == port[3] &&
+                      swr->maxX == port[4] && swr->maxY == port[5];
+    if (!sameTarget) swrOverlayFlushHeld(swr);
     
     swr->fb = fb;
     swr->fbPitch = pitch;
@@ -4056,7 +4063,10 @@ typedef struct {
     int pitch, boundsBase;
     int width, height, stepX, stepY, originX, originY, countX, countY, alpha;
     int minX, minY, maxX, maxY;
-    // A held pass outlives the draw call, and the texture might not: it keeps its own copy of the tile.
+    // A held pass outlives the draw call, and the texture might not: it keeps its own copy of the tile,
+    // or, for a tile too big to copy, the texture it reads from (`ref`), and the texture's eviction
+    // writes the held clear out first (swrTiledHeldUses).
+    const SWTexture* ref;
     uintpixel_t ownTexels[SWR_TILED_OWN_SIDE * SWR_TILED_OWN_SIDE];
     uint8_t ownCoverage[SWR_TILED_OWN_SIDE * SWR_TILED_OWN_SIDE];
     uint16_t ownBounds[SWR_TILED_OWN_SIDE * 2];
@@ -4191,11 +4201,14 @@ FORCE_INLINE uintpixel_t swrFilled(SWFilledMemo* memo, int fills, uintpixel_t un
 // With `filled`, dstline is a copy of the row as it is without the fills held
 // over the passes, and each pixel written there also goes to `filled` as the
 // fills leave it.
-FORCE_INLINE void swrTiledPassRow(const SWTiledPass* pass, int y, uintpixel_t* dstline, SWTiledMemo* memo,
-                                  uintpixel_t* filled, int fills, SWFilledMemo* filledMemo)
+// Only columns clipX0 to clipX1 of the row are written (swrTiledHeldSpan), as if the port ended there.
+FORCE_INLINE void swrTiledPassRowClip(const SWTiledPass* pass, int y, uintpixel_t* dstline, SWTiledMemo* memo,
+                                      uintpixel_t* filled, int fills, SWFilledMemo* filledMemo, int clipX0, int clipX1)
 {
     int fromOrigin = y - pass->originY;
     if (y < pass->minY || y >= pass->maxY || fromOrigin < 0) return;
+    int minX = pass->minX > clipX0 ? pass->minX : clipX0, maxX = pass->maxX < clipX1 ? pass->maxX : clipX1;
+    if (minX >= maxX) return;
     int copyY = fromOrigin / pass->stepY, row = fromOrigin - copyY * pass->stepY;
     if (copyY >= pass->countY || row >= pass->height) return;
     
@@ -4209,16 +4222,34 @@ FORCE_INLINE void swrTiledPassRow(const SWTiledPass* pass, int y, uintpixel_t* d
     const uint8_t* covline = pass->coverage != NULL ? &pass->coverage[row * pass->pitch] : NULL;
     // Start at the first copy whose stretch reaches the port: in a wide room most lie to its left.
     int copyX = 0, left = pass->originX;
-    if (left + to <= pass->minX) {
-        copyX = (pass->minX - to - left) / pass->stepX + 1;
+    if (left + to <= minX) {
+        copyX = (minX - to - left) / pass->stepX + 1;
         left += copyX * pass->stepX;
     }
-    for (; copyX < pass->countX && left + from < pass->maxX; copyX++, left += pass->stepX)
+    for (; copyX < pass->countX && left + from < maxX; copyX++, left += pass->stepX)
     {
         int x0 = left + from, x1 = left + to;
-        if (x1 <= pass->minX) continue;
-        if (x0 < pass->minX) x0 = pass->minX;
-        if (x1 > pass->maxX) x1 = pass->maxX;
+        if (x1 <= minX) continue;
+        if (x0 < minX) x0 = minX;
+        if (x1 > maxX) x1 = maxX;
+        if (covline == NULL && pass->alpha > 253) {
+            // At full alpha an opaque texel is what swrTiledPixel leaves, whatever was under it, and a
+            // transparent one leaves the pixel alone: runs of opaque texels are copied, without reading
+            // the row they go over. (Snowdin Town's backdrop, a whole screen of them a frame, cost 21 ms
+            // simulated pixel by pixel through the memo.)
+            const uintpixel_t* src = &srcline[x0 - left];
+            int x = x0;
+            while (x < x1) {
+                while (x < x1 && !swrIsOpaque(*src)) { x++; src++; }
+                int run = x;
+                while (x < x1 && swrIsOpaque(*src)) { x++; src++; }
+                if (x == run) continue;
+                memcpy(&dstline[run], &srcline[run - left], (size_t) (x - run) * sizeof(uintpixel_t));
+                if (filled != NULL)
+                    for (int f = run; f < x; f++) filled[f] = swrFilled(filledMemo, fills, dstline[f]);
+            }
+            continue;
+        }
         for (int x = x0; x < x1; x++) {
             const uint8_t* covered = covline != NULL ? &covline[x - left] : NULL;
             if (covered != NULL ? *covered != 0 : swrIsOpaque(srcline[x - left])) {
@@ -4228,6 +4259,12 @@ FORCE_INLINE void swrTiledPassRow(const SWTiledPass* pass, int y, uintpixel_t* d
             }
         }
     }
+}
+
+FORCE_INLINE void swrTiledPassRow(const SWTiledPass* pass, int y, uintpixel_t* dstline, SWTiledMemo* memo,
+                                  uintpixel_t* filled, int fills, SWFilledMemo* filledMemo)
+{
+    swrTiledPassRowClip(pass, y, dstline, memo, filled, fills, filledMemo, pass->minX, pass->maxX);
 }
 #endif
 
@@ -4269,7 +4306,13 @@ bool swrTiledHold(SWRenderer* swr, SWTexture* texture, int sx, int sy, int sw, i
     if (swrFillHeldCount > 0) return false; // it would go under the fills held over the earlier passes
     SWTiledPass* pass = &swrTiledHeld[swr->tiledHeldCount];
     if (!swrTiledPassSetUp(swr, texture, sx, sy, sw, sh, firstX, firstY, tileW, tileH, countX, countY, color, alphaf, pass)) return false;
-    if (pass->width > SWR_TILED_OWN_SIDE || pass->height > SWR_TILED_OWN_SIDE) return false;
+    pass->ref = NULL;
+    if (pass->width > SWR_TILED_OWN_SIDE || pass->height > SWR_TILED_OWN_SIDE) {
+        // Too big to copy (a room's backdrop): held as it is in the texture.
+        pass->ref = texture;
+        swr->tiledHeldCount++;
+        return true;
+    }
     
     // Its own copy of the tile, rows of `width`, with bounds counted from column 0.
     for (int row = 0; row < pass->height; row++) {
@@ -4319,6 +4362,55 @@ void swrFillHeldDrop(void)
 #if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING
     swrFillHeldCount = 0;
 #endif
+}
+
+bool swrTiledHeldUses(const SWRenderer* swr, const SWTexture* texture)
+{
+#if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING
+    for (int p = 0; p < swr->tiledHeldCount; p++)
+        if (swrTiledHeld[p].ref == texture) return true;
+#else
+    (void) swr; (void) texture;
+#endif
+    return false;
+}
+
+// The held clear and its passes worked out a stretch of a row at a time, where
+// the caller needs them (swrRunsDrawOverHeld: only where no tile picture is
+// solid). Begin, any number of spans, End; End lets the clear and passes go.
+#if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING
+static SWTiledMemo swrSpanMemos[SWR_TILED_HELD_MAX];
+#endif
+
+bool swrTiledHeldSpanBegin(SWRenderer* swr)
+{
+#if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING
+    if (!swr->clearHeld || swr->tiledHeldCount <= 0 || swrFillHeldCount > 0) return false;
+    memset(swrSpanMemos, 0, sizeof(swrSpanMemos));
+    return true;
+#else
+    (void) swr;
+    return false;
+#endif
+}
+
+void swrTiledHeldSpan(SWRenderer* swr, int y, int x0, int x1)
+{
+#if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING
+    uintpixel_t* dstline = &swr->mainFb[y * swr->mainWidth];
+    swrFillPixels(&dstline[x0], (size_t) (x1 - x0), swr->clearHeldColor);
+    for (int p = 0; p < swr->tiledHeldCount; p++)
+        swrTiledPassRowClip(&swrTiledHeld[p], y, dstline, &swrSpanMemos[p], NULL, 0, NULL, x0, x1);
+#else
+    (void) swr; (void) y; (void) x0; (void) x1;
+#endif
+}
+
+void swrTiledHeldSpanEnd(SWRenderer* swr)
+{
+    swrDirtyAll(swr);
+    swr->tiledHeldCount = 0;
+    swr->clearHeld = false;
 }
 
 #if PIXEL_SIZE == 16 && defined SW_HAS_PREMUL_BLEND && !defined SW_DITHERED_BLENDING

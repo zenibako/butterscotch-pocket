@@ -1513,6 +1513,7 @@ static void prefetchCheck(void) {
     unsigned loads;
     uint64_t loadNanos;
     SWRenderer_takeItemLoads(&loads, &loadNanos);
+    if (loads != 0) ofBenchNoteItemLoads(loads, loadNanos);
     if (battle && loads != 0) ofBenchNoteBattleLoads(loads, loadNanos);
     if (!prefetchOn()) return;
     int battleId = 0, left = -1;
