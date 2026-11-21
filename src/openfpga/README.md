@@ -542,8 +542,8 @@ Speed mode draws rooms at 320x240. The rendering implementation is in
 [`../sw/sw_drawing.c`](../sw/sw_drawing.c).
 Undertale's battles are the exception: Speed draws them at 640x480, except
 the heaviest, which stay at 320x240. Those are the `global.battlegroup` values
-in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Flowey's own battle
-rooms. The size is chosen as a battle starts and kept until it ends. A battle too slow
+in `g_speedHalfBattles` (`platform/game_undertale.c`), plus Photoshop Flowey's
+room (`room_floweyx`). The size is chosen as a battle starts and kept until it ends. A battle too slow
 for full speed skips frames, as Speed does everywhere. `--speed-full-battles`
 and `--speed-half-battles` (desktop: `BS_SPEED_FULL_BATTLES=1` or `0`) put every
 battle at one size. Deltarune's battles stay at 320x240 unless asked. Fonts
