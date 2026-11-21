@@ -69,6 +69,13 @@ bool swrTiledHold(SWRenderer* swr, SWTexture* texture, int sx, int sy, int sw, i
 void swrTiledHeldWrite(SWRenderer* swr, uintpixel_t color);
 bool swrFillHold(SWRenderer* swr, uintpixel_t pxcolor, int alphaInt);
 void swrFillHeldDrop(void);
+// Whether a held tiled pass reads from the texture itself (one too big to copy).
+bool swrTiledHeldUses(const SWRenderer* swr, const SWTexture* texture);
+// The held clear and tiled passes written a stretch at a time instead of whole (see swrRunsDrawOverHeld).
+// Begin says whether they can be; End lets them go.
+bool swrTiledHeldSpanBegin(SWRenderer* swr);
+void swrTiledHeldSpan(SWRenderer* swr, int y, int x0, int x1);
+void swrTiledHeldSpanEnd(SWRenderer* swr);
 void swrGridFlush(SWRenderer* swr);
 bool swrGridHeld(void);
 void swrHeldUnderDiscard(SWRenderer* swr);

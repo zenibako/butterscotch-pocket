@@ -57,6 +57,7 @@ void swrEvictTextureFromCache(SWRenderer* swr, int textureIndex)
 {
     swrOverlayFlush(swr); // held draws may still point at it
     SWTexture* texture = swr->textures[textureIndex];
+    if (texture != NULL && swrTiledHeldUses(swr, texture)) swrClearSettle(swr); // held while a tile picture is built
     swr->textures[textureIndex] = NULL;
     
     swrFreeTexture(texture);
@@ -66,6 +67,7 @@ static void evictItem(SWRenderer* swr, size_t index)
 {
     swrOverlayFlush(swr); // held draws may still point at it
     SWTexture* texture = swr->itemTextures[index];
+    if (swrTiledHeldUses(swr, texture)) swrClearSettle(swr); // held while a tile picture is built
     swr->itemTextures[index] = NULL;
     swr->itemBytes -= pageBytes(texture);
     swrFreeTexture(texture);
