@@ -99,6 +99,8 @@ int main(int argc, char **argv) {
     /* The game cores show a progress bar while loading; the benchmark entries
      * (and --debug, or --verbose-load) keep the OS terminal with the load log. */
     bool verboseLoad = false;
+    bool benchmark = false; /* a benchmark runs at 4:3 unless asked otherwise */
+    int aspectArg = -1;
     /* --bench-battles-list <ids>: which battles the battle tour visits; read first, whatever the order. */
     for (int i = 0; i + 1 < argc; i++)
         if (strcmp(argv[i], "--bench-battles-list") == 0) ofBenchSetTourList(argv[i + 1]);
@@ -106,6 +108,7 @@ int main(int argc, char **argv) {
         if (strncmp(argv[i], "--bench", 7) == 0 || strncmp(argv[i], "--focus-", 8) == 0 ||
             strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "--verbose-load") == 0)
             verboseLoad = true;
+        if (strncmp(argv[i], "--bench", 7) == 0 || strncmp(argv[i], "--focus-", 8) == 0) benchmark = true;
         if (ofFocusStart(argv[i])) { args.seed=7; args.hasSeed=true; }
         if (strcmp(argv[i], "--bench-sleep") == 0) {
             args.seed = 7;
@@ -171,7 +174,9 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
-        if (strcmp(argv[i], "--full-screen") == 0) ofPlatformSetFullScreen(true);
+        /* --full-screen / --no-full-screen: start at 10:9 or 4:3 (Select > Aspect Ratio). */
+        if (strcmp(argv[i], "--full-screen") == 0) aspectArg = 1;
+        if (strcmp(argv[i], "--no-full-screen") == 0) aspectArg = 0;
         /* --no-prefetch: a battle's textures are read at their first draw, not during its encounter's flash. */
         if (strcmp(argv[i], "--no-prefetch") == 0) ofPlatformSetPrefetch(false);
         /* --slow-frame-ms <n>: log frames from n ms of work up as slow, not from OF_PERF_SLOW_FRAME_MS. */
@@ -200,6 +205,8 @@ int main(int argc, char **argv) {
 #else
     (void) verboseLoad;
 #endif
+    if (aspectArg >= 0) ofPlatformSetFullScreen(aspectArg == 1);
+    else if (benchmark) ofPlatformSetFullScreen(false);
     ofDiagCheckFile(OF_DATA_WIN_NAME);
 #ifndef OF_PC
     ofLoadingPlan(OF_DATA_WIN_NAME);
@@ -209,7 +216,7 @@ int main(int argc, char **argv) {
     if (getenv("BS_SCRIPT") != NULL) ofPlatformSetInputScript(getenv("BS_SCRIPT"));
     if (getenv("BS_UNCAPPED") != NULL && !ofBenchLivePacing()) ofPlatformSetUncapped(true);
     if (getenv("BS_SMOOTH") != NULL) ofPlatformSetSmoothLowres(true);
-    if (getenv("BS_FULL_SCREEN") != NULL && strcmp(getenv("BS_FULL_SCREEN"), "0") != 0) ofPlatformSetFullScreen(true);
+    if (getenv("BS_FULL_SCREEN") != NULL) ofPlatformSetFullScreen(strcmp(getenv("BS_FULL_SCREEN"), "0") != 0);
     /* BS_NO_MIRROR=1 draws mirrored layers the ordinary way; BS_MIRROR_FAINT=<alpha of 256> sets how faint
      * a mirrored layer has to be to be left out (4 leaves none out). For comparing frames. */
     if (getenv("BS_NO_MIRROR") != NULL) swrMirrorMerge = false;

@@ -76,7 +76,15 @@ int platformHeapCanReserve(size_t bytes)
 /* Full screen's frame: the Pocket's screen is 10:9, and the core's video.json
  * has a 320x288 10:9 scaler slot for it. */
 #define OF_TALL_H 288
+/* Aspect Ratio: 10:9 full screen is what the player starts in. The desktop
+ * build starts at 4:3 instead, as it starts in Accuracy, so frame comparisons
+ * keep their reference size; BS_FULL_SCREEN=1 gives it 10:9. Benchmarks also
+ * run at 4:3 unless an entry asks for --full-screen (see main.c). */
+#ifdef OF_PC
 static bool g_fullScreen = false;
+#else
+static bool g_fullScreen = true;
+#endif
 static bool fullScreenRoomIsShort(void);
 void ofPlatformSetFullScreen(bool on) { g_fullScreen = on; }
 bool ofPlatformFullScreen(void) { return g_fullScreen; }
