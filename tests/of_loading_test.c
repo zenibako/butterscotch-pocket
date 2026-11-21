@@ -211,13 +211,41 @@ static void testDescribe(void) {
 
 static void testScreens(void) {
     memset(g_fb, 0, sizeof(g_fb));
-    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 420, 0x7FFF);
-    /* The bar sits at the bottom: nothing above it, white then grey along it. */
-    for (int y = 0; y < barTop(OF_LOADING_HEIGHT); y++)
+    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 420, 0x7FFF, OF_TRACK);
+    /* The bar sits near the bottom, white then grey along it, with only the heart's outline above it. */
+    for (int y = 0; y < heartStripTop(OF_LOADING_HEIGHT); y++)
         for (int x = 0; x < OF_LOADING_WIDTH; x++) assert(g_fb[y * OF_LOADING_WIDTH + x] == 0);
     int row = barTop(OF_LOADING_HEIGHT) * OF_LOADING_WIDTH;
     assert(g_fb[row + barLeft(OF_LOADING_WIDTH)] == 0x7FFF && g_fb[row + OF_LOADING_WIDTH - barLeft(OF_LOADING_WIDTH) - 1] == OF_TRACK);
     preview("loading-bar");
+
+    /* The heart is over the bar's head: its tip on the bottom row, its middle on the bar, centred on the head, the
+     * bar running into its outline from both sides; and it leaves nothing behind when it moves on. */
+    int front = OF_LOADING_WIDTH * 420 / 1000;
+    int bottom = (OF_LOADING_HEIGHT - 1) * OF_LOADING_WIDTH;
+    assert(g_fb[bottom + front] == OF_HEART);
+    assert(g_fb[bottom + front - 1] == OF_BLACK && g_fb[bottom + front + 1] == OF_BLACK);
+    assert(heartTop(OF_LOADING_HEIGHT) + OF_HEART_H / 2 == barTop(OF_LOADING_HEIGHT) + barHeight(OF_LOADING_HEIGHT) / 2);
+    assert(g_fb[row + front - OF_HEART_W / 2 - 2] == 0x7FFF && g_fb[row + front + OF_HEART_W / 2 + 2] == OF_TRACK);
+    assert(g_fb[bottom + front - 3] == 0 && g_fb[bottom + front + 3] == 0);
+    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 900, 0x7FFF, OF_TRACK);
+    int hearts = 0;
+    for (int y = heartStripTop(OF_LOADING_HEIGHT); y < OF_LOADING_HEIGHT; y++)
+        for (int x = 0; x < OF_LOADING_WIDTH; x++)
+            if (g_fb[y * OF_LOADING_WIDTH + x] == OF_HEART) {
+                assert(x > OF_LOADING_WIDTH * 900 / 1000 - OF_HEART_W);
+                hearts++;
+            }
+    assert(hearts == 27); /* the heart's pixels, once */
+    for (int x = 0; x < OF_LOADING_WIDTH * 900 / 1000 - OF_HEART_W; x++)
+        assert(g_fb[row + x] == 0x7FFF && g_fb[row - OF_LOADING_WIDTH + x] == 0 && g_fb[bottom + x] == 0);
+    /* At either end it stays whole on screen. */
+    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 0, 0x7FFF, OF_TRACK);
+    assert(g_fb[bottom + 1 + OF_HEART_W / 2] == OF_HEART);
+    preview("loading-bar-start");
+    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 1000, 0x7FFF, OF_TRACK);
+    assert(g_fb[bottom + OF_LOADING_WIDTH - 2 - OF_HEART_W / 2] == OF_HEART);
+    ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 420, 0x7FFF, OF_TRACK);
 
     static const char *const cases[][3] = {
         { "missing", "Cannot open data.win", "app exited" },

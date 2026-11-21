@@ -15,27 +15,109 @@
 #define OF_GREY   0x3DEF /* the logged error */
 #define OF_TRACK  0x1084 /* the bar's empty part */
 #define OF_RED    0x7C00
+#define OF_HEART  0x7C00 /* a soul's red */
 
-/* The bar: a thin line along the very bottom edge, the whole width across,
- * where other Pocket cores put theirs. Text keeps a margin. */
+/* The bar: a thin line near the very bottom edge, the whole width across,
+ * where other Pocket cores put theirs, raised just enough for the heart to
+ * sit centred on it and whole. Text keeps a margin. */
 #define OF_TEXT_MARGIN 24
+#ifndef OF_BAR_HEIGHT
 #define OF_BAR_HEIGHT 2
+#endif
 
 static int textLeft(int width) { return width * OF_TEXT_MARGIN / OF_LOADING_WIDTH; }
 static int barLeft(int width) { (void) width; return 0; }
 static int barWidth(int width) { return width; }
 static int barHeight(int height) { return height * OF_BAR_HEIGHT / OF_LOADING_HEIGHT; }
-static int barTop(int height) { return height - barHeight(height); }
+#define OF_HEART_H 6
+static int heartScale(int height) {
+    int scale = height / OF_LOADING_HEIGHT;
+    return scale < 1 ? 1 : scale;
+}
+/* The bar's middle is the heart's middle, with the heart on the bottom row. */
+static int barTop(int height) {
+    int below = OF_HEART_H * heartScale(height) / 2 - barHeight(height) / 2;
+    return height - barHeight(height) - (below > 0 ? below : 0);
+}
 
-void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t color) {
+/* A heart rides the head of the bar, the colour of a soul, outlined in black
+ * so it reads over the fill and the track alike. Drawn here (it is not taken
+ * from any game), 7x6 at 320x240, about the size of the soul in battle, centred on the bar's head. */
+#define OF_HEART_W 7
+static const uint16_t g_heart[OF_HEART_H] = {
+    0x36, /* .XX.XX. */
+    0x7F, /* XXXXXXX */
+    0x7F, /* XXXXXXX */
+    0x3E, /* .XXXXX. */
+    0x1C, /* ..XXX.. */
+    0x08, /* ...X... */
+};
+
+static int heartTop(int height) {
+    int h = OF_HEART_H * heartScale(height);
+    int top = barTop(height) + barHeight(height) / 2 - h / 2;
+    return top + h > height ? height - h : top;
+}
+
+/* The rows the heart and its outline can take. */
+static int heartStripTop(int height) {
+    int top = heartTop(height) - 1;
+    return top < 0 ? 0 : top;
+}
+
+/* The heart's left edge for a bar filled `filled` pixels: centred on the
+ * bar's head, kept on screen (outline and all) at either end. */
+static int heartLeft(int width, int height, int filled) {
+    int w = OF_HEART_W * heartScale(height);
+    int x = barLeft(width) + filled - w / 2;
+    if (x < 1) x = 1;
+    if (x > width - w - 1) x = width - w - 1;
+    return x;
+}
+
+static bool heartAt(int scale, int col, int row) {
+    if (col < 0 || row < 0 || col >= OF_HEART_W * scale || row >= OF_HEART_H * scale) return false;
+    return (g_heart[row / scale] & (1u << (OF_HEART_W - 1 - col / scale))) != 0;
+}
+
+static void drawHeart(uint16_t *fb, int width, int height, int left) {
+    int scale = heartScale(height), top = heartTop(height);
+    for (int row = -1; row <= OF_HEART_H * scale; row++) {
+        int y = top + row;
+        if (y < 0 || y >= height) continue;
+        for (int col = -1; col <= OF_HEART_W * scale; col++) {
+            int x = left + col;
+            if (x < 0 || x >= width) continue;
+            if (heartAt(scale, col, row)) {
+                fb[y * width + x] = OF_HEART;
+            } else if (heartAt(scale, col - 1, row) || heartAt(scale, col + 1, row) || heartAt(scale, col, row - 1) ||
+                       heartAt(scale, col, row + 1)) {
+                fb[y * width + x] = OF_BLACK;
+            }
+        }
+    }
+}
+
+/* The bar alone; returns how many pixels of it are filled. */
+static int drawBarLine(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track) {
     if (permille < 0) permille = 0;
     if (permille > 1000) permille = 1000;
     int left = barLeft(width), span = barWidth(width), top = barTop(height), rows = barHeight(height);
     int filled = span * permille / 1000;
     for (int y = top; y < top + rows; y++) {
         uint16_t *row = fb + y * width + left;
-        for (int x = 0; x < span; x++) row[x] = x < filled ? color : OF_TRACK;
+        for (int x = 0; x < span; x++) row[x] = x < filled ? fill : track;
     }
+    return filled;
+}
+
+void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track) {
+    /* The heart's strip is cleared each time: the frame may be one of the
+     * display's other buffers, with the heart further back. */
+    for (int y = heartStripTop(height); y < height; y++)
+        for (int x = 0; x < width; x++) fb[y * width + x] = OF_BLACK;
+    int filled = drawBarLine(fb, width, height, permille, fill, track);
+    drawHeart(fb, width, height, heartLeft(width, height, filled));
 }
 
 /* Before data.win has loaded there is no game font: the text is then drawn
@@ -231,7 +313,8 @@ void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *
         for (int probe = drawWrapped(NULL, 0, 0, left, 0, right, error->footer, 0); probe > 0; probe -= line) lines++;
         drawWrapped(fb, width, height, left, barTop(height) - line / 2 - lines * line, right, error->footer, OF_LIGHT);
     }
-    ofLoadingDrawBar(fb, width, height, permille < 30 ? 30 : permille, OF_RED);
+    /* No heart here: the footer sits where it would ride. */
+    drawBarLine(fb, width, height, permille < 30 ? 30 : permille, OF_RED, OF_TRACK);
 }
 
 static bool mentions(const char *text, const char *what) {
@@ -314,7 +397,8 @@ static void present(void) {
     uint16_t *fb = ofPlatformLoadingSurface(&fresh);
     if (fb == NULL) return;
     if (fresh) for (int i = 0; i < OF_LOADING_WIDTH * OF_LOADING_HEIGHT; i++) fb[i] = OF_BLACK;
-    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, OF_WHITE);
+    uint16_t fill = ofGame.loadingFill != 0 ? ofGame.loadingFill : OF_WHITE;
+    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, fill, OF_TRACK);
     ofPlatformLoadingFlip();
 }
 

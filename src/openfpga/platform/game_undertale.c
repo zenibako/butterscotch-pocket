@@ -610,6 +610,7 @@ static bool tourForList(const char *list, const char **script, const OfJump **ju
 const OfGame ofGame = {
     .title = "Undertale",
     .dataFiles = "data.win, textures.bin and music.bin",
+    .loadingFill = 0x7FE0,  /* the HP bar's yellow */
     .installPrompts = installPrompts,
     .natives = g_natives,
     .nativeCount = sizeof(g_natives) / sizeof(g_natives[0]),

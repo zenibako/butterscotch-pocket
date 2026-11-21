@@ -3,7 +3,8 @@
 
 /*
  * The loading screen of the game cores: a black screen with a progress bar
- * along the bottom, as most Pocket cores show, in place of the OS text
+ * along the bottom, as most Pocket cores show, and a red heart over its
+ * head (drawn in code, not taken from a game), in place of the OS text
  * terminal and its scrolling load log. The benchmark entries keep the log
  * (main.c decides). If loading fails, the bar turns red and the screen says
  * what went wrong; see ofLoadingFail.
@@ -43,7 +44,7 @@ void ofLoadingFail(const char *why, bool logSaved);
 
 /* Drawing, shared with the desktop preview (tools/loading-preview.c). The
  * frame is RGB555 with rows of `width` pixels. */
-void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t color);
+void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t fill, uint16_t track);
 typedef struct {
     const char *title;    /* "Couldn't load Undertale" */
     const char *reason;   /* one sentence */
