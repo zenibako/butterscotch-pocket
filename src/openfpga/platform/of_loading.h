@@ -3,7 +3,8 @@
 
 /*
  * The loading screen of the game cores: a black screen with a progress bar
- * along the bottom, as most Pocket cores show, in place of the OS text
+ * along the bottom, as most Pocket cores show, and a red heart riding its
+ * front (drawn in code, not taken from a game), in place of the OS text
  * terminal and its scrolling load log. The benchmark entries keep the log
  * (main.c decides). If loading fails, the bar turns red and the screen says
  * what went wrong; see ofLoadingFail.

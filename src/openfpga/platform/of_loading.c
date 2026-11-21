@@ -15,6 +15,7 @@
 #define OF_GREY   0x3DEF /* the logged error */
 #define OF_TRACK  0x1084 /* the bar's empty part */
 #define OF_RED    0x7C00
+#define OF_HEART  0x7C00 /* a soul's red */
 
 /* The bar: a thin line along the very bottom edge, the whole width across,
  * where other Pocket cores put theirs. Text keeps a margin. */
@@ -27,7 +28,58 @@ static int barWidth(int width) { return width; }
 static int barHeight(int height) { return height * OF_BAR_HEIGHT / OF_LOADING_HEIGHT; }
 static int barTop(int height) { return height - barHeight(height); }
 
-void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t color) {
+/* A heart rides the front of the bar, the colour of a soul. Drawn here (it is
+ * not taken from any game), 9x8 at 320x240, standing on the bar with a pixel
+ * between them. */
+#define OF_HEART_W 9
+#define OF_HEART_H 8
+#define OF_HEART_GAP 1
+static const uint16_t g_heart[OF_HEART_H] = {
+    0x0C6, /* .XX...XX. */
+    0x1EF, /* XXXX.XXXX */
+    0x1FF, /* XXXXXXXXX */
+    0x1FF, /* XXXXXXXXX */
+    0x0FE, /* .XXXXXXX. */
+    0x07C, /* ..XXXXX.. */
+    0x038, /* ...XXX... */
+    0x010, /* ....X.... */
+};
+
+static int heartScale(int height) {
+    int scale = height / OF_LOADING_HEIGHT;
+    return scale < 1 ? 1 : scale;
+}
+
+/* The rows the heart can take, above the bar. */
+static int heartTop(int height) {
+    return barTop(height) - (OF_HEART_H + OF_HEART_GAP) * heartScale(height);
+}
+
+/* The heart's left edge for a bar filled `filled` pixels: centred on the
+ * bar's front, kept on screen at either end. */
+static int heartLeft(int width, int height, int filled) {
+    int w = OF_HEART_W * heartScale(height);
+    int x = barLeft(width) + filled - w / 2;
+    if (x < 0) x = 0;
+    if (x > width - w) x = width - w;
+    return x;
+}
+
+static void drawHeart(uint16_t *fb, int width, int height, int left, uint16_t color) {
+    int scale = heartScale(height), top = heartTop(height);
+    for (int row = 0; row < OF_HEART_H * scale; row++) {
+        int y = top + row;
+        if (y < 0 || y >= height) continue;
+        uint16_t bits = g_heart[row / scale];
+        for (int col = 0; col < OF_HEART_W * scale; col++) {
+            int x = left + col;
+            if ((bits & (1u << (OF_HEART_W - 1 - col / scale))) && x >= 0 && x < width) fb[y * width + x] = color;
+        }
+    }
+}
+
+/* The bar alone; returns how many pixels of it are filled. */
+static int drawBarLine(uint16_t *fb, int width, int height, int permille, uint16_t color) {
     if (permille < 0) permille = 0;
     if (permille > 1000) permille = 1000;
     int left = barLeft(width), span = barWidth(width), top = barTop(height), rows = barHeight(height);
@@ -36,6 +88,16 @@ void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_
         uint16_t *row = fb + y * width + left;
         for (int x = 0; x < span; x++) row[x] = x < filled ? color : OF_TRACK;
     }
+    return filled;
+}
+
+void ofLoadingDrawBar(uint16_t *fb, int width, int height, int permille, uint16_t color) {
+    int filled = drawBarLine(fb, width, height, permille, color), top = barTop(height);
+    /* The strip the heart moves along is cleared each time: the frame may be
+     * one of the display's other buffers, with the heart further back. */
+    for (int y = heartTop(height) < 0 ? 0 : heartTop(height); y < top; y++)
+        for (int x = 0; x < width; x++) fb[y * width + x] = OF_BLACK;
+    drawHeart(fb, width, height, heartLeft(width, height, filled), OF_HEART);
 }
 
 /* Before data.win has loaded there is no game font: the text is then drawn
@@ -231,7 +293,8 @@ void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *
         for (int probe = drawWrapped(NULL, 0, 0, left, 0, right, error->footer, 0); probe > 0; probe -= line) lines++;
         drawWrapped(fb, width, height, left, barTop(height) - line / 2 - lines * line, right, error->footer, OF_LIGHT);
     }
-    ofLoadingDrawBar(fb, width, height, permille < 30 ? 30 : permille, OF_RED);
+    /* No heart here: the footer sits where it would ride. */
+    drawBarLine(fb, width, height, permille < 30 ? 30 : permille, OF_RED);
 }
 
 static bool mentions(const char *text, const char *what) {
