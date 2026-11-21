@@ -1293,10 +1293,6 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
 {
     if (SWR_SKIPPED((SWRenderer*) renderer)) return;
     SWRenderer* swr = (SWRenderer*) renderer;
-    // A clear of the whole main buffer still held, with nothing over it but
-    // tiled passes held already: this one can be held with them.
-    bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
-                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
     DataWin* dwin = renderer->dataWin;
 
     if (0 > tpagIndex || dwin->tpag.count <= (uint32_t) tpagIndex) return;
@@ -1306,6 +1302,12 @@ static void SWRenderer_drawSpriteTiled(Renderer* renderer, int32_t tpagIndex,
     if (0 > pageId || swr->totalTextureCount <= (uint32_t) pageId) return;
     SWTexture* texture = swrTextureForItem(swr, tpagIndex);
     if (!texture) return;
+    // A clear of the whole main buffer still held, with nothing over it but
+    // tiled passes held already: this one can be held with them. Worked out
+    // after the texture is in, because loading it can evict another and
+    // settle the clear.
+    bool canHold = swr->clearHeld && swr->fb == swr->mainFb && swrPendingCount == 0 && !swrGridHeld() &&
+                   swr->mirrorLayers == 0 && swr->mirrorStage == 0 && swr->overlayCount == 0 && swr->pipeCount == 0;
 
     float axScale = fabsf(xscale);
     float ayScale = fabsf(yscale);
