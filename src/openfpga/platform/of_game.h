@@ -163,6 +163,13 @@ typedef struct {
     int roomJumpCount;
     const OfBenchSection *roomSections;
     int roomSectionCount;
+    /* Optional town walk ("--bench-town"): Undertale's room 68 Snowdin Town, left to right. */
+    const char *townTitle;
+    const char *townScript;
+    const OfJump *townJumps;
+    int townJumpCount;
+    const OfBenchSection *townSections;
+    int townSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

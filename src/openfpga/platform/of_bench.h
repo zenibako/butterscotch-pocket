@@ -29,6 +29,8 @@ bool ofBenchStartFloweyTour(bool livePacing);
 /* "--bench-room" (or "--bench-snow"): the game's single-room benchmark, if it has one: Undertale's
  * room 57 snow patch, Deltarune's room 85 dancers. */
 bool ofBenchStartRoom(void);
+/* "--bench-town": the game's town walk, if it has one: Undertale's room 68 Snowdin Town. */
+bool ofBenchStartTown(void);
 bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);

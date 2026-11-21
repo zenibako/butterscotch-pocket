@@ -26,6 +26,32 @@ static const OfBenchSection g_snowSections[] = {
     { "standing, patch in view", 820, "near", "room_tundra_snowpuzz", "obj_snowfloor", NULL },
 };
 
+/* Room 68 (room_tundra_town), Snowdin Town, 2720x240 with 167 instances.
+ * The run jumps there from the intro (its first visit, which reads the town's
+ * textures), turns random encounters off, walks left out onto the bridge
+ * (room 67) and back in, the way a player arrives, stands at the entrance,
+ * then walks the town left to right along the trees at its foot: past the
+ * shop and inn, the bear at the tree and Grillby's, stands by the library,
+ * and walks on to Papyrus and Sans's house. */
+static const char g_townScript[] =
+    "100:L*200,420:R*40,540:D*25,570:R*140,715:D*12,730:R*330,1100:R*400";
+
+static const OfJump g_townJumps[] = {
+    { 60, 68, NULL, NULL },
+    { 70, -1, "encounter=-100000", NULL },
+};
+
+static const OfBenchSection g_townSections[] = {
+    { "boot and intro", 60, "boot", NULL, NULL, NULL },
+    { "jump into town", 62, "jump", "room_tundra_town", NULL, NULL },
+    { "first visit, bridge", 453, "visit", NULL, NULL, NULL },
+    { "back into town", 460, "entry", "room_tundra_town", NULL, NULL },
+    { "standing at entrance", 540, "stand", "room_tundra_town", NULL, NULL },
+    { "walk: shop to Grillby's", 1060, "walk", "room_tundra_town", NULL, NULL },
+    { "standing by library", 1100, "still", "room_tundra_town", NULL, NULL },
+    { "walk: library to houses", 1380, "walk2", "room_tundra_town", NULL, NULL },
+};
+
 /* Key presses that walk from boot to the first battle; see runInputScript()
  * in of_platform.c for the syntax. Frame numbers assume a fresh save state. */
 static const char g_script[] =

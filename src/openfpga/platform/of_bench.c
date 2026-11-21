@@ -183,6 +183,14 @@ bool ofBenchStartRoom(void) {
     return true;
 }
 
+bool ofBenchStartTown(void) {
+    if (ofGame.townScript == NULL) return false;
+    benchStart(ofGame.townTitle, ofGame.townScript, ofGame.townJumps, ofGame.townJumpCount,
+               ofGame.townSections, ofGame.townSectionCount, true, false);
+    g_def.runProbes = false;
+    return true;
+}
+
 bool ofBenchLivePacing(void) {
     return g_def.livePacing;
 }

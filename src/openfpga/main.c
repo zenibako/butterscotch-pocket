@@ -172,6 +172,14 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(roomSmooth);
             if (!ofBenchStartRoom()) logWarn("Bench: this game has no single-room benchmark\n");
         }
+        /* --bench-town (accuracy) and --bench-town-smooth (speed): the town walk, Undertale's Snowdin Town. */
+        bool townSmooth = strcmp(argv[i], "--bench-town-smooth") == 0;
+        if (townSmooth || strcmp(argv[i], "--bench-town") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(townSmooth);
+            if (!ofBenchStartTown()) logWarn("Bench: this game has no town walk\n");
+        }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
         /* --full-screen / --no-full-screen: start at 10:9 or 4:3 (Select > Aspect Ratio). */
