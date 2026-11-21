@@ -68,6 +68,9 @@ typedef struct {
     /* The game's name, and its files on the card, for the loading screen's errors. */
     const char *title;
     const char *dataFiles;
+    /* The loading bar's colours (RGB555), as the game's own HP bar; 0 for
+     * both: white on grey. */
+    uint16_t loadingFill, loadingTrack;
     /* Prompts that name keyboard keys, beyond the ones every game shares. */
     const OfStringPatch *strings;
     size_t stringCount;

@@ -17,11 +17,12 @@
 #define OF_RED    0x7C00
 #define OF_HEART  0x7C00 /* a soul's red */
 
-/* The bar: a thin line along the very bottom edge, the whole width across,
- * where other Pocket cores put theirs. Text keeps a margin. */
+/* The bar: along the very bottom edge, the whole width across, where other
+ * Pocket cores put theirs, as tall as the heart so the heart sits centred on
+ * it and whole. Text keeps a margin. */
 #define OF_TEXT_MARGIN 24
 #ifndef OF_BAR_HEIGHT
-#define OF_BAR_HEIGHT 2
+#define OF_BAR_HEIGHT 8
 #endif
 
 static int textLeft(int width) { return width * OF_TEXT_MARGIN / OF_LOADING_WIDTH; }
@@ -32,8 +33,7 @@ static int barTop(int height) { return height - barHeight(height); }
 
 /* A heart rides the head of the bar, the colour of a soul, outlined in black
  * so it reads over the fill and the track alike. Drawn here (it is not taken
- * from any game), 9x8 at 320x240, centred on the bar's head and as low as the
- * screen allows. */
+ * from any game), 9x8 at 320x240, centred on the bar's head. */
 #define OF_HEART_W 9
 #define OF_HEART_H 8
 static const uint16_t g_heart[OF_HEART_H] = {
@@ -396,7 +396,12 @@ static void present(void) {
     uint16_t *fb = ofPlatformLoadingSurface(&fresh);
     if (fb == NULL) return;
     if (fresh) for (int i = 0; i < OF_LOADING_WIDTH * OF_LOADING_HEIGHT; i++) fb[i] = OF_BLACK;
-    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, OF_WHITE, OF_TRACK);
+    uint16_t fill = OF_WHITE, track = OF_TRACK;
+    if (ofGame.loadingFill != 0 || ofGame.loadingTrack != 0) {
+        fill = ofGame.loadingFill;
+        track = ofGame.loadingTrack;
+    }
+    ofLoadingDrawBar(fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, g_permille, fill, track);
     ofPlatformLoadingFlip();
 }
 

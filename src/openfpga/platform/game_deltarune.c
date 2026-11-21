@@ -725,6 +725,8 @@ static bool battleUiActive(Runner *runner) {
 const OfGame ofGame = {
     .title = "Deltarune",
     .dataFiles = "deltarune.win, dr_textures.bin and dr_music.bin",
+    .loadingFill = 0x03FF,  /* Kris's HP bar: cyan on dark red */
+    .loadingTrack = 0x4000,
     .installPrompts = installPrompts,
     .battleUiInstall = battleUiInstall,
     .battleUiActive = battleUiActive,

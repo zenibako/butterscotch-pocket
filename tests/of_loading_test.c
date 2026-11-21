@@ -212,7 +212,7 @@ static void testDescribe(void) {
 static void testScreens(void) {
     memset(g_fb, 0, sizeof(g_fb));
     ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 420, 0x7FFF, OF_TRACK);
-    /* The bar sits at the bottom, white then grey along it, with only the heart above it. */
+    /* The bar sits at the bottom, white then grey along it, with only the heart's outline above it. */
     for (int y = 0; y < heartStripTop(OF_LOADING_HEIGHT); y++)
         for (int x = 0; x < OF_LOADING_WIDTH; x++) assert(g_fb[y * OF_LOADING_WIDTH + x] == 0);
     int row = barTop(OF_LOADING_HEIGHT) * OF_LOADING_WIDTH;
@@ -236,7 +236,7 @@ static void testScreens(void) {
             }
     assert(hearts == 46); /* the heart's pixels, once */
     for (int x = 0; x < OF_LOADING_WIDTH * 900 / 1000 - OF_HEART_W; x++)
-        assert(g_fb[bottom + x] == 0x7FFF && g_fb[bottom - 3 * OF_LOADING_WIDTH + x] == 0);
+        assert(g_fb[bottom + x] == 0x7FFF && g_fb[(barTop(OF_LOADING_HEIGHT) - 1) * OF_LOADING_WIDTH + x] == 0);
     /* At either end it stays whole on screen. */
     ofLoadingDrawBar(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, 0, 0x7FFF, OF_TRACK);
     assert(g_fb[bottom + 1 + OF_HEART_W / 2] == OF_HEART);
