@@ -131,6 +131,8 @@ void ofPerfPeekTotals(OfPerfTotals *out); /* the same sum, left running */
  * phase that was running. */
 void ofPerfPhase(OfPhase phase);
 bool ofPerfFrame(uint16_t *fb, int width, int height); /* true if it drew on fb */
+/* The work of the frame ofPerfFrame last ended (its period less the limiter's sleep), ns. */
+uint64_t ofPerfLastWorkNanos(void);
 /* Writes a few words in the top right corner, in the game's font (see
  * of_font.h): the selected Performance Mode, or a notice. */
 void ofPerfDrawMode(uint16_t *fb, int width, int height, const char *label);

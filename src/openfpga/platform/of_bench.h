@@ -102,6 +102,8 @@ void ofBenchNoteRead(int kind, int after, uint64_t nanos);
 void ofBenchNotePrefetch(unsigned items, unsigned noRoom, unsigned left, unsigned updates, unsigned reads,
                          uint64_t readNanos, uint64_t nanos);
 void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos);
+/* Texture items loaded at a draw, anywhere (the town walk's frame table). */
+void ofBenchNoteItemLoads(unsigned items, uint64_t nanos);
 /* What a call costs on this machine, in nanoseconds, each averaged over a few
  * thousand: reading the clock; a sprite draw on a skipped frame, which goes
  * through everything a draw does up to the first pixel and stops there; the

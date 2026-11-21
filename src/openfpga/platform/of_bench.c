@@ -10,6 +10,7 @@
 #include "of_perf.h"
 #include "sw_call_notes.h"
 #include "sw_texture_pack.h"
+#include "sw_renderer.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -76,6 +77,14 @@ static int g_sectionNoteCount[OF_BENCH_MAX_SECTIONS];
 static uint32_t g_sectionNotesMissed[OF_BENCH_MAX_SECTIONS];
 static SWPipeRasterNotes g_sectionPipeRaster[OF_BENCH_MAX_SECTIONS];
 static unsigned g_firstFrameMs = 0;
+/* Per section, for routes that ask for it (frameStats): the slowest frame's work and
+ * which frame it was, how many frames went over 33.3 and 50 ms of work, the texture
+ * items loaded at a draw and their ms, and texture pages and items given up. */
+static struct {
+    uint64_t maxWorkNanos, itemNanos;
+    unsigned maxFrame, over33, over50, items, evictions;
+} g_frameStats[OF_BENCH_MAX_SECTIONS];
+static unsigned g_evictionsBefore;
 
 /* Draw calls and mixing are timed on one frame in this many: timing them
  * costs 3 to 5 ms of a battle frame on the device, which the game does not
@@ -92,6 +101,7 @@ static struct {
     bool runProbes;
     bool livePacing;
     bool floweyOpening; /* the Flowey tour's separate opening windows (ofGame.floweyOpening) */
+    bool frameStats;    /* the slowest-frame and texture table in reportWork */
 } g_def;
 static const char *g_tourList;
 
@@ -105,6 +115,7 @@ static void benchStart(const char *title, const char *script, const OfJump *jump
     g_def.runProbes = !livePacing;
     g_def.livePacing = livePacing;
     g_def.floweyOpening = false;
+    g_def.frameStats = false;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
@@ -188,6 +199,7 @@ bool ofBenchStartTown(void) {
     benchStart(ofGame.townTitle, ofGame.townScript, ofGame.townJumps, ofGame.townJumpCount,
                ofGame.townSections, ofGame.townSectionCount, true, false);
     g_def.runProbes = false;
+    g_def.frameStats = true;
     return true;
 }
 
@@ -386,6 +398,12 @@ void ofBenchNotePrefetch(unsigned items, unsigned noRoom, unsigned left, unsigne
     g_prefetchSections[g_section].nanos += nanos;
 }
 
+void ofBenchNoteItemLoads(unsigned items, uint64_t nanos) {
+    if (!g_running || g_section >= OF_BENCH_MAX_SECTIONS) return;
+    g_frameStats[g_section].items += items;
+    g_frameStats[g_section].itemNanos += nanos;
+}
+
 void ofBenchNoteBattleLoads(unsigned items, uint64_t nanos) {
     if (!g_running || g_section >= OF_BENCH_MAX_SECTIONS) return;
     g_prefetchSections[g_section].loads += items;
@@ -486,6 +504,7 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
     if (!g_sectionSeen[g_section] && ofBenchSceneMatches(runner, section)) g_sectionSeen[g_section] = true;
     if (g_frame == 0) {
         g_firstFrameMs = (unsigned) ((now - g_startNanos) / 1000000u);
+        g_evictionsBefore = SWRenderer_textureEvictions();
         g_sectionStart = now;
         g_sectionFirstUpdate = runner->frameCount;
         if (!g_def.livePacing) {
@@ -496,7 +515,22 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
         }
     }
     g_frame++;
+    if (g_def.frameStats && g_frame > 1) {
+        /* ofPerfFrame has just ended this frame. */
+        uint64_t work = ofPerfLastWorkNanos();
+        if (work > g_frameStats[g_section].maxWorkNanos) {
+            g_frameStats[g_section].maxWorkNanos = work;
+            g_frameStats[g_section].maxFrame = (unsigned) g_frame;
+        }
+        if (work > 33333333u) ++g_frameStats[g_section].over33;
+        if (work > 50000000u) ++g_frameStats[g_section].over50;
+    }
     if (g_frame < section->lastFrame) return;
+    if (g_def.frameStats) {
+        unsigned evictions = SWRenderer_textureEvictions();
+        g_frameStats[g_section].evictions = evictions - g_evictionsBefore;
+        g_evictionsBefore = evictions;
+    }
 
     bool seen = (section->roomName == NULL && section->requiredObject == NULL) || g_sectionSeen[g_section];
     bool endValid = section->endValid == NULL ||
@@ -668,6 +702,17 @@ static void reportWork(void) {
     }
     ofLogPrint("%d frames in %u.%u s; full speed is 33.3\n", firstFrame, totalMs / 1000, (totalMs % 1000) / 100);
     ofLogPrint("work = total minus display flip\n");
+    if (g_def.frameStats) {
+        /* The slowest frame's work (ms) and its frame, frames over 33.3 and 50 ms,
+         * texture items loaded at a draw and their ms, pages and items given up. */
+        ofLogPrint("frames max-ms at   >33  >50  tex/ms    unld\n");
+        for (int i = 0; i < g_def.sectionCount; i++) {
+            unsigned max = (unsigned) (g_frameStats[i].maxWorkNanos / 100000u);
+            ofLogPrint("%-5s %5u.%u %4u %4u %4u %4u/%-5u %4u\n", g_def.sections[i].tag, max / 10, max % 10,
+                       g_frameStats[i].maxFrame, g_frameStats[i].over33, g_frameStats[i].over50, g_frameStats[i].items,
+                       (unsigned) (g_frameStats[i].itemNanos / 1000000u), g_frameStats[i].evictions);
+        }
+    }
     if (g_def.runProbes) {
         ioReport();
         asyncReport();

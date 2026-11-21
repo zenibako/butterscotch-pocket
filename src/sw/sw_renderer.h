@@ -53,6 +53,8 @@ void SWRenderer_prefetchCancel(void** state);
 int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)[2], int max);
 /* Items loaded for a draw since the last call (not prefetched), and their time. */
 void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos);
+// Texture pages and items given up so far (evicted or unloaded).
+unsigned SWRenderer_textureEvictions(void);
 /* Whether a filled draw_circle/draw_ellipse with this centre and these radii would put nothing on the target: it
  * lies wholly outside, beyond a pixel's margin. False for any renderer but this one. Such a call still settles held
  * layers, so a caller may leave one out only when a draw since the last thing held has done that already. */

@@ -4062,6 +4062,12 @@ int SWRenderer_planItem(Renderer* renderer, int32_t tpagIndex, uint32_t (*spans)
     return count;
 }
 
+unsigned SWRenderer_textureEvictions(void)
+{
+    extern unsigned swrTextureEvictions;
+    return swrTextureEvictions;
+}
+
 void SWRenderer_takeItemLoads(unsigned* count, uint64_t* nanos)
 {
     SwrItemLoads loads;

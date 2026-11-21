@@ -41,15 +41,20 @@ static const OfJump g_townJumps[] = {
     { 70, -1, "encounter=-100000", NULL },
 };
 
+/* Section ends count drawn frames, which fall behind the script's frame numbers by one
+ * at each room change that draws nothing (2 by the jump, 3 on the bridge, 4 back in town):
+ * frame 59 is the jump's first picture (script 61), 436-449 the door's fade (script
+ * 439-452) and 450 the first picture back in the town (script 454). */
 static const OfBenchSection g_townSections[] = {
-    { "boot and intro", 60, "boot", NULL, NULL, NULL },
-    { "jump into town", 62, "jump", "room_tundra_town", NULL, NULL },
-    { "first visit, bridge", 453, "visit", NULL, NULL, NULL },
-    { "back into town", 460, "entry", "room_tundra_town", NULL, NULL },
-    { "standing at entrance", 540, "stand", "room_tundra_town", NULL, NULL },
-    { "walk: shop to Grillby's", 1060, "walk", "room_tundra_town", NULL, NULL },
-    { "standing by library", 1100, "still", "room_tundra_town", NULL, NULL },
-    { "walk: library to houses", 1380, "walk2", "room_tundra_town", NULL, NULL },
+    { "boot and intro", 58, "boot", NULL, NULL, NULL },
+    { "jump into town", 60, "jump", "room_tundra_town", NULL, NULL },
+    { "first visit, bridge", 435, "visit", NULL, NULL, NULL },
+    { "door fade on bridge", 449, "fade", "room_tundra_dangerbridge", NULL, NULL },
+    { "back into town", 456, "entry", "room_tundra_town", NULL, NULL },
+    { "standing at entrance", 536, "stand", "room_tundra_town", NULL, NULL },
+    { "walk: shop to Grillby's", 1056, "walk", "room_tundra_town", NULL, NULL },
+    { "standing by library", 1096, "still", "room_tundra_town", NULL, NULL },
+    { "walk: library to houses", 1376, "walk2", "room_tundra_town", NULL, NULL },
 };
 
 /* Key presses that walk from boot to the first battle; see runInputScript()

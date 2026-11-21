@@ -804,11 +804,14 @@ tile pictures the first circle lets out) and inside `collision_circle` (`collide
 
 `--bench-town` walks room 68 (`room_tundra_town`, Snowdin Town). It jumps
 there from the intro (`jump` is that first, cold visit), turns random
-encounters off, walks left onto the bridge and back in the way a player
-arrives (`entry`), stands at the entrance (`stand`), walks the town to the
-library (`walk`), stands there (`still`) and walks on to Papyrus and Sans's
+encounters off, walks left onto the bridge (`visit`; `fade` is the door's
+fade at its end) and back in the way a player arrives (`entry`), stands at
+the entrance (`stand`), walks the town to the library (`walk`), stands there (`still`) and walks on to Papyrus and Sans's
 house (`walk2`). `--bench-town-smooth` is the same route in Speed mode. It
-skips the post-run probes.
+skips the post-run probes. Its report adds a `frames` table: each section's
+slowest frame (ms of work, and which drawn frame), how many frames took over
+33.3 and over 50 ms, texture items loaded at a draw and their ms, and texture
+pages and items given up (`unld`).
 
 `tools/mkbullet.py` packages those routes as the separate `zenibako.BsBullet`
 core. Its launch entries and exact arguments are:

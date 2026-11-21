@@ -55,7 +55,7 @@ typedef struct {
     bool (*endValid)(const Runner *runner);
 } OfBenchSection;
 
-#define OF_BENCH_MAX_SECTIONS 8
+#define OF_BENCH_MAX_SECTIONS 9
 #define OF_BENCH_MAX_OPENING_WINDOWS 8
 
 /* A window in scripted update numbers, including updates with no swap. */
