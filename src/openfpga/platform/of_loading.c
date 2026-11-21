@@ -29,7 +29,7 @@ static int textLeft(int width) { return width * OF_TEXT_MARGIN / OF_LOADING_WIDT
 static int barLeft(int width) { (void) width; return 0; }
 static int barWidth(int width) { return width; }
 static int barHeight(int height) { return height * OF_BAR_HEIGHT / OF_LOADING_HEIGHT; }
-#define OF_HEART_H 8
+#define OF_HEART_H 6
 static int heartScale(int height) {
     int scale = height / OF_LOADING_HEIGHT;
     return scale < 1 ? 1 : scale;
@@ -42,17 +42,15 @@ static int barTop(int height) {
 
 /* A heart rides the head of the bar, the colour of a soul, outlined in black
  * so it reads over the fill and the track alike. Drawn here (it is not taken
- * from any game), 9x8 at 320x240, centred on the bar's head. */
-#define OF_HEART_W 9
+ * from any game), 7x6 at 320x240, about the size of the soul in battle, centred on the bar's head. */
+#define OF_HEART_W 7
 static const uint16_t g_heart[OF_HEART_H] = {
-    0x0C6, /* .XX...XX. */
-    0x1EF, /* XXXX.XXXX */
-    0x1FF, /* XXXXXXXXX */
-    0x1FF, /* XXXXXXXXX */
-    0x0FE, /* .XXXXXXX. */
-    0x07C, /* ..XXXXX.. */
-    0x038, /* ...XXX... */
-    0x010, /* ....X.... */
+    0x36, /* .XX.XX. */
+    0x7F, /* XXXXXXX */
+    0x7F, /* XXXXXXX */
+    0x3E, /* .XXXXX. */
+    0x1C, /* ..XXX.. */
+    0x08, /* ...X... */
 };
 
 static int heartTop(int height) {

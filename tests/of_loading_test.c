@@ -236,7 +236,7 @@ static void testScreens(void) {
                 assert(x > OF_LOADING_WIDTH * 900 / 1000 - OF_HEART_W);
                 hearts++;
             }
-    assert(hearts == 46); /* the heart's pixels, once */
+    assert(hearts == 27); /* the heart's pixels, once */
     for (int x = 0; x < OF_LOADING_WIDTH * 900 / 1000 - OF_HEART_W; x++)
         assert(g_fb[row + x] == 0x7FFF && g_fb[row - OF_LOADING_WIDTH + x] == 0 && g_fb[bottom + x] == 0);
     /* At either end it stays whole on screen. */
