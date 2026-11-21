@@ -176,14 +176,6 @@ void swrFramebufferTouched(void)
 
 int swrFillExtendRows = 0;
 
-void swrMarkDrawnRows(Renderer* renderer, int y0, int y1)
-{
-    SWRenderer* swr = (SWRenderer*) renderer;
-    if (swr == NULL) return;
-    swrDirtyRectIn(swr, swr->mainFb, 0, y0, SWR_DIRTY_MAX_W, y1);
-    swr->uniformValid = false;
-}
-
 // swrFillExtendRows for a fill: when the rectangle covers the whole width of the main buffer and the rows from the
 // top band's edge to the bottom band's, without covering the whole height, moves its top and bottom edges out to
 // the buffer's. The edges are given in room coordinates, so the buffer's rows are mapped back the same way.

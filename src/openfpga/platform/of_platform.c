@@ -77,6 +77,7 @@ int platformHeapCanReserve(size_t bytes)
  * has a 320x288 10:9 scaler slot for it. */
 #define OF_TALL_H 288
 static bool g_fullScreen = false;
+static bool fullScreenRoomIsShort(void);
 void ofPlatformSetFullScreen(bool on) { g_fullScreen = on; }
 bool ofPlatformFullScreen(void) { return g_fullScreen; }
 
@@ -500,7 +501,11 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     }
 #endif
     *outW = hires ? OF_HIRES_W : OF_SCREEN_W;
-    *outH = hires ? OF_HIRES_H : g_fullScreen ? OF_TALL_H : OF_SCREEN_H;
+    /* 10:9 full screen: 320x288, except in a room too short for it, which is
+     * drawn at plain 320x240 (the Pocket then shows its usual 4:3 bars, as
+     * tall as the bands would be). Asked after the step, so a room change
+     * this frame counts. */
+    *outH = hires ? OF_HIRES_H : g_fullScreen && !fullScreenRoomIsShort() ? OF_TALL_H : OF_SCREEN_H;
     return true;
 }
 
@@ -592,9 +597,9 @@ static void logFramebufferAddress(const void *surface) {
  * grows 24 px up and 24 px down (the runner's widescreen hack); in a room
  * shorter than the grown view, that shows what lies past the room or what the
  * game keeps just outside its 4:3 view (Undertale's first room, the
- * single-screen Ruins rooms, a battle shrunk for Speed). Those rooms are shown
- * at 4:3 inside the 320x288 frame: the two bands are blacked out. A room
- * without views is drawn whole, so it counts as short. */
+ * single-screen Ruins rooms, a battle shrunk for Speed). Those rooms are drawn
+ * at 320x240 instead, exactly as at 4:3. A room without views is drawn whole,
+ * so it counts as short. */
 static bool fullScreenRoomIsShort(void) {
     if (g_runner == NULL || g_runner->currentRoom == NULL) return true;
     int64_t roomH = (int64_t) g_runner->currentRoom->height;
@@ -608,14 +613,10 @@ static bool fullScreenRoomIsShort(void) {
     }
     return true;
 }
-static bool g_fullScreenShort = false; /* fullScreenRoomIsShort() for the frame being drawn */
-
 uint16_t *platformAcquireFramebuffer(int width, int height) {
-    /* Decided once per frame, before it is drawn: fades over the 4:3 view
-     * are drawn over the whole frame (swrFillExtendRows) unless the bands
-     * are to be blacked out anyway. */
-    g_fullScreenShort = g_fullScreen && height == OF_TALL_H && fullScreenRoomIsShort();
-    swrFillExtendRows = g_fullScreen && height == OF_TALL_H && !g_fullScreenShort ? (OF_TALL_H - OF_SCREEN_H) / 2 : 0;
+    /* A 320x288 frame: fades over the 4:3 view are drawn over the whole
+     * frame (swrFillExtendRows). */
+    swrFillExtendRows = height == OF_TALL_H ? (OF_TALL_H - OF_SCREEN_H) / 2 : 0;
     matchVideoMode(width, height);
     if (width != g_modeW || height != g_modeH) return NULL;
     if (g_modeStride != width * (int) sizeof(uint16_t)) return NULL;
@@ -860,18 +861,6 @@ void platformSwapBuffers(void) {
         }
     }
 #endif
-    /* Full screen in a short room: black out the bands above and below the
-     * 4:3 picture, after everything the game drew, overlays included. */
-    if (g_fullScreenShort && g_nextW == OF_SCREEN_W && g_nextH == OF_TALL_H) {
-        const int band = (OF_TALL_H - OF_SCREEN_H) / 2;
-        const size_t bandBytes = (size_t) band * OF_SCREEN_W * sizeof(uint16_t);
-        memset(g_nextFb, 0, bandBytes);
-        memset(g_nextFb + (size_t) (OF_TALL_H - band) * OF_SCREEN_W, 0, bandBytes);
-        if (g_runner != NULL) {
-            swrMarkDrawnRows(g_runner->renderer, 0, band);
-            swrMarkDrawnRows(g_runner->renderer, OF_TALL_H - band, OF_TALL_H);
-        }
-    }
     /* Words drawn over the picture are not the renderer's: it then clears
      * the whole of this buffer next time it gets it. */
     bool overlaid = ofPerfFrame(g_nextFb, g_nextW, g_nextH);

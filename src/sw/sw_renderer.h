@@ -64,10 +64,6 @@ bool SWRenderer_drawFilledCircleSettled(Renderer* renderer, float cx, float cy, 
 // buffer's last clear. A platform that writes into one of those buffers itself
 // (an overlay, a menu, a copy) calls this, so the next clear is a whole one.
 void swrFramebufferTouched(void);
-// For a platform that blacks out rows [y0, y1) of the frame just drawn in the main buffer (the Pocket's full screen
-// shows rooms too short for it at 4:3): marks them as drawn there, so the next frame in that buffer clears them like
-// anything else drawn, and forgets that the buffer was one colour.
-void swrMarkDrawnRows(Renderer* renderer, int y0, int y1);
 // Full screen (the Pocket port's 320x288): a game draws its fades and flashes over its own 4:3 view, which is this
 // many rows short of the frame at the top and at the bottom. A solid fill or solid sprite that covers the whole width
 // and reaches both of those edges is drawn over the whole height instead. 0 (the default) leaves draws as they are.
