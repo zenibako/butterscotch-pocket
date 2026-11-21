@@ -551,6 +551,12 @@ static void matchVideoMode(int width, int height) {
             g_hiresAvailable = false;
             return;
         }
+        if (height != OF_SCREEN_H) {
+            /* 320x288 refused: back to 4:3, and the next frame is sized for it. */
+            logWarn("Video: %dx%d is not available, staying at 4:3.\n", width, height);
+            g_fullScreen = false;
+            return;
+        }
         /* An OS without mode setting still has the boot 320x240 mode. */
         g_modeStride = OF_SCREEN_W * (int) sizeof(uint16_t);
     } else {

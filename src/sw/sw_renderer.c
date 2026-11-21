@@ -189,8 +189,9 @@ static void swrExtendFill(SWRenderer* swr, float x1, float* y1, float x2, float*
     float left = sx1 < sx2 ? sx1 : sx2, right = sx1 < sx2 ? sx2 : sx1;
     float top = sy1 < sy2 ? sy1 : sy2, bottom = sy1 < sy2 ? sy2 : sy1;
     int width = swr->mainWidth, height = swr->mainHeight;
-    // A fill draws from floor(left) through ceil(right), so x2 = 319 covers a 320-wide buffer.
-    if (left > 0.5f || right < (float) width - 1.5f) return;
+    // A fill covers columns floor(left) up to, not including, ceil(right) (swrFillRectangle), so only one that
+    // reaches column width - 1 covers the whole width.
+    if (left >= 1.0f || right <= (float) width - 1.0f) return;
     if (top > (float) band + 0.5f || bottom < (float) (height - band) - 1.5f) return;
     if (top <= 0.5f && bottom >= (float) height - 1.5f) return;
     float roomTop = (0.0f - (float) swr->portY) / swr->scaleY + swr->viewY;
