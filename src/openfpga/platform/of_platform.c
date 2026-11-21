@@ -73,6 +73,21 @@ int platformHeapCanReserve(size_t bytes)
 
 #define OF_HIRES_W 640
 #define OF_HIRES_H 480
+/* Full screen's frame: the Pocket's screen is 10:9, and the core's video.json
+ * has a 320x288 10:9 scaler slot for it. */
+#define OF_TALL_H 288
+/* Aspect Ratio: 10:9 full screen is what the player starts in. The desktop
+ * build starts at 4:3 instead, as it starts in Accuracy, so frame comparisons
+ * keep their reference size; BS_FULL_SCREEN=1 gives it 10:9. Benchmarks also
+ * run at 4:3 unless an entry asks for --full-screen (see main.c). */
+#ifdef OF_PC
+static bool g_fullScreen = false;
+#else
+static bool g_fullScreen = true;
+#endif
+static bool fullScreenRoomIsShort(void);
+void ofPlatformSetFullScreen(bool on) { g_fullScreen = on; }
+bool ofPlatformFullScreen(void) { return g_fullScreen; }
 
 static Runner *g_runner = NULL;
 static uint16_t *g_nextFb = NULL;
@@ -494,7 +509,11 @@ bool platformGetWindowSize(int32_t *outW, int32_t *outH) {
     }
 #endif
     *outW = hires ? OF_HIRES_W : OF_SCREEN_W;
-    *outH = hires ? OF_HIRES_H : OF_SCREEN_H;
+    /* 10:9 full screen: 320x288, except in a room too short for it, which is
+     * drawn at plain 320x240 (the Pocket then shows its usual 4:3 bars, as
+     * tall as the bands would be). Asked after the step, so a room change
+     * this frame counts. */
+    *outH = hires ? OF_HIRES_H : g_fullScreen && !fullScreenRoomIsShort() ? OF_TALL_H : OF_SCREEN_H;
     return true;
 }
 
@@ -530,6 +549,12 @@ static void matchVideoMode(int width, int height) {
         if (width > OF_SCREEN_W) {
             logWarn("Video: %dx%d is not available, staying at %dx%d.\n", width, height, OF_SCREEN_W, OF_SCREEN_H);
             g_hiresAvailable = false;
+            return;
+        }
+        if (height != OF_SCREEN_H) {
+            /* 320x288 refused: back to 4:3, and the next frame is sized for it. */
+            logWarn("Video: %dx%d is not available, staying at 4:3.\n", width, height);
+            g_fullScreen = false;
             return;
         }
         /* An OS without mode setting still has the boot 320x240 mode. */
@@ -582,7 +607,30 @@ static void logFramebufferAddress(const void *surface) {
 /* The renderer draws each frame straight into the display's back buffer, so
  * presenting is just a flip. Returns NULL (renderer keeps its own buffer and
  * the frame is copied) if the mode is unavailable or its rows are padded. */
+/* Full screen: whether the room is too short for the taller frame. The view
+ * grows 24 px up and 24 px down (the runner's widescreen hack); in a room
+ * shorter than the grown view, that shows what lies past the room or what the
+ * game keeps just outside its 4:3 view (Undertale's first room, the
+ * single-screen Ruins rooms, a battle shrunk for Speed). Those rooms are drawn
+ * at 320x240 instead, exactly as at 4:3. A room without views is drawn whole,
+ * so it counts as short. */
+static bool fullScreenRoomIsShort(void) {
+    if (g_runner == NULL || g_runner->currentRoom == NULL) return true;
+    int64_t roomH = (int64_t) g_runner->currentRoom->height;
+    if (!g_runner->viewsEnabled) return true;
+    for (int32_t vi = 0; vi < MAX_VIEWS; vi++) {
+        if (!g_runner->views[vi].enabled) continue;
+        GMLCamera *camera = Runner_getCameraForView(g_runner, vi);
+        if (camera == NULL) continue;
+        /* Grown view height: viewHeight * 288 / 240. */
+        return roomH * OF_SCREEN_H < (int64_t) camera->viewHeight * OF_TALL_H;
+    }
+    return true;
+}
 uint16_t *platformAcquireFramebuffer(int width, int height) {
+    /* A 320x288 frame: fades over the 4:3 view are drawn over the whole
+     * frame (swrFillExtendRows). */
+    swrFillExtendRows = height == OF_TALL_H ? (OF_TALL_H - OF_SCREEN_H) / 2 : 0;
     matchVideoMode(width, height);
     if (width != g_modeW || height != g_modeH) return NULL;
     if (g_modeStride != width * (int) sizeof(uint16_t)) return NULL;
@@ -1615,6 +1663,22 @@ static bool menuVideo(int direction) {
     return false;
 }
 
+/* Aspect Ratio: 4:3, or 10:9 full screen (320x240 rooms drawn at 320x288,
+ * see ofPlatformSetFullScreen). The entry's --full-screen sets the starting
+ * value; it takes effect from the next frame drawn. The menu closes, so the
+ * change shows at once. */
+static const char *menuAspectValue(void) {
+    return g_fullScreen ? "10:9" : "4:3";
+}
+
+static bool menuAspect(int direction) {
+    (void) direction;
+    g_fullScreen = !g_fullScreen;
+    logInfo("Video: aspect ratio %s\n", g_fullScreen ? "10:9" : "4:3");
+    showNotice(g_fullScreen ? "Aspect ratio 10:9" : "Aspect ratio 4:3");
+    return true;
+}
+
 static const char *menuFrameTimesValue(void) {
     return onOff(ofPerfOverlayOn());
 }
@@ -1745,6 +1809,8 @@ static const OfMenuRow g_menuRows[] = {
       "Closes this menu and returns to the game." },
     { "Performance Mode", menuVideoValue, menuVideo, NULL,
       "Speed favors frame rate. Accuracy preserves visual detail." },
+    { "Aspect Ratio", menuAspectValue, menuAspect, NULL,
+      "10:9 fills the screen in most rooms. 4:3 keeps the original framing." },
     { "Debug", NULL, NULL, &g_debugPage,
       "Opens logs, performance tools and troubleshooting actions." },
 };
@@ -1974,7 +2040,7 @@ void ofPlatformSnapshotGet(uint32_t values[3]) {
 #else
     values[1] = 0;
 #endif
-    values[2] = g_smoothLowres ? 1u : 0u;
+    values[2] = (g_smoothLowres ? 1u : 0u) | (g_fullScreen ? 2u : 0u);
 }
 
 void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
@@ -1983,7 +2049,8 @@ void ofPlatformSnapshotResumed(Runner *runner, const uint32_t values[3]) {
     /* The battle on screen may not be the one the size was chosen for. */
     g_wasBattle = false;
     g_scriptFrame = (int)values[0];
-    g_smoothLowres = values[2] != 0;
+    g_smoothLowres = (values[2] & 1u) != 0;
+    g_fullScreen = (values[2] & 2u) != 0;
 #ifdef OF_PC
     g_dumpFrame = (int)values[1];
     (void)runner;

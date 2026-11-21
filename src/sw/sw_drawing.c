@@ -881,7 +881,17 @@ static void swrOverlayFlushHeld(SWRenderer* swr)
 static bool swrOverlayHold(SWRenderer* swr, int dx, int dy, int dw, int dh, SWTexture* texture,
                            int sx, int sy, int lastCol, int lastRow, uintpixel_t tintColor, int alpha)
 {
-    if (swrGridHeld()) return false; // nothing is held over a held grid (see SWRenderer_drawSpriteGrid)
+    // Full screen (swrFillExtendRows): one colour over the whole 4:3 view, a fade or a flash, covers the whole frame.
+    int band = swrFillExtendRows;
+    bool extend = band > 0 && swr->fb == swr->mainFb && dx == 0 && dw >= swr->mainWidth && dy <= band &&
+                  dy + dh >= swr->mainHeight - band && (dy > 0 || dy + dh < swr->mainHeight);
+    if (swrGridHeld()) {
+        // Nothing is held over a held grid (see SWRenderer_drawSpriteGrid). A fade that has to reach the bands is
+        // held all the same once the grid is let out, which keeps the grid under it.
+        if (!extend) return false;
+        swrTileRunsFlush(swr); // held tile pictures are older than the grid (see swrOverlayFlush)
+        swrGridFlush(swr);
+    }
     if (lastCol >= texture->width || lastRow >= texture->height) return false;
     if ((lastCol - sx + 1) * (lastRow - sy + 1) > SW_OVERLAY_MAX_SOURCE_TEXELS) return false;
     
@@ -893,6 +903,11 @@ static bool swrOverlayHold(SWRenderer* swr, int dx, int dy, int dw, int dh, SWTe
             if (srcline[col] != texel) return false;
     }
     
+    if (extend) {
+        dy = 0;
+        dh = swr->mainHeight;
+    }
+
     uintpixel_t color = tint(tintColor, texel);
     float cover = alpha > 253 ? 1.0f : (float) alpha / 256.0f;
     float red = (float) ((color >> 10) & 0x1F) * 256.0f;

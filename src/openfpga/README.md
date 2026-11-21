@@ -497,6 +497,7 @@ hardware gives a core no menu variables of its own.
 |---|---|
 | Resume | closes the menu |
 | Performance Mode | selects Speed or Accuracy |
+| Aspect Ratio | 4:3, or 10:9 (prototype): 320x240 rooms are drawn at 320x288 to fill the Pocket's screen, the view grown 24 px up and down; rooms too short for that are drawn at 320x240, as at 4:3. The core starts at 10:9; benchmarks run at 4:3 unless their `ARGS=` has `--full-screen`, and `--no-full-screen` starts an entry at 4:3. The desktop build starts at 4:3 (`BS_FULL_SCREEN=1` for 10:9). Closes the menu |
 | Debug | opens the rows below |
 | Save log to SD card | first row in Debug; writes the log to the spare save slot; leave through the Analogue menu to keep it |
 | Save-state status | shows whether the current scene is eligible, and displays a refusal reason when selected |

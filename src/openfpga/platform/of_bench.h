@@ -50,6 +50,14 @@ void ofPlatformSetSmoothLowres(bool enabled);
  * the game's own choice per battle (ofGame.speedHalfBattle). --speed-full-battles / --speed-half-battles. */
 void ofPlatformSetSpeedFullBattles(bool full);
 void ofPlatformSetPrefetch(bool on);
+/* Full screen (prototype): 320-wide frames are drawn at 320x288, the Pocket's 10:9 screen shape, with the
+ * room view grown 24 px up and 24 px down, evenly about its centre, to fill it (the runner's widescreen hack).
+ * Rooms too short for the grown view are drawn at 320x240, as at 4:3; in the others a fade or flash over the 4:3
+ * view is drawn over the whole frame (swrFillExtendRows). 640x480 frames stay 4:3:
+ * the core has no 640x576 mode. On by default on the Pocket, off on desktop and in benchmarks; --full-screen
+ * and --no-full-screen choose, as does BS_FULL_SCREEN=1/0 on desktop. */
+void ofPlatformSetFullScreen(bool on);
+bool ofPlatformFullScreen(void);
 /* For a report's title: which of those Speed is using, once a frame has been drawn ("" in Accuracy). */
 const char *ofPlatformSpeedBattlesNote(void);
 /* The selected Performance Mode. */

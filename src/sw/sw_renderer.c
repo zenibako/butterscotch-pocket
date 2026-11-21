@@ -174,6 +174,32 @@ void swrFramebufferTouched(void)
     swrDirtyGeneration++;
 }
 
+int swrFillExtendRows = 0;
+
+// swrFillExtendRows for a fill: when the rectangle covers the whole width of the main buffer and the rows from the
+// top band's edge to the bottom band's, without covering the whole height, moves its top and bottom edges out to
+// the buffer's. The edges are given in room coordinates, so the buffer's rows are mapped back the same way.
+static void swrExtendFill(SWRenderer* swr, float x1, float* y1, float x2, float* y2)
+{
+    int band = swrFillExtendRows;
+    if (band <= 0 || swr->fb != swr->mainFb || swr->scaleY == 0.0f || swr->portY != 0) return;
+    float sx1 = x1, sy1 = *y1, sx2 = x2, sy2 = *y2;
+    swrTransformPosIfNeeded(swr, &sx1, &sy1);
+    swrTransformPosIfNeeded(swr, &sx2, &sy2);
+    float left = sx1 < sx2 ? sx1 : sx2, right = sx1 < sx2 ? sx2 : sx1;
+    float top = sy1 < sy2 ? sy1 : sy2, bottom = sy1 < sy2 ? sy2 : sy1;
+    int width = swr->mainWidth, height = swr->mainHeight;
+    // A fill covers columns floor(left) up to, not including, ceil(right) (swrFillRectangle), so only one that
+    // reaches column width - 1 covers the whole width.
+    if (left >= 1.0f || right <= (float) width - 1.0f) return;
+    if (top > (float) band + 0.5f || bottom < (float) (height - band) - 1.5f) return;
+    if (top <= 0.5f && bottom >= (float) height - 1.5f) return;
+    float roomTop = (0.0f - (float) swr->portY) / swr->scaleY + swr->viewY;
+    float roomBottom = ((float) height - (float) swr->portY) / swr->scaleY + swr->viewY;
+    if (*y1 <= *y2) { *y1 = roomTop; *y2 = roomBottom; }
+    else { *y1 = roomBottom; *y2 = roomTop; }
+}
+
 // Picks up what is known of the platform buffer about to be drawn in.
 MAYBE_UNUSED static void swrDirtyAcquire(SWRenderer* swr, const uintpixel_t* fb, int width, int height)
 {
@@ -985,6 +1011,7 @@ static void SWRenderer_drawRectangle(Renderer* renderer, float x1, float y1, flo
 {
     if (SWR_SKIPPED((SWRenderer*) renderer)) return;
     SWRenderer* swr = (SWRenderer*) renderer;
+    if (!outline && swr->blendMode == bm_normal) swrExtendFill(swr, x1, &y1, x2, &y2);
 #if PIXEL_SIZE == 16
     // Nothing comes of a rectangle this faint (alphaBlend skips it), so it is no reason to let out what is held.
     if (swr->blendMode == bm_normal && swrIntAlpha(alpha) < 4) return;
