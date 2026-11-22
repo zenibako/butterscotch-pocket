@@ -4267,14 +4267,8 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
             ++swrTileRunReaders;
             for (int32_t t = 0; t < count; t++) {
                 int32_t tpag = Renderer_resolveObjectTPAGIndex(renderer->dataWin, tiles[t]);
-                if (tpag != lastTpag && tpag >= 0 && (uint32_t) tpag < renderer->dataWin->tpag.count) {
-                    const TexturePageItem* item = &renderer->dataWin->tpag.items[tpag];
-                    if (item->sourceWidth != item->targetWidth || item->sourceHeight != item->targetHeight) {
-                        if (item->texturePageId >= 0) swrEnsureTextureIsLoaded(swr, (uint32_t) item->texturePageId);
-                    } else {
-                        swrTextureForItem(swr, tpag);
-                    }
-                }
+                // (swrRunCanBuildLazily keeps rescaled items out, so every item here is drawn as stored.)
+                if (tpag != lastTpag && tpag >= 0 && (uint32_t) tpag < renderer->dataWin->tpag.count) swrTextureForItem(swr, tpag);
                 lastTpag = tpag;
             }
             --swrTileRunReaders;
