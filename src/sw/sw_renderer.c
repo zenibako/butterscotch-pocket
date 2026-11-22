@@ -2743,6 +2743,11 @@ typedef struct {
     int32_t viewLeft, viewTop;
     uint32_t viewFrame, bornFrame;
     int lastStep;
+    // A column built ahead a few rows of blocks at a time (swrAheadTake): which (-1 none), and how
+    // many of its rows of blocks are drawn. It is marked built only once all are.
+    int partCol, partRows;
+    // Of a flattened picture: swrColumnsBuiltCount when no column of it was found ready to build ahead.
+    uint32_t noneReadyAt;
 } SWTileRun;
 
 static SWTileRun swrTileRuns[SWR_TILE_RUN_ENTRIES];
@@ -2804,10 +2809,10 @@ static uint64_t swrTileRunHash(uint64_t hash, const void* data, size_t bytes)
     return hash;
 }
 
-// Marks each block of columns c0 to c1 of a picture empty, solid or mixed.
-static void swrRunClassifyColumns(SWTileRun* run, int c0, int c1)
+// Marks blocks of rows r0 to r1 of columns c0 to c1 of a picture empty, solid or mixed.
+static void swrRunClassifyBlocks(SWTileRun* run, int c0, int c1, int r0, int r1)
 {
-    int blocksX = (run->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK, blocksY = (run->height + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
+    int blocksX = (run->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK, blocksY = r1;
 #if PIXEL_SIZE == 16 && defined SW_NO_SEMI_TRANSPARENT_TEXTURE_SUPPORT
     // A pixel is opaque by its top bit alone: a block's pixels ANDed together have it when all are,
     // ORed together when any is. A row of the picture at a time, every block of it, so that the
@@ -2817,7 +2822,7 @@ static void swrRunClassifyColumns(SWTileRun* run, int c0, int c1)
         uint16_t ands[SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK], ors[SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK];
         int fullX = run->width / SWR_TILE_RUN_BLOCK;
         int by, bx, y, x;
-        for (by = 0; by < blocksY; by++) {
+        for (by = r0; by < blocksY; by++) {
             int y0 = by * SWR_TILE_RUN_BLOCK, y1 = y0 + SWR_TILE_RUN_BLOCK;
             if (y1 > run->height) y1 = run->height;
             for (bx = c0; bx < c1; bx++) { ands[bx] = 0xFFFF; ors[bx] = 0; }
@@ -2844,7 +2849,7 @@ static void swrRunClassifyColumns(SWTileRun* run, int c0, int c1)
         return;
     }
 #endif
-    for (int by = 0; by < blocksY; by++) {
+    for (int by = r0; by < blocksY; by++) {
         for (int bx = c0; bx < c1; bx++) {
             int x1 = bx * SWR_TILE_RUN_BLOCK + SWR_TILE_RUN_BLOCK, y1 = by * SWR_TILE_RUN_BLOCK + SWR_TILE_RUN_BLOCK;
             if (x1 > run->width) x1 = run->width;
@@ -2859,6 +2864,12 @@ static void swrRunClassifyColumns(SWTileRun* run, int c0, int c1)
             run->blocks[by * blocksX + bx] = opaque == 0 ? SWR_BLOCK_EMPTY : (opaque == total && whole) ? SWR_BLOCK_SOLID : SWR_BLOCK_MIXED;
         }
     }
+}
+
+// Marks each block of columns c0 to c1 of a picture empty, solid or mixed.
+static void swrRunClassifyColumns(SWTileRun* run, int c0, int c1)
+{
+    swrRunClassifyBlocks(run, c0, c1, 0, (run->height + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK);
 }
 
 static void swrRunClassify(SWTileRun* run)
@@ -2911,6 +2922,9 @@ static bool swrRunAllocateWith(SWTileRun* run, int width, int height, bool lazy,
     run->colTiles = indexEntries == 0 ? NULL : (uint16_t*) (run->colStart + blocksX + 1);
     run->viewFrame = 0;
     run->lastStep = 1;
+    run->partCol = -1;
+    run->partRows = 0;
+    run->noneReadyAt = UINT32_MAX;
     run->width = width; run->height = height;
     return true;
 }
@@ -2982,9 +2996,14 @@ static bool swrRunColumnsBuilt(const SWTileRun* run, int c0, int c1)
     return true;
 }
 
+// Counts columns marked built (swrRunColumnsMark), so that a flattened picture waiting for the
+// pictures under it looks again only once one is (swrFlatAheadColumn).
+static uint32_t swrColumnsBuiltCount;
+
 // Marks columns c0 to c1 built, and lets the marks go once every column is.
 static void swrRunColumnsMark(SWTileRun* run, int c0, int c1)
 {
+    swrColumnsBuiltCount++;
     int blocksX = (run->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
     memset(run->built + c0, 1, (size_t) (c1 - c0));
     int c = 0;
@@ -3201,28 +3220,52 @@ static void swrRunsDrawOverHeld(SWRenderer* swr, SWTileRun* const* runs, int cou
     swrTiledHeldSpanEnd(swr);
 }
 
+// The rows of blocks of a picture.
+static int swrRunBlockRows(const SWTileRun* run)
+{
+    return (run->height + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
+}
+
+// After rows r0 to r1 of blocks of columns c0 to c1 are drawn, their blocks are marked (so that a
+// tall column built ahead pays for that a few rows at a time too); once a column's last row is, it
+// is built. Until then (one column, built ahead) it is the picture's part column: its rows still to
+// be drawn are marked empty, and the pixels of the rows drawn are already the whole picture's.
+static void swrRunRowsDrawn(SWTileRun* run, int c0, int c1, int r0, int r1)
+{
+    swrRunClassifyBlocks(run, c0, c1, r0, r1);
+    if (r1 < swrRunBlockRows(run)) {
+        run->partCol = c0;
+        run->partRows = r1;
+        return;
+    }
+    if (run->partCol >= c0 && run->partCol < c1) run->partCol = -1;
+    swrRunColumnsMark(run, c0, c1);
+}
+
 // The pictures being held flattened into one, or NULL: when they have not
 // been held together before, are too big together, or there is no room.
-// Draws columns c0 to c1 of a flattened picture from the pictures being held (which the port's
-// stretch of has been built of, swrRunEnsure), works in its tint, and marks its blocks.
-static void swrFlatDrawColumns(SWTileRun* entry, int c0, int c1)
+// Draws rows r0 to r1 of blocks of columns c0 to c1 of a flattened picture from the pictures being
+// held (which the port's stretch of has been built of, swrRunEnsure), works in its tint, and marks
+// their blocks once their last row is drawn (swrRunRowsDrawn).
+static void swrFlatDrawColumns(SWTileRun* entry, int c0, int c1, int r0, int r1)
 {
     int x0 = c0 * SWR_TILE_RUN_BLOCK, x1 = swrMin(c1 * SWR_TILE_RUN_BLOCK, entry->width);
-    swrRunsDrawOnto(swrPendingRuns, swrPendingCount, entry->pixels + x0, entry->width, entry->x + x0, entry->y, x1 - x0, entry->height, NULL, false);
+    int y0 = r0 * SWR_TILE_RUN_BLOCK, y1 = swrMin(r1 * SWR_TILE_RUN_BLOCK, entry->height);
+    swrRunsDrawOnto(swrPendingRuns, swrPendingCount, entry->pixels + (size_t) y0 * entry->width + x0, entry->width,
+                    entry->x + x0, entry->y + y0, x1 - x0, y1 - y0, NULL, false);
 #ifdef SW_HAS_PREMUL_BLEND
     if (entry->tint != 0) {
         uint32_t alpha = entry->tint >> 16;
         uintpixel_t color = (uintpixel_t) (entry->tint & 0xffff);
         uint32_t srcRedBlue = swrSpreadRedBlue(color) * alpha, srcGreen = swrGreen(color) * alpha, dstalpha = 256 - alpha;
-        for (int y = 0; y < entry->height; y++) {
+        for (int y = y0; y < y1; y++) {
             uintpixel_t* row = &entry->pixels[(size_t) y * entry->width];
             for (int x = x0; x < x1; x++)
                 if (swrIsOpaque(row[x])) row[x] = swrBlendPremultiplied(row[x], srcRedBlue, srcGreen, dstalpha);
         }
     }
 #endif
-    swrRunClassifyColumns(entry, c0, c1);
-    swrRunColumnsMark(entry, c0, c1);
+    swrRunRowsDrawn(entry, c0, c1, r0, r1);
 }
 
 // The columns of a flattened picture built a stretch at a time that the port shows (left, in the
@@ -3235,25 +3278,122 @@ static void swrFlatEnsure(SWTileRun* entry, int left, int width)
     int c = c0;
     while (c < c1 && entry->built != NULL) {
         if (entry->built[c]) { c++; continue; }
+        if (c == entry->partCol) { swrFlatDrawColumns(entry, c, c + 1, entry->partRows, swrRunBlockRows(entry)); c++; continue; }
         int end = c;
-        while (end < c1 && !entry->built[end]) end++;
-        swrFlatDrawColumns(entry, c, end);
+        while (end < c1 && !entry->built[end] && end != entry->partCol) end++;
+        swrFlatDrawColumns(entry, c, end, 0, swrRunBlockRows(entry));
         c = end;
     }
 }
 
-// How many columns of each picture built a stretch at a time are built ahead of the view in a frame
-// it stays put: so that standing still, not walking, pays for most of a wide picture (a walk at 3
-// pixels a frame needs a new 16-pixel column of each every 5 or 6 frames).
-#define SWR_AHEAD_COLUMNS 1
+// How much of the pictures built a stretch at a time is built ahead of the view in a frame, all
+// pictures together: so that standing still, not walking, pays for most of a wide picture
+// (a walk at 3 pixels a frame needs a new 16-pixel column of each every 5 or 6 frames), at no more
+// than about a millisecond a frame on the device. Counted in units of estimated work
+// (swrRunAhead, swrFlatAhead) of about 40 us simulated each (4000 cycles at rt-os20's 100 MHz); a
+// column taller than this is built over several frames.
+#ifndef SWR_AHEAD_UNITS
+#define SWR_AHEAD_UNITS 18
+#endif
+// While the view moves, only the columns this near the port's edge are built ahead (the port needs
+// them in a few frames, swrRunEnsure, and would build them in one frame, every picture at once):
+// a walk into a stretch not built yet pays for it a few rows a frame, a walk over built ones nothing.
+#ifndef SWR_AHEAD_NEAR_COLUMNS
+#define SWR_AHEAD_NEAR_COLUMNS 6
+#endif
 // Nor in the first frames of a picture: a room's entry and the fade-in after it are slow already.
 #define SWR_AHEAD_SETTLE_FRAMES 12
 
-static int swrRunAheadColumn(const SWTileRun* run, int c0, int c1);
+// Who builds ahead in a frame. The pictures that wanted to last frame take turns, in the order they
+// were drawn: the frame's units are the next one's, or anyone's once it has said it cannot use
+// them all (a column finished, or a flattened picture waiting for the pictures under it) or when
+// none wanted to last frame.
+#define SWR_AHEAD_SEEN 8
+static struct {
+    uint32_t frame;
+    int left;
+    bool open;
+    uint64_t grant, lastServed;
+    uint64_t seen[SWR_AHEAD_SEEN], previous[SWR_AHEAD_SEEN];
+    int seenCount, previousCount;
+} swrAhead;
 
-// While the view stays put, builds a column of a flattened picture built a stretch at a time ahead
-// of it, as swrRunAhead does for the pictures it is made of: the nearest not yet built on the side
-// the view last moved to, once the columns of the held pictures under it are built.
+// How many units of work the picture may build ahead with now (0: none).
+static int swrAheadTake(const SWRenderer* swr, const SWTileRun* run)
+{
+    if (swrAhead.frame != swr->frameCounter) {
+        bool followed = swrAhead.frame + 1 == swr->frameCounter;
+        swrAhead.previousCount = followed ? swrAhead.seenCount : 0;
+        memcpy(swrAhead.previous, swrAhead.seen, sizeof(swrAhead.seen));
+        swrAhead.seenCount = 0;
+        swrAhead.frame = swr->frameCounter;
+        swrAhead.left = SWR_AHEAD_UNITS;
+        swrAhead.open = swrAhead.previousCount == 0;
+        if (!swrAhead.open) {
+            int at = 0;
+            for (int i = 0; i < swrAhead.previousCount; i++)
+                if (swrAhead.previous[i] == swrAhead.lastServed) at = i + 1;
+            swrAhead.grant = swrAhead.previous[at % swrAhead.previousCount];
+        }
+    }
+    bool listed = false;
+    for (int i = 0; i < swrAhead.seenCount; i++) listed |= swrAhead.seen[i] == run->serial;
+    if (!listed && swrAhead.seenCount < SWR_AHEAD_SEEN) swrAhead.seen[swrAhead.seenCount++] = run->serial;
+    if (swrAhead.left <= 0 || !(swrAhead.open || swrAhead.grant == run->serial)) return 0;
+    return swrAhead.left;
+}
+
+// The picture given `offered` units by swrAheadTake used this many: fewer when it could not use
+// them (a column finished, or none ready), and then anyone drawn after it may have the rest.
+static void swrAheadSpent(const SWTileRun* run, int units, int offered)
+{
+    swrAhead.left -= units;
+    if (units > 0) swrAhead.lastServed = run->serial;
+    if (units < offered) swrAhead.open = true;
+}
+
+// The next `rows` rows of blocks of column c to build ahead (fewer at its end): from r0 to r1.
+static void swrAheadRows(const SWTileRun* run, int c, int rows, int* r0, int* r1)
+{
+    *r0 = c == run->partCol ? run->partRows : 0;
+    *r1 = swrMin(*r0 + rows, swrRunBlockRows(run));
+}
+
+// Whether column c of a flattened picture can be drawn: the pictures held under it have it built.
+static bool swrFlatColumnReady(const SWTileRun* entry, int c)
+{
+    int x0 = entry->x + c * SWR_TILE_RUN_BLOCK, x1 = x0 + SWR_TILE_RUN_BLOCK;
+    for (int held = 0; held < swrPendingCount; held++) {
+        int h0, h1;
+        swrRunColumnsFor(swrPendingRuns[held], swrPendingRuns[held]->x, x0, x1, 0, &h0, &h1);
+        if (!swrRunColumnsBuilt(swrPendingRuns[held], h0, h1)) return false;
+    }
+    return true;
+}
+
+// The next column of a flattened picture to build ahead of a view showing columns c0 to c1: the one
+// begun, else the nearest not built whose pictures under it are, on the side the view last moved to
+// first (those pictures are built outward from the view, but may have been made after it); -1 if
+// none is ready.
+static int swrFlatAheadColumn(SWTileRun* entry, int c0, int c1)
+{
+    // The one begun first; it waits if the pictures under it went out and came back since (a room
+    // left and entered again keeps a flattened picture of the same pictures).
+    if (entry->partCol >= 0) return swrFlatColumnReady(entry, entry->partCol) ? entry->partCol : -1;
+    if (entry->noneReadyAt == swrColumnsBuiltCount) return -1; // nothing under it built since it looked
+    int blocksX = (entry->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
+    for (int side = 0; side < 2; side++) {
+        int step = (side == 0) == (entry->lastStep >= 0) ? 1 : -1;
+        for (int c = step > 0 ? c1 : c0 - 1; c >= 0 && c < blocksX; c += step)
+            if (!entry->built[c] && swrFlatColumnReady(entry, c)) return c;
+    }
+    entry->noneReadyAt = swrColumnsBuiltCount;
+    return -1;
+}
+
+// While the view stays put (or moves, near the port's edge), builds a little of a flattened picture
+// built a stretch at a time ahead of it, as swrRunAhead does for the pictures it is made of (swrFlatAheadColumn), with the units
+// swrAheadTake gives it.
 static void swrFlatAhead(SWRenderer* swr, SWTileRun* entry, int left, int width)
 {
     int32_t top = 0;
@@ -3262,23 +3402,24 @@ static void swrFlatAhead(SWRenderer* swr, SWTileRun* entry, int left, int width)
     if (followed && entry->viewLeft != left) entry->lastStep = left > entry->viewLeft ? 1 : -1;
     entry->viewFrame = swr->frameCounter;
     entry->viewLeft = left; entry->viewTop = top;
-    if (!still || entry->built == NULL || swr->frameCounter - entry->bornFrame <= SWR_AHEAD_SETTLE_FRAMES) return;
+    if (!followed || entry->built == NULL || swr->frameCounter - entry->bornFrame <= SWR_AHEAD_SETTLE_FRAMES) return;
     int c0, c1;
     swrRunColumnsFor(entry, entry->x, left, left + width, 0, &c0, &c1);
+    int c = swrFlatAheadColumn(entry, c0, c1);
+    if (!still && (c < c0 - SWR_AHEAD_NEAR_COLUMNS || c >= c1 + SWR_AHEAD_NEAR_COLUMNS)) return;
+    int units = swrAheadTake(swr, entry), cost = 0;
+    if (units == 0) return;
     SWR_NOTE_START(aheadNote);
-    for (int k = 0; k < SWR_AHEAD_COLUMNS && entry->built != NULL; k++) {
-        int c = swrRunAheadColumn(entry, c0, c1);
-        if (c < 0) break;
-        int x0 = entry->x + c * SWR_TILE_RUN_BLOCK, x1 = x0 + SWR_TILE_RUN_BLOCK;
-        bool ready = true;
-        for (int held = 0; held < swrPendingCount && ready; held++) {
-            int r0, r1;
-            swrRunColumnsFor(swrPendingRuns[held], swrPendingRuns[held]->x, x0, x1, 0, &r0, &r1);
-            ready = swrRunColumnsBuilt(swrPendingRuns[held], r0, r1);
-        }
-        if (!ready) break;
-        swrFlatDrawColumns(entry, c, c + 1);
+    if (c >= 0) {
+        // A block of it reads each picture under it and writes its own, a row of pixels of each at a
+        // time (rt-os20: about 6000 cycles with three pictures, 10000 with five or six).
+        int perBlock = ((swrPendingCount + 1) * 3 + 7) / 8 + (entry->tint != 0 ? 1 : 0), r0, r1;
+        swrAheadRows(entry, c, swrMax(1, units / perBlock), &r0, &r1);
+        swrFlatDrawColumns(entry, c, c + 1, r0, r1);
+        cost = swrMin(units, (r1 - r0) * perBlock);
+        if (r1 < swrRunBlockRows(entry)) cost = units; // the rest waits for the next frame
     }
+    swrAheadSpent(entry, cost, units);
     SWR_NOTE_END(aheadNote, "  of which: tile picture columns built ahead");
 }
 
@@ -3821,7 +3962,7 @@ MAYBE_UNUSED static bool swrLazyRunsOff(void)
 // it does whole (one crossing the port's left edge lost its pixel there). So each pixel of the
 // columns comes out as the whole picture's would.
 static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** tiles, const float* offsets, int32_t count,
-                              int originX, int originY, int c0, int c1)
+                              int originX, int originY, int c0, int c1, int r0, int r1)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
     uintpixel_t* savedFb = swr->fb;
@@ -3831,8 +3972,9 @@ static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** til
     int savedMaxX = swr->maxX, savedMaxY = swr->maxY;
     swr->fb = run->pixels;
     swr->fbPitch = (uint16_t) run->width;
-    swr->viewY = (float) originY;
-    swr->portY = 0; swr->portH = run->height; swr->maxY = run->height;
+    int y0 = r0 * SWR_TILE_RUN_BLOCK, y1 = swrMin(r1 * SWR_TILE_RUN_BLOCK, run->height);
+    swr->viewY = (float) (originY + y0);
+    swr->portY = y0; swr->portH = y1 - y0; swr->maxY = y1;
     int x0 = c0 * SWR_TILE_RUN_BLOCK, x1 = swrMin(c1 * SWR_TILE_RUN_BLOCK, run->width);
     swr->viewX = (float) (originX + x0);
     swr->portX = x0; swr->portW = x1 - x0; swr->maxX = x1;
@@ -3841,16 +3983,21 @@ static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** til
     for (uint32_t k = listed ? run->colStart[c0] : 0; k < end; k++) {
         int32_t t = listed ? run->colTiles[k] : (int32_t) k;
         int x = tiles[t]->x + (int32_t) offsets[t * 2] - originX, w = (int) tiles[t]->width;
-        if (x + w <= x0 || x >= x1) continue;
-        if (x >= x0 && x + w <= x1) {
+        int y = tiles[t]->y + (int32_t) offsets[t * 2 + 1] - originY, h = (int) tiles[t]->height;
+        if (x + w <= x0 || x >= x1 || y + h <= y0 || y >= y1) continue;
+        if (x >= x0 && x + w <= x1 && y >= y0 && y + h <= y1) {
             Renderer_drawTile(renderer, tiles[t], offsets[t * 2], offsets[t * 2 + 1]);
             continue;
         }
         int from = x < x0 ? x0 - x : 0, to = x + w > x1 ? x1 - x : w;
+        int fromY = y < y0 ? y0 - y : 0, toY = y + h > y1 ? y1 - y : h;
         RoomTile part = *tiles[t];
         part.x += from;
         part.sourceX += from;
         part.width = (uint32_t) (to - from);
+        part.y += fromY;
+        part.sourceY += fromY;
+        part.height = (uint32_t) (toY - fromY);
         Renderer_drawTile(renderer, &part, offsets[t * 2], offsets[t * 2 + 1]);
     }
     swrOverlayFlush(swr);
@@ -3860,8 +4007,7 @@ static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** til
     swr->portX = savedPortX; swr->portY = savedPortY;
     swr->portW = savedPortW; swr->portH = savedPortH;
     swr->maxX = savedMaxX; swr->maxY = savedMaxY;
-    swrRunClassifyColumns(run, c0, c1);
-    swrRunColumnsMark(run, c0, c1);
+    swrRunRowsDrawn(run, c0, c1, r0, r1);
 }
 
 // Whether a run can be built a stretch at a time (swrRunDrawColumns): every tile at full size,
@@ -3885,7 +4031,7 @@ static bool swrRunCanBuildLazily(RoomTile** tiles, const float* offsets, int32_t
 // tiles are drawn into the picture, and stay held. Otherwise everything held goes out first, as for
 // a picture built whole; or, unless mayFlush, nothing is built and this returns false.
 static bool swrRunBuild(Renderer* renderer, SWTileRun* run, RoomTile** tiles, const float* offsets, int32_t count,
-                        int placeX, int placeY, const int* cols, int n, bool mayFlush)
+                        int placeX, int placeY, const int* cols, int n, bool mayFlush, int aheadRows)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
     bool asideOk = !swrGridHeld();
@@ -3909,12 +4055,19 @@ static bool swrRunBuild(Renderer* renderer, SWTileRun* run, RoomTile** tiles, co
         swrGridFlush(swr);
     }
     ++swrTileRunReaders; // making room for a texture must not give up the picture being drawn into
+    int rows = swrRunBlockRows(run);
     for (int i = 0; i < n && run->built != NULL; i++) {
         int c = cols[i], end = c;
         if (run->built[c]) continue;
+        if (aheadRows > 0 || c == run->partCol) {
+            // A column built ahead a few rows at a time: the next rows, or the rest of them.
+            int r0 = c == run->partCol ? run->partRows : 0;
+            swrRunDrawColumns(renderer, run, tiles, offsets, count, placeX, placeY, c, c + 1, r0, aheadRows > 0 ? swrMin(r0 + aheadRows, rows) : rows);
+            continue;
+        }
         // Neighbouring columns go together (one save of the renderer's state).
-        while (i + 1 < n && cols[i + 1] == end + 1 && !run->built[end + 1]) { end++; i++; }
-        swrRunDrawColumns(renderer, run, tiles, offsets, count, placeX, placeY, c, end + 1);
+        while (i + 1 < n && cols[i + 1] == end + 1 && !run->built[end + 1] && end + 1 != run->partCol) { end++; i++; }
+        swrRunDrawColumns(renderer, run, tiles, offsets, count, placeX, placeY, c, end + 1, 0, rows);
     }
     --swrTileRunReaders;
     if (asideOk) {
@@ -3938,7 +4091,7 @@ static void swrRunEnsure(Renderer* renderer, SWTileRun* run, RoomTile** tiles, c
     int cols[SWR_TILE_RUN_MAX_SIDE / SWR_TILE_RUN_BLOCK], n = 0;
     for (int c = c0; c < c1; c++)
         if (!run->built[c]) cols[n++] = c;
-    swrRunBuild(renderer, run, tiles, offsets, count, placeX, placeY, cols, n, true);
+    swrRunBuild(renderer, run, tiles, offsets, count, placeX, placeY, cols, n, true, 0);
     SWR_NOTE_END(buildNote, "  of which: tile picture columns built");
 }
 
@@ -3947,6 +4100,7 @@ static void swrRunEnsure(Renderer* renderer, SWTileRun* run, RoomTile** tiles, c
 // when every column is built.
 static int swrRunAheadColumn(const SWTileRun* run, int c0, int c1)
 {
+    if (run->partCol >= 0) return run->partCol; // one begun is finished first
     int blocksX = (run->width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
     int right = c1, left = c0 - 1;
     while (right < blocksX && run->built[right]) right++;
@@ -3956,21 +4110,46 @@ static int swrRunAheadColumn(const SWTileRun* run, int c0, int c1)
     return right >= 0 ? right : left;
 }
 
-// While the view stays put, builds a few more columns of a picture built a stretch at a time ahead
-// of it (swrRunAheadColumn), so that a walk later finds them built. Only when nothing held has to go
+// While the view stays put (or moves, near the port's edge: SWR_AHEAD_NEAR_COLUMNS), builds a little
+// more of a picture built a stretch at a time ahead of it (swrRunAheadColumn), as many rows of a column as the units swrAheadTake gives it allow, so that a
+// walk later finds them built. Only when nothing held has to go
 // out for it, and with every texture the tiles need in already (they were all brought in when the
 // picture was created, so this reads nothing from the card).
-static void swrRunAhead(Renderer* renderer, SWTileRun* run, RoomTile** tiles, const float* offsets, int32_t count, int placeX, int placeY)
+static void swrRunAhead(Renderer* renderer, SWTileRun* run, RoomTile** tiles, const float* offsets, int32_t count, int placeX, int placeY, bool still)
 {
     SWRenderer* swr = (SWRenderer*) renderer;
     int c0, c1;
     int32_t viewLeft = (int32_t) swr->viewX;
     swrRunColumnsFor(run, placeX, viewLeft, viewLeft + (swr->maxX - swr->portX), 0, &c0, &c1);
+    int c = swrRunAheadColumn(run, c0, c1), cost = 0;
+    if (!still && (c < c0 - SWR_AHEAD_NEAR_COLUMNS || c >= c1 + SWR_AHEAD_NEAR_COLUMNS)) return;
+    int units = swrAheadTake(swr, run);
+    if (units == 0) return;
     SWR_NOTE_START(aheadNote);
-    for (int k = 0; k < SWR_AHEAD_COLUMNS && run->built != NULL; k++) {
-        int c = swrRunAheadColumn(run, c0, c1);
-        if (c < 0 || !swrRunBuild(renderer, run, tiles, offsets, count, placeX, placeY, &c, 1, false)) break;
+    if (c >= 0) {
+        // As many rows as the units allow, at least one: a unit for each block, for each tile reaching
+        // the rows, and for each 256 pixels those tiles draw there (rt-os20: about 3600, 4800 and
+        // 4000 cycles).
+        int r0 = c == run->partCol ? run->partRows : 0, r1 = r0, rows = swrRunBlockRows(run);
+        int cx0 = c * SWR_TILE_RUN_BLOCK, cx1 = cx0 + SWR_TILE_RUN_BLOCK;
+        while (r1 < rows) {
+            int y0 = r0 * SWR_TILE_RUN_BLOCK, y1 = (r1 + 1) * SWR_TILE_RUN_BLOCK, reaching = 0, area = 0;
+            for (uint32_t k = run->colStart[c]; k < run->colStart[c + 1]; k++) {
+                int32_t t = run->colTiles[k];
+                int y = tiles[t]->y + (int32_t) offsets[t * 2 + 1] - placeY, h = (int) tiles[t]->height;
+                if (y >= y1 || y + h <= y0) continue;
+                int x = tiles[t]->x + (int32_t) offsets[t * 2] - placeX, w = (int) tiles[t]->width;
+                reaching++;
+                area += (swrMin(x + w, cx1) - swrMax(x, cx0)) * (swrMin(y + h, y1) - swrMax(y, y0));
+            }
+            int next = r1 + 1 - r0 + reaching + (area + 255) / 256;
+            if (r1 > r0 && next > units) { cost = units; break; } // the rest waits for the next frame
+            cost = next;
+            r1++;
+        }
+        if (!swrRunBuild(renderer, run, tiles, offsets, count, placeX, placeY, &c, 1, false, r1 - r0)) cost = 0;
     }
+    swrAheadSpent(run, swrMin(cost, units), units);
     SWR_NOTE_END(aheadNote, "  of which: tile picture columns built ahead");
 }
 
@@ -4105,8 +4284,8 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
             SWR_NOTE_END(buildNote, "  of which: tile picture built");
         }
     }
-    // What the port shows of a picture built a stretch at a time, built if it is not yet; and while
-    // the view stays put, a little more ahead of it.
+    // What the port shows of a picture built a stretch at a time, built if it is not yet; and a
+    // little more ahead of it (swrRunAhead).
     if (run->built != NULL) {
         int placeX = run->x + (anchorX >> shift) - run->anchorX, placeY = run->y + (anchorY >> shift) - run->anchorY;
         int32_t viewLeft = (int32_t) swr->viewX, viewTop = (int32_t) swr->viewY;
@@ -4116,7 +4295,8 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         run->viewFrame = swr->frameCounter;
         run->viewLeft = viewLeft; run->viewTop = viewTop;
         swrRunEnsure(renderer, run, tiles, offsets, count, placeX, placeY);
-        if (still && run->built != NULL && swr->frameCounter - run->bornFrame > SWR_AHEAD_SETTLE_FRAMES) swrRunAhead(renderer, run, tiles, offsets, count, placeX, placeY);
+        if (followed && run->built != NULL && swr->frameCounter - run->bornFrame > SWR_AHEAD_SETTLE_FRAMES)
+            swrRunAhead(renderer, run, tiles, offsets, count, placeX, placeY, still);
     }
     run->lastUsedFrame = swr->frameCounter;
     
