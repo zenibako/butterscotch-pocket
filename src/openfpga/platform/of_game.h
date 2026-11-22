@@ -173,6 +173,14 @@ typedef struct {
     int townJumpCount;
     const OfBenchSection *townSections;
     int townSectionCount;
+    /* Optional bridge walk ("--bench-bridge"), run with the frame limit on as in play, so what is
+     * loaded ahead in spare time is: Undertale's room 67 bridge, then into Snowdin Town cold. */
+    const char *bridgeTitle;
+    const char *bridgeScript;
+    const OfJump *bridgeJumps;
+    int bridgeJumpCount;
+    const OfBenchSection *bridgeSections;
+    int bridgeSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

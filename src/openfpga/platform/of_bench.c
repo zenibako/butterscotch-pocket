@@ -102,6 +102,7 @@ static struct {
     bool livePacing;
     bool floweyOpening; /* the Flowey tour's separate opening windows (ofGame.floweyOpening) */
     bool frameStats;    /* the slowest-frame and texture table in reportWork */
+    bool paced;         /* the frame limit on without live pacing (the bridge walk) */
 } g_def;
 static const char *g_tourList;
 
@@ -116,6 +117,7 @@ static void benchStart(const char *title, const char *script, const OfJump *jump
     g_def.livePacing = livePacing;
     g_def.floweyOpening = false;
     g_def.frameStats = false;
+    g_def.paced = false;
     if (g_def.sectionCount > OF_BENCH_MAX_SECTIONS) ofDiagHalt("benchmark has more sections than OF_BENCH_MAX_SECTIONS");
     g_running = true;
     g_startNanos = nowNanos();
@@ -201,6 +203,21 @@ bool ofBenchStartTown(void) {
     g_def.runProbes = false;
     g_def.frameStats = true;
     return true;
+}
+
+bool ofBenchStartBridge(void) {
+    if (ofGame.bridgeScript == NULL) return false;
+    benchStart(ofGame.bridgeTitle, ofGame.bridgeScript, ofGame.bridgeJumps, ofGame.bridgeJumpCount,
+               ofGame.bridgeSections, ofGame.bridgeSectionCount, true, false);
+    g_def.runProbes = false;
+    g_def.frameStats = true;
+    g_def.paced = true;
+    ofPlatformSetUncapped(false); /* spare time, as in play */
+    return true;
+}
+
+bool ofBenchPaced(void) {
+    return g_def.livePacing || g_def.paced;
 }
 
 bool ofBenchLivePacing(void) {
@@ -577,7 +594,7 @@ static void advanceBenchFrame(Runner *runner, uint64_t now) {
     char drawn[40] = "";
     if (ofPlatformForcedSkip() > 0) snprintf(drawn, sizeof(drawn), ", drawing 1 frame in %d", ofPlatformForcedSkip());
     ofLogPrint("=== %s benchmark, %s%s%s%s%s%s%s ===\n", g_def.title, ofPlatformSpeedMode() ? "speed" : "accuracy",
-               ofPlatformSpeedBattlesNote(), ofPlatformFullScreen() ? ", 10:9" : "", g_def.livePacing ? ", live pacing" : "",
+               ofPlatformSpeedBattlesNote(), ofPlatformFullScreen() ? ", 10:9" : "", g_def.livePacing ? ", live pacing" : g_def.paced ? ", frame limit on" : "",
                note[0] != '\0' ? ", " : "", note, drawn);
 #ifndef OF_PC
     {

@@ -180,6 +180,13 @@ int main(int argc, char **argv) {
             ofPlatformSetSmoothLowres(townSmooth);
             if (!ofBenchStartTown()) logWarn("Bench: this game has no town walk\n");
         }
+        /* --bench-bridge: the bridge walk with the frame limit on, Undertale's room 67 into Snowdin Town. */
+        if (strcmp(argv[i], "--bench-bridge") == 0) {
+            args.seed = 7;
+            args.hasSeed = true;
+            ofPlatformSetSmoothLowres(false);
+            if (!ofBenchStartBridge()) logWarn("Bench: this game has no bridge walk\n");
+        }
         if (strcmp(argv[i], "--speed-full-battles") == 0) ofPlatformSetSpeedFullBattles(true);
         if (strcmp(argv[i], "--speed-half-battles") == 0) ofPlatformSetSpeedFullBattles(false);
         /* --full-screen / --no-full-screen: start at 10:9 or 4:3 (Select > Aspect Ratio). */
@@ -222,7 +229,7 @@ int main(int argc, char **argv) {
 
 #ifdef OF_PC
     if (getenv("BS_SCRIPT") != NULL) ofPlatformSetInputScript(getenv("BS_SCRIPT"));
-    if (getenv("BS_UNCAPPED") != NULL && !ofBenchLivePacing()) ofPlatformSetUncapped(true);
+    if (getenv("BS_UNCAPPED") != NULL && !ofBenchPaced()) ofPlatformSetUncapped(true);
     if (getenv("BS_SMOOTH") != NULL) ofPlatformSetSmoothLowres(true);
     if (getenv("BS_FULL_SCREEN") != NULL) ofPlatformSetFullScreen(strcmp(getenv("BS_FULL_SCREEN"), "0") != 0);
     /* BS_NO_MIRROR=1 draws mirrored layers the ordinary way; BS_MIRROR_FAINT=<alpha of 256> sets how faint
