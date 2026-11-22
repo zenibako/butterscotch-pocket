@@ -1207,6 +1207,98 @@ static TileRunGather* tileRunGather(Runner* runner, Room* room, int32_t start, i
     return g;
 }
 
+// The tiles of a room layer of assets (GameMaker 2 rooms), gathered for drawTileRun, kept for the next
+// frame as tileRunGather keeps a run of tile drawables: gathering costs a step per tile of the layer
+// (finding its element, its tile layer's visibility and offsets), and the renderer comparing the
+// tiles with the last ones another. A kept gather is used again while the room's tiles
+// (RoomTile_generation, which the layer_tile_* functions bump, visibility and alpha included), the
+// layer's elements (the same array, as many) and the tile layers it looked up are unchanged. Tiles
+// whose element carries another alpha are copies kept with it, so their addresses hold too.
+#define LAYER_TILE_GATHERS 8
+typedef struct {
+    Room* room;                 // nullptr: unused
+    uint32_t layerId;
+    const RoomTile* legacyTiles;
+    uint32_t legacyTileCount;
+    const RuntimeLayerElement* elements;
+    size_t elementCount;
+    int32_t layerCount;         // -1: too many tile layers to check, not kept
+    int32_t layerDepth[TILE_RUN_GATHER_LAYERS];
+    bool layerFound[TILE_RUN_GATHER_LAYERS], layerVisible[TILE_RUN_GATHER_LAYERS];
+    float layerX[TILE_RUN_GATHER_LAYERS], layerY[TILE_RUN_GATHER_LAYERS];
+    uint32_t generation, stamp, lastUsed;
+    RoomTile** tiles;           // what is handed over (stb arrays)
+    float* offsets;
+    RoomTile* copies;
+} LayerTileGather;
+
+static LayerTileGather layerTileGathers[LAYER_TILE_GATHERS];
+
+static bool layerTileGatherStillHolds(Runner* runner, const LayerTileGather* g, Room* room, const RuntimeLayer* layer, const RoomLayerAssetsData* data) {
+    if (g->room != room || g->layerId != layer->id || g->generation != RoomTile_generation || g->layerCount < 0) return false;
+    if (g->legacyTiles != data->legacyTiles || g->legacyTileCount != (uint32_t) data->legacyTileCount) return false;
+    if (g->elements != layer->elements || g->elementCount != arrlenu(layer->elements)) return false;
+    for (int32_t l = 0; l < g->layerCount; l++) {
+        ptrdiff_t idx = hmgeti(runner->tileLayerMap, g->layerDepth[l]);
+        if ((idx >= 0) != g->layerFound[l]) return false;
+        if (idx >= 0) {
+            const TileLayerState* state = &runner->tileLayerMap[idx].value;
+            if (state->visible != g->layerVisible[l] || state->offsetX != g->layerX[l] || state->offsetY != g->layerY[l]) return false;
+        }
+    }
+    return true;
+}
+
+// The kept gather of a layer if it still holds (*fresh false), else an entry to gather it into
+// afresh, emptied and stamped anew (*fresh true).
+static LayerTileGather* layerTileGatherFor(Runner* runner, Room* room, const RuntimeLayer* layer, const RoomLayerAssetsData* data, bool* fresh) {
+    ++tileRunGatherClock;
+    LayerTileGather* spare = &layerTileGathers[0];
+    for (int32_t e = 0; e < LAYER_TILE_GATHERS; e++) {
+        LayerTileGather* g = &layerTileGathers[e];
+        if (layerTileGatherStillHolds(runner, g, room, layer, data)) {
+            g->lastUsed = tileRunGatherClock;
+            *fresh = false;
+            return g;
+        }
+        if (g->room == nullptr ? spare->room != nullptr : (spare->room != nullptr && g->lastUsed < spare->lastUsed)) spare = g;
+    }
+    LayerTileGather* g = spare;
+    g->room = room;
+    g->layerId = layer->id;
+    g->legacyTiles = data->legacyTiles;
+    g->legacyTileCount = (uint32_t) data->legacyTileCount;
+    g->elements = layer->elements;
+    g->elementCount = arrlenu(layer->elements);
+    g->generation = RoomTile_generation;
+    g->lastUsed = tileRunGatherClock;
+    g->layerCount = 0;
+    if (++tileRunGatherStamp == 0) tileRunGatherStamp = 1;
+    g->stamp = tileRunGatherStamp;
+    arrsetlen(g->tiles, 0);
+    arrsetlen(g->offsets, 0);
+    arrsetlen(g->copies, 0);
+    *fresh = true;
+    return g;
+}
+
+// Notes a tile layer a fresh gather looked up, for layerTileGatherStillHolds.
+static void layerTileGatherNoteLayer(Runner* runner, LayerTileGather* g, int32_t depth, ptrdiff_t idx) {
+    if (g->layerCount < 0) return;
+    int32_t l = 0;
+    while (l < g->layerCount && g->layerDepth[l] != depth) l++;
+    if (l < g->layerCount) return;
+    if (l == TILE_RUN_GATHER_LAYERS) { g->layerCount = -1; return; }
+    g->layerDepth[l] = depth;
+    g->layerFound[l] = idx >= 0;
+    if (idx >= 0) {
+        g->layerVisible[l] = runner->tileLayerMap[idx].value.visible;
+        g->layerX[l] = runner->tileLayerMap[idx].value.offsetX;
+        g->layerY[l] = runner->tileLayerMap[idx].value.offsetY;
+    }
+    g->layerCount++;
+}
+
 static void rebuildDrawableCacheIfDirty(Runner* runner) {
     if (runner->drawableListStructureDirty) {
         arrsetlen(runner->cachedDrawables, 0);
@@ -1537,20 +1629,26 @@ void Runner_draw(Runner* runner) {
                 size_t tileElementCount = arrlenu(runtimeLayer->elements);
                 // The layer's tiles are gathered and offered to the renderer as one run (see drawTileRun), like
                 // the tiles of an older room; drawn one by one only if it declines. A tile whose element carries
-                // another alpha is handed over as a copy.
-                static RoomTile** layerTiles = nullptr;
-                static float* layerOffsets = nullptr;
-                static RoomTile* layerCopies = nullptr;
-                arrsetlen(layerTiles, 0);
-                arrsetlen(layerOffsets, 0);
-                arrsetlen(layerCopies, 0);
-                if (data->legacyTileCount > 0) arrsetcap(layerCopies, data->legacyTileCount); // copies must not move
+                // another alpha is handed over as a copy. The gather is kept for the next frame while it holds
+                // (layerTileGatherFor); not while tiles are traced, which happens as they are gathered.
+                bool tracingLayerTiles = false;
+#ifdef ENABLE_VM_TRACING
+                tracingLayerTiles = shlen(runner->vmContext->tilesToBeTraced) > 0;
+#endif
+                bool freshGather = true;
+                LayerTileGather* gather = layerTileGatherFor(runner, room, runtimeLayer, data, &freshGather);
+                if (tracingLayerTiles && !freshGather) {
+                    gather->room = nullptr;
+                    gather = layerTileGatherFor(runner, room, runtimeLayer, data, &freshGather);
+                }
+                if (tracingLayerTiles) gather->layerCount = -1; // gathered again next frame, traced again
+                if (freshGather && data->legacyTileCount > 0) arrsetcap(gather->copies, data->legacyTileCount); // copies must not move
                 size_t searchFrom = 0;
                 // The layer's tiles mostly share a depth: look its tile layer up once per change.
                 bool haveTileDepth = false;
                 int32_t tileDepth = 0;
                 ptrdiff_t tileLayerIdx = -1;
-                repeat(data->legacyTileCount, j) {
+                if (freshGather) repeat(data->legacyTileCount, j) {
                     if (runner->renderer != nullptr) {
                         RoomTile* tile = &data->legacyTiles[j];
                         // Find the matching RuntimeLayerElement so we can honor per-element visibility. Elements
@@ -1572,6 +1670,7 @@ void Runner_draw(Runner* runner) {
                             tileLayerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
                             tileDepth = tile->tileDepth;
                             haveTileDepth = true;
+                            layerTileGatherNoteLayer(runner, gather, tileDepth, tileLayerIdx);
                         }
                         ptrdiff_t layerIdx = tileLayerIdx;
                         if (layerIdx >= 0 && !runner->tileLayerMap[layerIdx].value.visible) continue;
@@ -1609,26 +1708,31 @@ void Runner_draw(Runner* runner) {
 
                         RoomTile* drawn = tile;
                         if (tileEl != nullptr && tileEl->alpha != tile->alpha) {
-                            arrput(layerCopies, *tile);
-                            drawn = &layerCopies[arrlen(layerCopies) - 1];
+                            arrput(gather->copies, *tile);
+                            drawn = &gather->copies[arrlen(gather->copies) - 1];
                             drawn->alpha = tileEl->alpha;
                         }
-                        arrput(layerTiles, drawn);
-                        arrput(layerOffsets, offsetX);
-                        arrput(layerOffsets, offsetY);
+                        arrput(gather->tiles, drawn);
+                        arrput(gather->offsets, offsetX);
+                        arrput(gather->offsets, offsetY);
                     }
                 }
-                int32_t layerTileCount = (int32_t) arrlen(layerTiles);
+                if (runner->renderer == nullptr) gather->layerCount = -1; // nothing was gathered
+                int32_t layerTileCount = (int32_t) arrlen(gather->tiles);
                 if (layerTileCount > 0) {
-                    // Copies are made afresh each frame and share addresses between layers, so only a run that
-                    // points straight into the room's tiles carries the promise drawTileRun's reuse relies on.
-                    runner->renderer->tileRunGeneration = arrlen(layerCopies) == 0 ? RoomTile_generation : 0;
+                    // Copies share addresses with other copies made before (in this entry, for another layer), so
+                    // only a run that points straight into the room's tiles carries the promise drawTileRun's reuse
+                    // relies on; a kept one, its stamp as well.
+                    bool promise = arrlen(gather->copies) == 0;
+                    runner->renderer->tileRunGeneration = promise ? RoomTile_generation : 0;
+                    runner->renderer->tileRunStamp = promise && gather->layerCount >= 0 ? gather->stamp : 0;
                     bool taken = runner->renderer->vtable->drawTileRun != nullptr &&
-                                 runner->renderer->vtable->drawTileRun(runner->renderer, layerTiles, layerOffsets, layerTileCount);
+                                 runner->renderer->vtable->drawTileRun(runner->renderer, gather->tiles, gather->offsets, layerTileCount);
                     runner->renderer->tileRunGeneration = 0;
+                    runner->renderer->tileRunStamp = 0;
                     if (!taken) {
                         repeat(layerTileCount, j)
-                            Renderer_drawTile(runner->renderer, layerTiles[j], layerOffsets[j * 2], layerOffsets[j * 2 + 1]);
+                            Renderer_drawTile(runner->renderer, gather->tiles[j], gather->offsets[j * 2], gather->offsets[j * 2 + 1]);
                     }
                 }
 
