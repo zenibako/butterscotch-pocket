@@ -2936,6 +2936,7 @@ static bool swrRunAllocate(SWTileRun* run, int width, int height, bool lazy)
 
 // The columns of blocks a tile at x (in a picture's units), w wide, reaches in a picture blocksX
 // columns wide: c0 to c1, none when c0 >= c1. A tile of no width reaches none (it draws nothing).
+#if PIXEL_SIZE == 16 // only swrDrawTileRunCached's 16-bit path builds pictures lazily
 static void swrTileColumns(int x, int w, int blocksX, int* c0, int* c1)
 {
     if (w <= 0) { *c0 = *c1 = 0; return; }
@@ -2974,6 +2975,7 @@ static bool swrRunAllocateIndexed(SWTileRun* run, int width, int height, RoomTil
     start[0] = 0;
     return true;
 }
+#endif
 
 // The columns of blocks of a picture placed at placeX (in its units) that pixels left to right of
 // the buffer's port reach, with `margin` pixels to spare, cut to the picture.
@@ -3961,6 +3963,7 @@ MAYBE_UNUSED static bool swrLazyRunsOff(void)
 // either way). Not by cutting the draw to the port instead: cut, a tile does not always come out as
 // it does whole (one crossing the port's left edge lost its pixel there). So each pixel of the
 // columns comes out as the whole picture's would.
+#if PIXEL_SIZE == 16 // only swrDrawTileRunCached's 16-bit path builds pictures lazily
 static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** tiles, const float* offsets, int32_t count,
                               int originX, int originY, int c0, int c1, int r0, int r1)
 {
@@ -4152,6 +4155,7 @@ static void swrRunAhead(Renderer* renderer, SWTileRun* run, RoomTile** tiles, co
     swrAheadSpent(run, swrMin(cost, units), units);
     SWR_NOTE_END(aheadNote, "  of which: tile picture columns built ahead");
 }
+#endif
 
 // Draws the run from its cached picture, building it first if need be. Returns false if the run cannot be drawn that way.
 static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const float* offsets, int32_t count)
