@@ -5,8 +5,10 @@ Butterscotch Pocket plays **Undertale v1.08** and, as an experiment,
 You build them from your own copy of the game.
 
 **The core on its own won't start a game.** If you open Undertale and see
-*"Couldn't load Undertale. The game data is missing."*, the core is installed
-correctly and only step 2 below is left.
+*"Couldn't load Undertale"* with *"Its game files aren't on the SD card yet"*
+(or *"The game data is missing"* on older versions), the core is installed
+correctly and only step 2 below is left. The QR code on that screen opens
+this project's page.
 
 ## Quick start
 
@@ -207,7 +209,7 @@ Check that the three files from the [card layout](#quick-start) are in
 
 ## Troubleshooting
 
-**"Couldn't load Undertale. The game data is missing. Cannot open data.win"**
+**"Couldn't load Undertale: Its game files aren't on the SD card yet" (older versions: "The game data is missing"), with "Cannot open data.win"**
 The core is fine, but the game files aren't on the card yet. Do
 [A3–A4](#a3-copy-your-game-onto-the-card) or [B2–B4](#b2-get-the-preparation-tool).
 If you already did, check the files are in `Assets/butterscotch/common/`

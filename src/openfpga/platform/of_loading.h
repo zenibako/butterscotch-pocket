@@ -51,7 +51,11 @@ typedef struct {
     const char *hint;     /* what to do, or NULL */
     const char *detail;   /* the error as logged, or NULL */
     const char *footer;   /* where the log is, or NULL */
+    const char *qr;       /* a link shown as a QR code beside the text, or NULL */
 } OfLoadError;
+/* Where a player stuck on a failure screen finds the install guide. */
+#define OF_INSTALL_GUIDE_URL "https://github.com/zenibako/butterscotch-pocket"
+
 void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *error, int permille);
 /* Fills in `error` for a failure, from the last error logged (`lastError`,
  * may be empty), what stopped the app, and whether the data file had loaded. */

@@ -9,6 +9,7 @@
 #define OF_LOG_SLOT_FILE "undertale_1.sav"
 #include "../src/openfpga/platform/of_loading.c"
 #include "../src/openfpga/platform/debug_font.c"
+#include "../vendor/qrcodegen/qrcodegen.c"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -199,14 +200,16 @@ static void testDescribe(void) {
     OfLoadError e;
     ofLoadingDescribe(&e, "Undertale", "data.win, textures.bin and music.bin", "Cannot open data.win", "app exited",
                       false, NULL);
-    assert(strstr(e.reason, "missing") && strstr(e.hint, "data.win") && strcmp(e.detail, "Cannot open data.win") == 0);
+    /* It names the tools that build the files, not files to go and copy, and links the guide. */
+    assert(strstr(e.reason, "aren't on the SD card") && strstr(e.hint, "Pocket Sync") && strstr(e.hint, "prepare-data"));
+    assert(strcmp(e.detail, "Cannot open data.win") == 0 && strcmp(e.qr, OF_INSTALL_GUIDE_URL) == 0);
     ofLoadingDescribe(&e, "Undertale", "x", "FATAL: malloc(4507012) failed at src/data_win.c:3290", "abort() called", false, NULL);
-    assert(strstr(e.reason, "memory") && e.hint == NULL);
+    assert(strstr(e.reason, "memory") && e.hint == NULL && e.qr == NULL);
     ofLoadingDescribe(&e, "Undertale", "x", "DataWin: short read on chunk CODE (expected 5264384, got 0)", "app exited",
                       false, NULL);
-    assert(strstr(e.reason, "could not be read") && e.hint != NULL);
+    assert(strstr(e.reason, "could not be read") && e.hint != NULL && e.qr != NULL);
     ofLoadingDescribe(&e, "Undertale", "x", "", "app exited", true, NULL);
-    assert(strstr(e.reason, "stopped") && strcmp(e.detail, "app exited") == 0);
+    assert(strstr(e.reason, "stopped") && strcmp(e.detail, "app exited") == 0 && e.qr == NULL);
 }
 
 static void testScreens(void) {
@@ -257,6 +260,16 @@ static void testScreens(void) {
                           "Quit from the Analogue menu to save the log: the entry's _1.sav file in Saves/butterscotch/common.");
         ofLoadingDrawError(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, i == 0 ? 0 : 520);
         assert(g_fb[row + barLeft(OF_LOADING_WIDTH)] == OF_RED);
+        /* The code's quiet zone is white at its top right corner, level with the title, and no text runs into
+         * it: the column left of it, up to the gap, is black on every row the code covers. */
+        int side = drawQr(NULL, 0, 0, 0, 0, OF_INSTALL_GUIDE_URL);
+        int qrRight = OF_LOADING_WIDTH - OF_QR_MARGIN, qrTop = OF_LOADING_HEIGHT / 6;
+        assert(side == (33 + 2 * OF_QR_QUIET) * OF_QR_SCALE);
+        assert(g_fb[qrTop * OF_LOADING_WIDTH + qrRight - 1] == OF_WHITE);
+        assert(g_fb[(qrTop + side - 1) * OF_LOADING_WIDTH + qrRight - side] == OF_WHITE);
+        for (int y = qrTop; y < qrTop + side; y++)
+            for (int x = qrRight - side - OF_QR_GAP; x < qrRight - side; x++)
+                assert(g_fb[y * OF_LOADING_WIDTH + x] == OF_BLACK);
         char name[64];
         snprintf(name, sizeof(name), "loading-error-%s", cases[i][0]);
         preview(name);

@@ -5,6 +5,7 @@
 #include "of_loading.h"
 
 #include "of_font.h"
+#include "qrcodegen.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -297,16 +298,52 @@ static int drawWrapped(uint16_t *fb, int width, int height, int x, int y, int ri
     return y;
 }
 
+/* The QR code beside a failure's text: version 4 holds the guide's link at
+ * medium error correction, 2 px a module with the four-module quiet zone. */
+#define OF_QR_VERSION 4
+#define OF_QR_SCALE 2
+#define OF_QR_QUIET 4
+#define OF_QR_GAP 10
+#define OF_QR_MARGIN 12
+
+/* Draws `text` as a QR code with its top right corner at (right, top) and
+ * returns its width in pixels, or 0 if it doesn't fit a version 4 code. */
+static int drawQr(uint16_t *fb, int width, int height, int right, int top, const char *text) {
+    static uint8_t code[qrcodegen_BUFFER_LEN_FOR_VERSION(OF_QR_VERSION)];
+    static uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(OF_QR_VERSION)];
+    if (!qrcodegen_encodeText(text, temp, code, qrcodegen_Ecc_MEDIUM, 1, OF_QR_VERSION, qrcodegen_Mask_AUTO, true))
+        return 0;
+    int size = qrcodegen_getSize(code);
+    int side = (size + 2 * OF_QR_QUIET) * OF_QR_SCALE;
+    if (fb == NULL) return side;
+    int left = right - side;
+    for (int y = 0; y < side; y++)
+        for (int x = 0; x < side; x++) {
+            int mx = x / OF_QR_SCALE - OF_QR_QUIET, my = y / OF_QR_SCALE - OF_QR_QUIET;
+            bool dark = qrcodegen_getModule(code, mx, my); /* false outside the code */
+            int px = left + x, py = top + y;
+            if (px >= 0 && px < width && py >= 0 && py < height) fb[py * width + px] = dark ? OF_BLACK : OF_WHITE;
+        }
+    return side;
+}
+
 void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *error, int permille) {
     for (int i = 0; i < width * height; i++) fb[i] = OF_BLACK;
     int line = lineHeight();
     int left = textLeft(width), right = width - left;
     int y = height / 6;
-    y = drawWrapped(fb, width, height, left, y, right, error->title, OF_WHITE) + line;
-    y = drawWrapped(fb, width, height, left, y, right, error->reason, OF_WHITE);
-    if (error->hint != NULL) y = drawWrapped(fb, width, height, left, y, right, error->hint, OF_LIGHT);
+    /* The code sits top right, level with the title; the text runs beside it. */
+    int textRight = right;
+    if (error->qr != NULL) {
+        int qrRight = width * OF_QR_MARGIN / OF_LOADING_WIDTH;
+        int side = drawQr(fb, width, height, width - qrRight, y, error->qr);
+        if (side > 0) textRight = width - qrRight - side - OF_QR_GAP;
+    }
+    y = drawWrapped(fb, width, height, left, y, textRight, error->title, OF_WHITE) + line;
+    y = drawWrapped(fb, width, height, left, y, textRight, error->reason, OF_WHITE);
+    if (error->hint != NULL) y = drawWrapped(fb, width, height, left, y, textRight, error->hint, OF_LIGHT);
     if (error->detail != NULL && error->detail[0] != '\0')
-        drawWrapped(fb, width, height, left, y + line, right, error->detail, OF_GREY);
+        drawWrapped(fb, width, height, left, y + line, textRight, error->detail, OF_GREY);
     if (error->footer != NULL) {
         /* Above the bar, as many lines as it wraps to. */
         int lines = 0;
@@ -323,23 +360,33 @@ static bool mentions(const char *text, const char *what) {
 
 void ofLoadingDescribe(OfLoadError *error, const char *title, const char *dataFiles, const char *lastError,
                        const char *why, bool dataLoaded, const char *footer) {
-    static char heading[64], hint[160];
+    static char heading[64], hint[192];
     snprintf(heading, sizeof(heading), "Couldn't load %s", title);
     error->title = heading;
     error->footer = footer;
     error->hint = NULL;
+    error->qr = NULL;
     error->detail = lastError != NULL && lastError[0] != '\0' ? lastError : why;
 
+    /* The game files are built from the player's own copy of the game, so the
+     * hint names the tools, not files they could look for (field report
+     * 2026-11-22: "copy data.win, textures.bin and music.bin" read as a copy). */
     if (mentions(lastError, "annot open") || mentions(lastError, "Failed to open")) {
-        error->reason = "The game data is missing.";
-        snprintf(hint, sizeof(hint), "Copy %s to /Assets/butterscotch/common/ on the SD card.", dataFiles);
+        error->reason = "Its game files aren't on the SD card yet.";
+        snprintf(hint, sizeof(hint), "%s",
+                 "Build them from your own copy of the game with the Butterscotch plugin in Pocket Sync, "
+                 "or prepare-data on a computer. Scan the code for the steps.");
         error->hint = hint;
+        error->qr = OF_INSTALL_GUIDE_URL;
     } else if (mentions(lastError, "alloc(")) {
         error->reason = "It ran out of memory while loading.";
     } else if (!dataLoaded) {
         error->reason = "The game data could not be read.";
-        snprintf(hint, sizeof(hint), "Prepare %s again and copy them to /Assets/butterscotch/common/.", dataFiles);
+        snprintf(hint, sizeof(hint),
+                 "Build %s again with the latest Butterscotch tools and copy all of them. Scan the code for the steps.",
+                 dataFiles);
         error->hint = hint;
+        error->qr = OF_INSTALL_GUIDE_URL;
     } else {
         error->reason = "The game stopped while starting.";
     }
