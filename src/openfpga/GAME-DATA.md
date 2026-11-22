@@ -1,208 +1,327 @@
-# Add your own game files
+# Install Butterscotch Pocket
 
-Butterscotch Pocket includes the core and game programs. You supply the game
-data from your own computer installation. The desktop preparation tool converts
-its textures and audio into a new folder ready to copy to your SD card. The
-Pocket Sync plugin can install converted files directly on the card, as
-described below. Neither downloads games, changes your computer installation
-or writes saves.
+Butterscotch Pocket plays **Undertale v1.08** and, as an experiment,
+**Deltarune Chapter 1** on the Analogue Pocket. No game files are included.
+You build them from your own copy of the game.
 
-The supported targets are **Undertale v1.08** and **Deltarune Chapter 1**.
-Checking a data file's bytecode version does not establish compatibility with
-other game releases or chapters.
+**The core on its own won't start a game.** If you open Undertale and see
+*"Couldn't load Undertale. The game data is missing."*, the core is installed
+correctly and only step 2 below is left.
 
-## 1. Install the core
+## Quick start
 
-Download **`butterscotch-pocket.zip`** from the [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest), then choose either installation method:
+1. **Install the core.** Download `butterscotch-pocket.zip` from the
+   [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest)
+   and put it on your SD card (Pocket Sync or by hand, both below).
+2. **Build your game files.** Your game's `data.win` must be converted into
+   three files. Use the Pocket Sync plugin, or the `prepare-data` tool on
+   your computer if you don't use Pocket Sync.
+3. **Play.** Put the card in the Pocket, open **openFPGA → Butterscotch**
+   and pick your game. Starting takes about 20 seconds.
 
-- **Pocket Sync:** Connect your Pocket or insert its SD card, click
-  **Connect to Pocket**, and select the card's root folder (the one containing
-  `Assets`, `Cores` and `Saves`). Drag the Butterscotch Pocket **core ZIP** onto
-  the Pocket Sync window and follow its install prompts. This works before
-  Butterscotch appears in its catalog. Once listed, you can also install it
-  from Pocket Sync's core browser.
-- **Manual:** Extract the core ZIP into the root of your Pocket SD card,
-  merging its `Cores`, `Assets` and `Platforms` folders with the existing folders.
+You need one of these:
 
-Installing the core does not install your commercial game data. Complete the
-preparation steps below for either installation method. The game-data
-preparation bundle is a separate computer-side tool; extract it on your
-computer, not on the SD card. Do not drag that tools archive into Pocket Sync.
+| Game | What you need |
+|---|---|
+| Undertale | Undertale **v1.08** for Windows or macOS, such as the Steam release. Console versions (Switch, PlayStation, Xbox) can't be used. |
+| Deltarune | A Windows or macOS install of Deltarune that contains `chapter1_windows` or `chapter1_mac` and the shared `mus` folder. Only Chapter 1 is supported. |
 
-Download the preparation bundle from the same release: `prepare-data-<os>-<arch>.tar.gz`.
-Use `darwin` for macOS, `windows` for Windows or `linux` for Linux, and
-`arm64` for an Apple silicon Mac or ARM computer, or `amd64` for an Intel/AMD
-64-bit computer. It contains a standalone `prepare-data` executable
-(`prepare-data.exe` on Windows). Python, a C compiler and the openfpgaOS SDK
-are not required. The same Go conversion library also runs in WASM.
+When you're done, your card holds these three files for each game you set up,
+next to the files the core ZIP installed:
 
-## 2. Select your installed game
+```text
+SD card
+├── Assets/
+│   └── butterscotch/
+│       └── common/
+│           ├── data.win          ← Undertale (built from your game)
+│           ├── textures.bin      ← Undertale (built from your game)
+│           ├── music.bin         ← Undertale (built from your game)
+│           ├── deltarune.win     ← Deltarune (built from your game)
+│           ├── dr_textures.bin   ← Deltarune (built from your game)
+│           ├── dr_music.bin      ← Deltarune (built from your game)
+│           └── os.bin, undertale.elf, …  (from the core ZIP)
+├── Cores/
+│   └── zenibako.Butterscotch/
+└── Platforms/
+    └── butterscotch.json
+```
 
-For Undertale, select the installed game folder containing `data.win`, or
-select `UNDERTALE.app` on macOS. Selecting its exact `game.ios` or Linux
-`game.unx` file also works. Keep the game's original `.ogg` music alongside it
-or in its `music` folder. An installer executable or a ZIP is not a data file.
+`textures.bin` and `music.bin` don't exist in your game folder. Only the
+tool can make them, so copying the game's `data.win` by itself won't work.
 
-For Deltarune, select the installed game folder containing `chapter1_windows`,
-`chapter1_mac` or `chapter1_linux` and the shared `mus` folder. On macOS you
-can select `DELTARUNE.app`. A Chapter 1 folder or its exact data file also works
-when the shared `mus` folder is beside the chapter folder.
+Pick the path that fits you:
 
-Deltarune needs all of these original files:
+- [**A. With Pocket Sync**](#a-with-pocket-sync): no terminal needed.
+- [**B. Without Pocket Sync**](#b-without-pocket-sync): unzip the core, run
+  `prepare-data` once in a terminal, copy one folder.
+
+---
+
+## A. With Pocket Sync
+
+[Pocket Sync](https://github.com/neil-morrison44/pocket-sync) is a free
+desktop app for managing your Pocket's SD card.
+
+### A1. Install the core
+
+1. Download `butterscotch-pocket.zip` from the
+   [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest).
+2. Open Pocket Sync, click **Connect to Pocket** and select your SD card
+   (the folder that holds `Assets`, `Cores` and `Saves`).
+3. Drag `butterscotch-pocket.zip` onto the Pocket Sync window and confirm.
+
+### A2. Install the plugin
+
+1. In Pocket Sync, open **Plugins → Add plugin via URL**.
+2. Enter `https://github.com/zenibako/butterscotch-pocket` and choose
+   **Verify & install plugin**.
+
+The plugin is separate from the core. Installing one doesn't install the other.
+
+### A3. Copy your game onto the card
+
+The plugin can only read the SD card, so first copy your game's files there,
+into a new folder:
+
+| Game | Copy into |
+|---|---|
+| Undertale | `Assets/butterscotch/common/undertale/` |
+| Deltarune | `Assets/butterscotch/common/deltarune/` |
+
+Where your game's files are (default Steam folders):
+
+- **Windows, Undertale:** `C:\Program Files (x86)\Steam\steamapps\common\Undertale\`.
+  Copy everything in it, including `data.win` and the `.ogg` music files.
+- **Windows, Deltarune:** `C:\Program Files (x86)\Steam\steamapps\common\DELTARUNE\`.
+  Copy the `chapter1_windows` and `mus` folders.
+- **macOS:** in Steam, right-click the game → **Manage → Browse local files**,
+  then right-click the app → **Show Package Contents** → `Contents/Resources`.
+  For Undertale copy everything in `Resources`. For Deltarune copy
+  `chapter1_mac` and `mus`.
+
+On macOS you can also do it in Terminal. Replace `/Volumes/POCKET` with your
+card's name:
+
+```sh
+# Undertale
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Assets/butterscotch/common/undertale"
+
+# Deltarune
+mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/deltarune"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/chapter1_mac"
+ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/mus"
+```
+
+Keep the original file names. Don't copy an installer or a ZIP.
+
+### A4. Build the game files
+
+1. In Pocket Sync's plugins, run **Butterscotch Game Data**.
+2. Pick your game, then **Install and keep originals** (recommended) or
+   **Install and discard originals** to free the space afterwards.
+3. Keep Pocket Sync open until it says the install finished.
+
+The three game files go straight into `Assets/butterscotch/common/`. There's
+nothing else to copy. Eject the card and play.
+
+---
+
+## B. Without Pocket Sync
+
+You need a computer with an SD card reader and a terminal (Terminal on macOS,
+PowerShell on Windows). You run one command, once per game.
+
+### B1. Install the core
+
+1. Download `butterscotch-pocket.zip` from the
+   [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest).
+2. Unzip it. You get three folders: `Assets`, `Cores` and `Platforms`.
+3. Copy those three folders to the **root** of your SD card. When asked,
+   **merge** them with the folders already there. Don't replace them, which
+   would delete your other cores.
+
+On macOS, Finder replaces folders instead of merging them. Use Terminal
+instead, replacing `/Volumes/POCKET` with your card's name:
+
+```sh
+ditto ~/Downloads/butterscotch-pocket "/Volumes/POCKET"
+```
+
+### B2. Get the preparation tool
+
+From the same release, download the `prepare-data` file for your computer:
+
+| Computer | Download |
+|---|---|
+| Mac with Apple silicon (M1 or newer) | `prepare-data-darwin-arm64.tar.gz` |
+| Intel Mac | `prepare-data-darwin-amd64.tar.gz` |
+| Windows PC | `prepare-data-windows-amd64.tar.gz` |
+| Linux PC | `prepare-data-linux-amd64.tar.gz` |
+
+Extract it somewhere on your computer, not on the SD card. On Windows,
+open PowerShell in your Downloads folder and run
+`tar -xf prepare-data-windows-amd64.tar.gz`.
+
+### B3. Build the game files
+
+Open a terminal in the extracted folder. Run only the line for your game.
+Keep the quotes, and use your own game's location if it isn't the default
+Steam folder.
+
+**macOS** (Terminal):
+
+```sh
+./prepare-data --game undertale --source "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app" --output prepared-undertale
+./prepare-data --game deltarune --source "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app" --output prepared-deltarune
+```
+
+**Windows** (PowerShell):
+
+```powershell
+.\prepare-data.exe --game undertale --source "C:\Program Files (x86)\Steam\steamapps\common\Undertale" --output prepared-undertale
+.\prepare-data.exe --game deltarune --source "C:\Program Files (x86)\Steam\steamapps\common\DELTARUNE" --output prepared-deltarune
+```
+
+Wait until it prints `Ready`. If it reports a missing or invalid file, fix
+that and run it again with a new `--output` name, because it never
+overwrites an existing folder.
+
+### B4. Copy the result to the card
+
+The output folder (for example `prepared-undertale`) contains an `Assets`
+folder. Copy that `Assets` folder to the root of your SD card and merge it.
+
+On macOS:
+
+```sh
+ditto prepared-undertale/Assets "/Volumes/POCKET/Assets"
+```
+
+Check that the three files from the [card layout](#quick-start) are in
+`Assets/butterscotch/common/`, eject the card and play. You can keep
+`PREPARED-DATA.json` on your computer; the card doesn't need it.
+
+---
+
+## Troubleshooting
+
+**"Couldn't load Undertale. The game data is missing. Cannot open data.win"**
+The core is fine, but the game files aren't on the card yet. Do
+[A3–A4](#a3-copy-your-game-onto-the-card) or [B2–B4](#b2-get-the-preparation-tool).
+If you already did, check the files are in `Assets/butterscotch/common/`
+itself, not in a subfolder such as `prepared-undertale/Assets/…` or
+`undertale/`.
+
+**I copied my game's `data.win` but it still won't start.**
+The game's own `data.win` isn't enough. The tool also builds `textures.bin`
+and `music.bin`, and all three must come from the same run. Copy all three.
+
+**"Load error in Core" from the Pocket menu.**
+Part of the core is missing or in the wrong place, usually because the ZIP
+was copied as a folder (`butterscotch-pocket/Cores/…`) instead of its three
+folders going to the card root. Redo [A1](#a1-install-the-core) or
+[B1](#b1-install-the-core).
+
+**My other cores disappeared after installing.**
+The folders were replaced instead of merged. Reinstall those cores, then
+install Butterscotch again by merging, or use Pocket Sync, which merges for you.
+
+**macOS says `prepare-data` "cannot be opened" or "Apple could not verify" it.**
+The tool isn't signed by Apple yet. Open **System Settings → Privacy &
+Security**, scroll down and choose **Open Anyway**, then run the command
+again. Or, in Terminal in the tool's folder, run
+`xattr -d com.apple.quarantine prepare-data` once.
+
+**Windows blocks `prepare-data.exe`.**
+If SmartScreen appears, choose **More info → Run anyway**. In PowerShell
+you can also run `Unblock-File .\prepare-data.exe` once.
+
+**The tool says it "requires bytecode version".**
+That copy of the game isn't a supported version. Only Undertale v1.08 and Deltarune Chapter 1 work. Update the game in
+Steam and try again. Console versions can't be used.
+
+**I can't find the plugin in Pocket Sync.**
+It isn't in the plugin list yet. Add it by URL, as in
+[A2](#a2-install-the-plugin).
+
+**The game starts but slows down in places.**
+Some heavy scenes are still slow. **Select → Performance Mode → Speed** (the
+default) is the fastest setting.
+
+Still stuck? Open the game, choose **Select → Debug → Save log to SD card**,
+quit from the Analogue menu, and attach the `_1.sav` file from
+`Saves/butterscotch/common/` to a
+[new issue](https://github.com/zenibako/butterscotch-pocket/issues/new).
+
+---
+
+## Updating
+
+Install a newer core the same way as in step A1 or B1. Your game files and
+saves stay on the card, so you don't need to build them again unless the
+release notes say so.
+
+Your progress is saved in `Saves/butterscotch/common/`. Back up your SD card
+before updating.
+
+---
+
+## Details
+
+### Accepted game sources
+
+For Undertale, `--source` (or the plugin's `undertale/` folder) can be the
+installed game folder containing `data.win`, `UNDERTALE.app` on macOS, or the
+exact `data.win`, `game.ios` or Linux `game.unx` file. The game's original
+`.ogg` music must be beside it or in its `music` folder.
+
+For Deltarune, it can be the installed game folder containing
+`chapter1_windows`, `chapter1_mac` or `chapter1_linux` and the shared `mus`
+folder, or `DELTARUNE.app` on macOS. A Chapter 1 folder or its exact data file
+also works when the shared `mus` folder is beside it. The tool needs:
 
 - Chapter 1's `data.win` or `game.ios`.
 - `audiogroup1.dat` in the chapter folder.
 - `lang/lang_en.json` in the chapter folder.
 - Chapter music and the shared `mus` folder's `.ogg` files.
 
-The tool gathers the chapter's referenced music and includes its language
-and additional sound data in the generated audio pack. You do not need to
-rename or manually copy those extra files to the SD card.
+It packs the chapter's music, language and extra sound data into the
+generated files. You don't need to rename or copy those extra files yourself.
 
-## 3. Prepare a new output folder
+### What the plugin does with your files
 
-Open a terminal in the extracted preparation bundle. Replace the example
-paths with your own. Keep paths containing spaces inside quotes.
+**Keep originals** leaves the `undertale/` or `deltarune/` folder on the card
+for another install. **Discard originals** removes that folder only after a
+successful install. Neither touches the other game, your installed files,
+your computer's game install or your saves. Leave enough free space for the
+originals, the conversion and the previous game files during a replacement.
 
-macOS or Linux:
+If conversion or installation fails, the originals are kept and the previous
+game files are restored. If restoring fails, keep the recovery backups at the
+reported location. Work and recovery files are hidden under
+`Assets/butterscotch/common/.butterscotch-install-*`, and the plugin's report
+is `Assets/butterscotch/common/.butterscotch-<game>.json`.
 
-```sh
-./prepare-data --game undertale --source "/path/to/UNDERTALE.app" --output "prepared-undertale"
-./prepare-data --game deltarune --source "/path/to/DELTARUNE.app" --output "prepared-deltarune"
-```
+The plugin installs from the latest stable release's `plugin.wasm` and
+`plugin.json`. The direct-install workflow needs v0.7.1 or newer. Update the
+plugin if you installed v0.7.0.
 
-Windows, in PowerShell:
+### Installing game files with Pocket Sync but without the plugin
 
-```powershell
-.\prepare-data.exe --game undertale --source "C:\Games\UNDERTALE" --output "prepared-undertale"
-.\prepare-data.exe --game deltarune --source "C:\Games\DELTARUNE" --output "prepared-deltarune"
-```
+You can run `prepare-data` (steps B2–B3), then compress the output's
+**Assets** folder into a ZIP and drag that ZIP onto Pocket Sync. Opening the
+ZIP must show `Assets` straight away, with `butterscotch/common` inside it;
+don't compress the `prepared-undertale` folder itself. This ZIP holds your
+own game data, so keep it private.
 
-Run only the command for the game you want to install. Choose an output folder
-that does not already exist and is outside the original game installation.
-If preparation fails, fix the reported missing or invalid file and rerun it.
-A failed conversion does not publish a partial output folder. To prepare again,
-choose a new output folder; the tool does not overwrite an existing folder.
+### Keep these separate
 
-## 4. Install the prepared data
-
-After the tool says `Ready`, choose either method:
-
-- **Pocket Sync:** In the prepared output folder, compress the **Assets**
-  folder into a ZIP using your computer's file manager. Drag this new ZIP onto
-  the connected Pocket Sync window, review the selected `Assets` paths, and
-  click **Confirm**. Include all three generated game files.
-- **Manual:** Copy the output folder's **Assets** folder into the root of
-  your Pocket SD card and merge folders.
-
-For Pocket Sync, check that opening the ZIP shows `Assets` immediately, with
-`butterscotch/common` inside it. Do not compress the enclosing
-`prepared-undertale` or `prepared-deltarune` folder: that would add an extra
-directory above `Assets`. The game-data ZIP contains no core, tools or saves.
-It is a private archive for your own card; do not upload it to a release.
-
-The resulting paths on the card are:
-
-| Game | Files under `/Assets/butterscotch/common/` |
-|---|---|
-| Undertale | `data.win`, `textures.bin`, `music.bin` |
-| Deltarune Chapter 1 | `deltarune.win`, `dr_textures.bin`, `dr_music.bin` |
-
-These generated texture and audio packs belong together with that game's data
-file. Copy all three files. When changing the game data, prepare all three
-again. Your core's matching app, OS and FPGA runtime come from the core ZIP;
-preparing game files does not replace them.
-
-Keep the `PREPARED-DATA.json` report on your computer if you need to identify
-the data hash and generated files later. It is not needed on the card.
-
-Unmount the card after copying, put it in the Pocket, and open Butterscotch.
-Select only a game whose data you installed. Your progress is under
-`/Saves/butterscotch/common/`; the preparation output contains no `Saves`
-folder. Keep your original games and generated data private.
-
-Pocket Sync installs the core and copies prepared files. Its optional plugin
-can also run the converter, as described below; neither method obtains your purchased game data. Installing an updated
-core does not convert a different game version. If a release asks you to
-prepare the data again, repeat steps 2–4 with a new output folder.
-
-Pocket Sync's [installation and ZIP import instructions](https://github.com/neil-morrison44/pocket-sync#installation)
-describe connecting a card and importing archives. Butterscotch's catalog
-listing must point to the **core ZIP**, keeping the computer-side tools and
-private game-data archives separate.
-
-## Pocket Sync plugin
-
-The optional plugin runs the same conversion library inside regular Pocket Sync.
-In **Plugins → Add plugin via URL**, enter:
-
-```text
-https://github.com/zenibako/butterscotch-pocket
-```
-
-Choose **Verify & install plugin**. This requires a published stable release
-containing both `plugin.wasm` and `plugin.json`; a source checkout or a draft
-release is not installable through this dialog. The core and plugin use the
-same repository URL, but installing one does not install the other.
-
-The direct-install workflow below requires **v0.7.1 or newer**. Update the
-plugin if you installed v0.7.0, which used separate input/output folders.
-
-1. Install the core, then copy original resources into the connected card:
-   - **Undertale:** `/Assets/butterscotch/common/undertale/`, with its native
-     `data.win`, `game.ios` or `game.unx` and original music beside it or in
-     `music/`.
-   - **Deltarune:** `/Assets/butterscotch/common/deltarune/`, with
-     `chapter1_mac`, `chapter1_windows` or `chapter1_linux` alongside shared
-     `mus/`. Keep the chapter's data, `audiogroup1.dat`, `lang/lang_en.json`
-     and music together. Preserve native filenames; no data-file renaming is
-     needed. Separate source folders prevent music filename collisions.
-2. Run **Butterscotch Game Data**, select the game, then choose
-   **Install and keep originals** (first/default) or
-   **Install and discard originals**. Review the source folder shown in the
-   confirmation. **Find my game files** offers three short steps for macOS,
-   Windows or Linux, with the game's resource location and SD-card destination.
-3. Keep Pocket Sync open until installation finishes. All three game files
-   are installed directly into `/Assets/butterscotch/common/` with the names
-   in the table above. No manual copy or merge is needed.
-
-The plugin reads only the connected card, so copy resources out of any `.app`
-bundle first. For default Steam installations on macOS, replace
-`/Volumes/POCKET` with your card's path and run only the commands you need:
-
-```sh
-# Undertale: copy Resources contents into the dedicated source folder.
-mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/undertale"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/Undertale/UNDERTALE.app/Contents/Resources" "/Volumes/POCKET/Assets/butterscotch/common/undertale"
-
-# Deltarune: preserve the chapter and shared music directory arrangement.
-mkdir -p "/Volumes/POCKET/Assets/butterscotch/common/deltarune"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/chapter1_mac" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/chapter1_mac"
-ditto "$HOME/Library/Application Support/Steam/steamapps/common/DELTARUNE/DELTARUNE.app/Contents/Resources/mus" "/Volumes/POCKET/Assets/butterscotch/common/deltarune/mus"
-```
-
-On Windows or Linux, copy the equivalent installed resources into those
-source folders with your file manager. Do not copy an installer or ZIP.
-
-**Keep originals** preserves the source folder for another install.
-**Discard originals** removes the entire selected `undertale/` or `deltarune/`
-source folder only after successful installation. It leaves the other game's
-source folder, installed game files, your computer's Steam installation and
-saves untouched. Keep enough free space for originals, conversion work and
-previous installed files during replacement.
-
-If conversion or installation fails, originals are kept and previous installed
-files are restored. If restoration fails, preserve the recovery backups at
-the reported location. A failure to discard originals or remove temporary
-files produces a cleanup warning after a successful install; the game remains
-installed.
-
-Work and recovery remnants are hidden under
-`/Assets/butterscotch/common/.butterscotch-install-*`; the plugin report is
-`/Assets/butterscotch/common/.butterscotch-<game>.json`. There are no separate
-top-level input or prepared-output folders. The desktop CLI still writes
-`PREPARED-DATA.json` in a separate output folder and refuses existing output
-folders. Keep original and converted game data private.
+- The **core ZIP** is the only thing to import into Pocket Sync as a core.
+- The `prepare-data-*.tar.gz` tools and source archives run on your computer.
+- Neither the core nor the tools include, download or change your games or
+  your saves. Keep your original and converted game files private.
 
 ## Building from source
 

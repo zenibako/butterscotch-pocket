@@ -1,6 +1,6 @@
 # Get started with Butterscotch Pocket
 
-1. Follow [installation](docs/INSTALL.md) to download and install the core ZIP.
+1. Follow [Install Butterscotch Pocket](GAME-DATA.md) to install the core.
 2. [Prepare your own supported game files](GAME-DATA.md), using the native tool
    or the Pocket Sync plugin from the same release.
 3. Read the [controls and current limits](README.md) before playing.

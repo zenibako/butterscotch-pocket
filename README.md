@@ -5,8 +5,17 @@ using [Butterscotch](https://github.com/ButterscotchRunner/Butterscotch) and
 openfpgaOS. This fork maintains the runner, Pocket port, game-data tools,
 Pocket Sync plugin and releases together.
 
-- [Install the core and plugin](src/openfpga/docs/INSTALL.md)
-- [Prepare your own game files](src/openfpga/GAME-DATA.md)
+**Install in 3 steps** ([full guide, with or without Pocket Sync](src/openfpga/GAME-DATA.md)):
+
+1. Put `butterscotch-pocket.zip` from the [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest) on your SD card.
+2. Build your game files from your own Undertale v1.08 or Deltarune Chapter 1, with the Pocket Sync plugin or the `prepare-data` tool. The core alone won't start a game.
+3. Open **openFPGA → Butterscotch** on the Pocket.
+
+Seeing *"The game data is missing"*? You're on step 2; see [Troubleshooting](src/openfpga/GAME-DATA.md#troubleshooting).
+
+More:
+
+- [Release overview and current limits](src/openfpga/docs/INSTALL.md)
 - [Pocket controls and development](src/openfpga/README.md)
 - [Build and release](src/openfpga/docs/BUILD.md)
 
