@@ -2952,26 +2952,28 @@ static bool swrRunAllocateIndexed(SWTileRun* run, int width, int height, RoomTil
 {
     int blocksX = (width + SWR_TILE_RUN_BLOCK - 1) / SWR_TILE_RUN_BLOCK;
     size_t entries = 0;
-    for (int32_t t = 0; t < count; t++) {
+    int32_t t;
+    int c;
+    for (t = 0; t < count; t++) {
         int c0, c1;
         swrTileColumns(tiles[t]->x + (int32_t) offsets[t * 2] - originX, (int) tiles[t]->width, blocksX, &c0, &c1);
         if (c1 > c0) entries += (size_t) (c1 - c0);
     }
     if (!swrRunAllocateWith(run, width, height, true, entries + 1)) return false;
     uint32_t* start = run->colStart;
-    for (int32_t t = 0; t < count; t++) {
+    for (t = 0; t < count; t++) {
         int c0, c1;
         swrTileColumns(tiles[t]->x + (int32_t) offsets[t * 2] - originX, (int) tiles[t]->width, blocksX, &c0, &c1);
-        for (int c = c0; c < c1; c++) start[c + 1]++;
+        for (c = c0; c < c1; c++) start[c + 1]++;
     }
-    for (int c = 0; c < blocksX; c++) start[c + 1] += start[c];
+    for (c = 0; c < blocksX; c++) start[c + 1] += start[c];
     // Filled using start[c] as column c's cursor, which leaves it at column c + 1's start.
-    for (int32_t t = 0; t < count; t++) {
+    for (t = 0; t < count; t++) {
         int c0, c1;
         swrTileColumns(tiles[t]->x + (int32_t) offsets[t * 2] - originX, (int) tiles[t]->width, blocksX, &c0, &c1);
-        for (int c = c0; c < c1; c++) run->colTiles[start[c]++] = (uint16_t) t;
+        for (c = c0; c < c1; c++) run->colTiles[start[c]++] = (uint16_t) t;
     }
-    for (int c = blocksX; c > 0; c--) start[c] = start[c - 1];
+    for (c = blocksX; c > 0; c--) start[c] = start[c - 1];
     start[0] = 0;
     return true;
 }
@@ -4015,11 +4017,21 @@ static void swrRunDrawColumns(Renderer* renderer, SWTileRun* run, RoomTile** til
 
 // Whether a run can be built a stretch at a time (swrRunDrawColumns): every tile at full size,
 // on a whole pixel, in a room drawn at full size, and few enough to be listed by column.
-static bool swrRunCanBuildLazily(RoomTile** tiles, const float* offsets, int32_t count)
+static bool swrRunCanBuildLazily(Renderer* renderer, RoomTile** tiles, const float* offsets, int32_t count)
 {
+    DataWin* dwin = renderer->dataWin;
+    int32_t lastTpag = -2;
     if (count > 65535) return false;
     for (int32_t t = 0; t < count; t++) {
         if (tiles[t]->scaleX != 1.0f || tiles[t]->scaleY != 1.0f) return false;
+        // An item stored at another size than it is drawn is rescaled per drawn rectangle, so a
+        // tile cut at a column's edge would not sample as the whole tile does.
+        int32_t tpag = Renderer_resolveObjectTPAGIndex(dwin, tiles[t]);
+        if (tpag != lastTpag && tpag >= 0 && (uint32_t) tpag < dwin->tpag.count) {
+            const TexturePageItem* item = &dwin->tpag.items[tpag];
+            if (item->sourceWidth != item->targetWidth || item->sourceHeight != item->targetHeight) return false;
+        }
+        lastTpag = tpag;
         float ox = offsets[t * 2], oy = offsets[t * 2 + 1];
         if (ox != (float) (int32_t) ox || oy != (float) (int32_t) oy || ox > 65536.0f || ox < -65536.0f || oy > 65536.0f || oy < -65536.0f)
             return false;
@@ -4039,7 +4051,8 @@ static bool swrRunBuild(Renderer* renderer, SWTileRun* run, RoomTile** tiles, co
     SWRenderer* swr = (SWRenderer*) renderer;
     bool asideOk = !swrGridHeld();
     int32_t lastTpag = -2;
-    for (int i = 0; i < n && asideOk; i++) {
+    int i;
+    for (i = 0; i < n && asideOk; i++) {
         for (uint32_t k = run->colStart[cols[i]]; k < run->colStart[cols[i] + 1] && asideOk; k++) {
             int32_t tpag = Renderer_resolveObjectTPAGIndex(renderer->dataWin, tiles[run->colTiles[k]]);
             if (tpag != lastTpag && !swrTextureForItemIsIn(swr, tpag)) asideOk = false;
@@ -4049,6 +4062,9 @@ static bool swrRunBuild(Renderer* renderer, SWTileRun* run, RoomTile** tiles, co
     if (!asideOk && !mayFlush) return false;
     int pending = swrPendingCount;
     bool clearHeld = swr->clearHeld, entering = swr->tileRunEntering;
+    // Making room for a texture must not give up the picture being drawn into, including while
+    // the held grid is let out below (its sprites may load textures).
+    ++swrTileRunReaders;
     if (asideOk) {
         swrPendingCount = 0;
         swr->clearHeld = false;
@@ -4057,9 +4073,8 @@ static bool swrRunBuild(Renderer* renderer, SWTileRun* run, RoomTile** tiles, co
         swrTileRunsFlush(swr);
         swrGridFlush(swr);
     }
-    ++swrTileRunReaders; // making room for a texture must not give up the picture being drawn into
     int rows = swrRunBlockRows(run);
-    for (int i = 0; i < n && run->built != NULL; i++) {
+    for (i = 0; i < n && run->built != NULL; i++) {
         int c = cols[i], end = c;
         if (run->built[c]) continue;
         if (aheadRows > 0 || c == run->partCol) {
@@ -4234,7 +4249,7 @@ static bool swrDrawTileRunCached(Renderer* renderer, RoomTile** tiles, const flo
         // A picture much wider than the port is built a stretch at a time as the view comes to it
         // (swrRunEnsure, below): Snowdin Town's two 2720-pixel pictures took 400 ms simulated whole.
         bool lazy = shift == 0 && width > 2 * (swr->maxX - swr->portX) + 4 * SWR_TILE_RUN_BLOCK && !swrLazyRunsOff() &&
-                    swrRunCanBuildLazily(tiles, offsets, count);
+                    swrRunCanBuildLazily(renderer, tiles, offsets, count);
         if (!swrRunFits(width, height) ||
             !(lazy ? swrRunAllocateIndexed(spare, width, height, tiles, offsets, count, left >> shift)
                    : swrRunAllocate(spare, width, height, false))) return false;
