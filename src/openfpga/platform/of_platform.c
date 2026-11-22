@@ -836,6 +836,8 @@ static void frameLog(void) {
 }
 #endif
 
+static void noteItemLoads(void);
+
 void platformSwapBuffers(void) {
     if (g_nextFb == NULL) return;
     ofPerfDetailAlways(g_debugMode);
@@ -844,6 +846,7 @@ void platformSwapBuffers(void) {
         scriptProfileFrame();
         ofPerfFrame(NULL, 0, 0);
         ofFocusPresent(g_runner,true);
+        noteItemLoads();
         ofBenchFrame(g_runner, true);
 #ifdef OF_PC
         dumpFrameIfRequested(false);
@@ -910,6 +913,7 @@ void platformSwapBuffers(void) {
 #ifdef OF_PC
     frameLog();
 #endif
+    noteItemLoads();
     ofBenchFrame(g_runner, false);
 #ifdef OF_PC
     dumpFrameIfRequested(true);
@@ -1478,6 +1482,21 @@ static void prefetchAll(void) {
     ++g_burst.updates;
 }
 
+/* Hands the items the renderer loaded at a draw since the last call to the
+ * benchmark (and, in a battle, to the battle's count). Called before a frame
+ * is counted, so a load made while drawing the frame that ends a section is
+ * the section's, and once an update for loads made where no frame was
+ * counted (a room change). */
+static void noteItemLoads(void) {
+    if (g_runner == NULL || g_runner->renderer == NULL) return;
+    unsigned loads;
+    uint64_t loadNanos;
+    SWRenderer_takeItemLoads(&loads, &loadNanos);
+    if (loads == 0) return;
+    ofBenchNoteItemLoads(loads, loadNanos);
+    if (ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner)) ofBenchNoteBattleLoads(loads, loadNanos);
+}
+
 /* While an update waits for its time: loads what has been read, keeps the card
  * busy, and counts how far loading ran past the update's time. */
 static uint64_t prefetchWait(uint64_t until) {
@@ -1509,12 +1528,7 @@ static uint64_t prefetchWait(uint64_t until) {
  * it as the battle room starts, and counts the items battles still load at a draw. */
 static void prefetchCheck(void) {
     if (g_runner == NULL || g_runner->renderer == NULL) return;
-    bool battle = ofGame.battleUiActive != NULL && ofGame.battleUiActive(g_runner);
-    unsigned loads;
-    uint64_t loadNanos;
-    SWRenderer_takeItemLoads(&loads, &loadNanos);
-    if (loads != 0) ofBenchNoteItemLoads(loads, loadNanos);
-    if (battle && loads != 0) ofBenchNoteBattleLoads(loads, loadNanos);
+    noteItemLoads();
     if (!prefetchOn()) return;
     int battleId = 0, left = -1;
     int32_t entries[OF_PREFETCH_MAX];
