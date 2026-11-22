@@ -285,6 +285,11 @@ struct Renderer {
     // it worked out from the same tiles and offsets while it is unchanged. Zero
     // when there is no such promise (tiles copied for the call, or another caller).
     uint32_t tileRunGeneration;
+    // Set by the runner with tileRunGeneration when it hands over the very
+    // arrays (same tiles, same offsets) it handed over before under this stamp:
+    // a renderer that has seen the stamp under the same generation may take the
+    // run as the same without comparing them. Zero otherwise.
+    uint32_t tileRunStamp;
 };
 
 // ===[ Shared Helpers (platform-agnostic) ]===
