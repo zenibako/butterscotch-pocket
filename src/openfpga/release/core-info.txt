@@ -2,9 +2,9 @@ Butterscotch Pocket (unofficial)
 
 Undertale v1.08; Deltarune Chapter 1
 Deltarune and save states experimental.
-Provide your own supported game data.
-
-Prepare data with Pocket Sync or CLI.
+Core alone won't start a game: build
+its files from your own game copy with
+the Pocket Sync plugin or prepare-data.
 github.com/zenibako/butterscotch-pocket
 
 Assets/butterscotch/common:

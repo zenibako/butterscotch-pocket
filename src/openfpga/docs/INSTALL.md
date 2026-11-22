@@ -11,43 +11,13 @@ chapters and game versions are not established as compatible.
 
 ## Install
 
-1. Open [Releases](https://github.com/zenibako/butterscotch-pocket/releases)
-   and download **`butterscotch-pocket.zip`** from the release you want.
-2. In Pocket Sync, connect your SD card and drag the core ZIP onto the window.
-   Alternatively, extract it into the SD-card root, merging `Cores`, `Assets`
-   and `Platforms` with the existing folders.
-3. Follow [Add your own game files](../GAME-DATA.md) to prepare and install your
-   Undertale or Deltarune data. Installing the core alone does not make either
-   commercial game playable.
+Follow **[Install Butterscotch Pocket](../GAME-DATA.md)**. It covers installing
+the core with or without Pocket Sync, building your game files from your own
+copy of Undertale or Deltarune, and fixing common errors such as
+*"The game data is missing"* or *"Load error in Core"*.
 
-Release assets become available when a stable release is published. Source
-archives, native preparation tools and the plugin assets are separate from
-the core ZIP; do not import those into Pocket Sync as core packages.
-
-## Prepare your games
-
-Choose either method; both use the same Go conversion library:
-
-| Method | What to use |
-|---|---|
-| Desktop CLI | Download `prepare-data-<os>-<arch>.tar.gz` from the same release. Supports macOS (`darwin`), Windows and Linux, each on `amd64` or `arm64`. Use `darwin-arm64` on Apple silicon Macs. |
-| Pocket Sync plugin | In **Plugins → Add plugin via URL**, enter `https://github.com/zenibako/butterscotch-pocket`, then choose **Verify & install plugin**. Stage originals under `Assets/butterscotch/common/undertale/` or `deltarune/` on the connected card, then install directly from the plugin. |
-
-The plugin's installer reads `plugin.wasm` and `plugin.json` from the latest
-stable release. Installing the plugin and installing the core are separate
-steps. No separate Pocket Sync development app is needed for published plugin
-releases. See the [game-data guide](../GAME-DATA.md) for exact source layouts,
-macOS `.app` resource copying, output paths and updating prepared data.
-
-The desktop CLI writes a new output folder and refuses an existing one; copy
-all three generated game files together. The plugin installs the
-three files directly into `Assets/butterscotch/common/`, with a choice to keep
-(default) or discard the selected original source folder after a successful
-install. Preserve native filenames within the separate source folders.
-These plugin instructions require v0.7.1 or newer; v0.7.0 uses the earlier
-separate-output workflow. Neither method
-changes your computer installation or writes saves. Ordinary game progress lives under
-`/Saves/butterscotch/common/`; back up your SD card before updates.
+The core on its own won't start a game: you also need three game files built
+from your own copy, which the guide walks you through.
 
 ## Controls and current limits
 
@@ -58,12 +28,8 @@ Speed or Accuracy. L is unused. See the
 for detailed controls, debugging and scene-specific save-state support.
 
 Performance varies by scene and some rendering features remain incomplete.
-The pinned release runtime uses an experimental os20 (dual-issue) save-state configuration
-at 100 MHz with -0.597 ns worst setup slack in the slow 85°C corner
-(the build misses that timing target). Save states and sleep support
-remain experimental. Private Memories from earlier test ELFs may not load with
-public release ELFs because their binary identities differ. Ordinary progress
-saves are separate and the installation package excludes saves.
+Memories (save states) and sleep are experimental. Your ordinary progress
+saves are separate, and the core ZIP never includes or replaces them.
 
 ## AI development disclosure
 

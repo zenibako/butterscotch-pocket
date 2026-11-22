@@ -6,12 +6,23 @@ It runs Undertale v1.08 and, as an
 experiment, Deltarune Chapter 1. You
 need to provide your own game files.
 
-Put in Assets/butterscotch/common:
-  data.win      from your game
-  textures.bin  built from data.win
-  music.bin     built from data.win
+The core alone won't start a game.
+Build the game files from your own
+copy, then put them on the SD card:
+- Pocket Sync: install the plugin
+  from the URL below, then run
+  Butterscotch Game Data.
+- No Pocket Sync: run prepare-data
+  from the release on a computer and
+  copy its Assets folder to the card.
+Undertale needs data.win,
+  textures.bin and music.bin in
+  Assets/butterscotch/common.
 Deltarune: deltarune.win,
   dr_textures.bin, dr_music.bin
+Copying the game's own data.win is
+not enough. Steps and help:
+github.com/zenibako/butterscotch-pocket
 
 Controls
   D-pad    Move
