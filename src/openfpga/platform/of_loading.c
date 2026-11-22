@@ -7,6 +7,7 @@
 #include "of_font.h"
 #include "qrcodegen.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -261,12 +262,16 @@ static void drawText(uint16_t *fb, int width, int height, int x, int y, const ch
 
 /* Draws `text` from (x, y), broken between words to fit `right`; returns the
  * y below it. With no frame it only measures. */
-static int drawWrapped(uint16_t *fb, int width, int height, int x, int y, int right, const char *text, uint16_t color) {
+/* Wraps `text` between x and right from y down, drawing only whole lines that
+ * end by `bottom`; returns the y below the last line drawn. */
+static int drawWrappedAbove(uint16_t *fb, int width, int height, int x, int y, int right, int bottom, const char *text,
+                            uint16_t color) {
     int line = lineHeight();
     char buffer[128];
     while (*text != '\0') {
         while (*text == ' ') text++;
         if (*text == '\0') break;
+        if (y + line > bottom) break;
         /* The longest run of whole words that fits, or one word cut where it must be. */
         size_t fit = 0, end = 0;
         for (;;) {
@@ -296,6 +301,10 @@ static int drawWrapped(uint16_t *fb, int width, int height, int x, int y, int ri
         text += fit;
     }
     return y;
+}
+
+static int drawWrapped(uint16_t *fb, int width, int height, int x, int y, int right, const char *text, uint16_t color) {
+    return drawWrappedAbove(fb, width, height, x, y, right, INT_MAX, text, color);
 }
 
 /* The QR code beside a failure's text: version 4 holds the guide's link at
@@ -342,14 +351,16 @@ void ofLoadingDrawError(uint16_t *fb, int width, int height, const OfLoadError *
     y = drawWrapped(fb, width, height, left, y, textRight, error->title, OF_WHITE) + line;
     y = drawWrapped(fb, width, height, left, y, textRight, error->reason, OF_WHITE);
     if (error->hint != NULL) y = drawWrapped(fb, width, height, left, y, textRight, error->hint, OF_LIGHT);
-    if (error->detail != NULL && error->detail[0] != '\0')
-        drawWrapped(fb, width, height, left, y + line, textRight, error->detail, OF_GREY);
+    /* The footer sits just above the bar; the logged error stops a line above it. */
+    int footerTop = barTop(height) - line / 2;
     if (error->footer != NULL) {
-        /* Above the bar, as many lines as it wraps to. */
         int lines = 0;
         for (int probe = drawWrapped(NULL, 0, 0, left, 0, right, error->footer, 0); probe > 0; probe -= line) lines++;
-        drawWrapped(fb, width, height, left, barTop(height) - line / 2 - lines * line, right, error->footer, OF_LIGHT);
+        footerTop -= lines * line;
+        drawWrapped(fb, width, height, left, footerTop, right, error->footer, OF_LIGHT);
     }
+    if (error->detail != NULL && error->detail[0] != '\0')
+        drawWrappedAbove(fb, width, height, left, y + line, textRight, footerTop - line / 2, error->detail, OF_GREY);
     /* No heart here: the footer sits where it would ride. */
     drawBarLine(fb, width, height, permille < 30 ? 30 : permille, OF_RED, OF_TRACK);
 }

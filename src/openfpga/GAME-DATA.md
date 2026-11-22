@@ -13,8 +13,9 @@ this project's page.
 ## Quick start
 
 1. **Install the core.** Download `butterscotch-pocket.zip` from the
-   [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest)
-   and put it on your SD card (Pocket Sync or by hand, both below).
+   [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest).
+   Import it in Pocket Sync, or unzip it and merge its `Assets`, `Cores` and
+   `Platforms` folders into the root of your SD card (both below).
 2. **Build your game files.** Your game's `data.win` must be converted into
    three files. Use the Pocket Sync plugin, or the `prepare-data` tool on
    your computer if you don't use Pocket Sync.
@@ -195,10 +196,11 @@ overwrites an existing folder.
 The output folder (for example `prepared-undertale`) contains an `Assets`
 folder. Copy that `Assets` folder to the root of your SD card and merge it.
 
-On macOS:
+On macOS, run only the line for the game you prepared:
 
 ```sh
 ditto prepared-undertale/Assets "/Volumes/POCKET/Assets"
+ditto prepared-deltarune/Assets "/Volumes/POCKET/Assets"
 ```
 
 Check that the three files from the [card layout](#quick-start) are in

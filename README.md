@@ -7,7 +7,7 @@ Pocket Sync plugin and releases together.
 
 **Install in 3 steps** ([full guide, with or without Pocket Sync](src/openfpga/GAME-DATA.md)):
 
-1. Put `butterscotch-pocket.zip` from the [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest) on your SD card.
+1. Download `butterscotch-pocket.zip` from the [latest release](https://github.com/zenibako/butterscotch-pocket/releases/latest). Import it in Pocket Sync, or unzip it and merge its `Assets`, `Cores` and `Platforms` folders into the root of your SD card.
 2. Build your game files from your own Undertale v1.08 or Deltarune Chapter 1, with the Pocket Sync plugin or the `prepare-data` tool. The core alone won't start a game.
 3. Open **openFPGA → Butterscotch** on the Pocket.
 

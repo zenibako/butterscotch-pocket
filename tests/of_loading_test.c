@@ -276,6 +276,28 @@ static void testScreens(void) {
     }
 }
 
+/* A long logged error stops above the footer instead of running into it. */
+static void testLongDetail(void) {
+    OfLoadError e;
+    ofLoadingDescribe(&e, "Undertale", "data.win, textures.bin and music.bin",
+                      "Cannot open data.win: a very long logged error that wraps over many lines of the narrow column "
+                      "beside the QR code, longer than any real one, to reach the footer rows at the bottom",
+                      "app exited", false, "Quit from the Analogue menu to save the log: the entry's _1.sav file in "
+                      "Saves/butterscotch/common.");
+    ofLoadingDrawError(g_fb, OF_LOADING_WIDTH, OF_LOADING_HEIGHT, &e, 0);
+    int line = lineHeight();
+    int footerTop = barTop(OF_LOADING_HEIGHT) - line / 2 - 3 * line;
+    int grey = 0;
+    for (int y = 0; y < OF_LOADING_HEIGHT; y++)
+        for (int x = 0; x < OF_LOADING_WIDTH; x++)
+            if (g_fb[y * OF_LOADING_WIDTH + x] == OF_GREY) {
+                assert(y < footerTop - line / 2);
+                grey++;
+            }
+    assert(grey > 0);
+    preview("loading-error-long-detail");
+}
+
 /* A failure while choosing the failure screen's font keeps the first error on it. */
 static void testFailReentry(void) {
     static uint16_t expected[OF_LOADING_WIDTH * OF_LOADING_HEIGHT];
@@ -298,6 +320,7 @@ int main(void) {
     testWrapTrailingSpace();
     testDescribe();
     testScreens();
+    testLongDetail();
     testFailReentry();
     printf("loading screen: passed\n");
     return 0;
