@@ -1501,7 +1501,26 @@ static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
  * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
  * A cached half-size texture can supply the coverage of each sampled pixel.
  */
+static void swrDrawSpriteUnpinned(
+    Renderer* renderer, int dx, int dy, int dw, int dh,
+    SWTexture* texture, int sx, int sy, int sw, int sh,
+    uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast
+);
+
 static void swrDrawSpriteInternal(
+    Renderer* renderer, int dx, int dy, int dw, int dh,
+    SWTexture* texture, int sx, int sy, int sw, int sh,
+    uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast
+)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
+    swrDrawSpriteUnpinned(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha, pointSample, contrast);
+    swr->texturePins = pin.next;
+}
+
+static void swrDrawSpriteUnpinned(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
     uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast

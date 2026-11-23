@@ -152,6 +152,8 @@ typedef struct {
 
 #define SWR_ROTATION_CACHE_SIZE 64
 
+typedef struct SWTexturePin { const SWTexture* texture; struct SWTexturePin* next; } SWTexturePin;
+
 typedef struct SWTilePictureView {
     uint32_t frame, generation;
     int x, y, width, height, shift; // width 0: no eligible view was observed
@@ -205,6 +207,7 @@ typedef struct
     size_t itemCount;
     size_t itemBytes;
     SWSurface** surfaces;
+    SWTexturePin* texturePins;
     uint32_t frameCounter;
     bool pendingClear;      // clearFrameBuffer was requested but not done yet (see swrFlushPendingClear)
     uintpixel_t pendingClearColor;

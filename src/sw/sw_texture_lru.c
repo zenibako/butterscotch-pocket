@@ -77,6 +77,8 @@ static void evictItem(SWRenderer* swr, size_t index)
     swrFreeTexture(texture);
 }
 
+static bool isPinned(const SWRenderer* swr, const SWTexture* t){ for (const SWTexturePin* p = swr->texturePins; p; p = p->next) if (p->texture == t) return true; return false; }
+
 // Evicts the least recently used page or item texture. Returns false if nothing qualified.
 static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
 {
@@ -88,6 +90,7 @@ static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
         const SWTexture* texture = swr->textures[i];
         if (!texture) continue;
         if (!includeCurrentFrame && texture->lastUsedFrame == swr->frameCounter) continue;
+        if (isPinned(swr, texture)) continue;
         
         uint32_t age = swr->frameCounter - texture->lastUsedFrame;
         if (victim == -1 || age > oldest) {
@@ -99,6 +102,7 @@ static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
         const SWTexture* texture = swr->itemTextures[j];
         if (!texture) continue;
         if (!includeCurrentFrame && texture->lastUsedFrame == swr->frameCounter) continue;
+        if (isPinned(swr, texture)) continue;
         
         uint32_t age = swr->frameCounter - texture->lastUsedFrame;
         if (victim == -1 || age > oldest) {
