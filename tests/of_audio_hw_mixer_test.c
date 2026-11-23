@@ -337,7 +337,7 @@ static void testMemoriesContinueTheSamples(void) {
     size_t size = 0;
     void *state = takeState(ut, ut, &size);
     for (int f = 0; f < 20; f++) frame(ut); /* the game goes on, then the Memory is loaded */
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     assert(!fakeForVoice(ut, 0) && ofIsPlaying(&ut->base, music) && ofIsPlaying(&ut->base, sfx));
     for (int f = 0; f < 15; f++) frame(ut);
     checkResumed(fakeForVoice(ut, 0), musicAt, refLong, LONG_SAMPLES, true);
@@ -351,7 +351,7 @@ static void testMemoriesContinueTheSamples(void) {
     ofPauseSound(&ut->base, music);
     frame(ut);
     state = takeState(ut, ut, &size);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     for (int f = 0; f < 5; f++) frame(ut);
     assert(!fakeForVoice(ut, 0)); /* paused: not started until resumed */
     ofResumeSound(&ut->base, music);
@@ -365,7 +365,7 @@ static void testMemoriesContinueTheSamples(void) {
     OfAudioSystem *software = newSystem(); assert(!software->hwMixer);
     ofAudioUseSoftwareMixer(false);
     state = ofAudioPrepareSnapshot(&software->base, data, size, &reason); assert(state);
-    ofAudioApplySnapshot(&software->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&software->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&software->base);
     assert(ofIsPlaying(&software->base, music));
     softwarePairs = 0; frame(software); assert(softwarePairs > 0);
     ofDestroy(&software->base);
@@ -381,7 +381,7 @@ static void testMemoriesContinueTheSamples(void) {
     ofDestroy(&software->base);
     g_audio = ut;
     state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); free(data);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base); free(data);
     for (int f = 0; f < 5; f++) frame(ut);
     assert(ofIsPlaying(&ut->base, swMusic) && fakeForVoice(ut, 0));
 
@@ -407,19 +407,19 @@ static void testPendingRestore(void) {
     /* Paused straight after a load, then saved again: the second Memory
      * still has the samples. */
     void *state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     ofPauseSound(&ut->base, music);
     for (int f = 0; f < 3; f++) frame(ut);
     assert(!fakeForVoice(ut, 0) && ut->hwRestoreCount[0] > 0);
     state = takeState(ut, ut, &size);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     ofResumeSound(&ut->base, music);
     for (int f = 0; f < 15; f++) frame(ut);
     checkResumed(fakeForVoice(ut, 0), musicAt, refLong, LONG_SAMPLES, true);
 
     /* Stopped before it starts, and the voice given to another sound. */
     state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     ofStopSound(&ut->base, music);
     play(ut, "short", false);
     assert(ut->hwRestore[0] == NULL);
@@ -431,7 +431,7 @@ static void testPendingRestore(void) {
 
     /* Moved before it starts: it plays from the new place, not the kept samples. */
     state = ofAudioPrepareSnapshot(&ut->base, data, size, &reason); assert(state);
-    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state);
+    ofAudioApplySnapshot(&ut->base, state); ofAudioFreeSnapshot(state); ofAudioLoadSnapshotSounds(&ut->base);
     ofSetTrackPosition(&ut->base, music, 1.0f);
     assert(ut->hwRestore[0] == NULL);
     for (int f = 0; f < 15; f++) frame(ut);

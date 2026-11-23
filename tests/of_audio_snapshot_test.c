@@ -239,6 +239,56 @@ int main(void) {
     mixVoice(&ut, &ut.voices[0], actual, 30);
     mixVoice(&ut, &ut.voices[1], actual, 30);
     assert(memcmp(expected, actual, sizeof(actual)) == 0);
+    /* Loading a Memory reads no file before the Pocket is told it worked: its
+     * host serves no read until then. A short sound the cache has is used as
+     * it is; one it lacks is read by ofAudioLoadSnapshotSounds, after that
+     * notice. Either way the voice plays the same samples. */
+    for (int cachedBefore = 1; cachedBefore >= 0; cachedBefore--) {
+        FILE *pack = ut.file;
+        ut.file = tmpfile(); assert(ut.file); /* empty: a read now would fail */
+        if (!cachedBefore) { free(ut.cachedSounds[0]); ut.cachedSounds[0] = NULL; ut.cachedBytes = 0; }
+        uint8_t *kept = ut.cachedSounds[0];
+        void *q = ofAudioPrepareSnapshot(&ut.base, bytes, size, &reason);
+        assert(q);
+        ofAudioApplySnapshot(&ut.base, q); ofAudioFreeSnapshot(q);
+        assert(ut.voices[0].active && ut.voices[0].data == kept);
+        fclose(ut.file); ut.file = pack;
+        ofAudioLoadSnapshotSounds(&ut.base);
+        assert(ut.voices[0].data != NULL && ut.voices[0].data == ut.cachedSounds[0]);
+        if (cachedBefore) assert(ut.cachedSounds[0] == kept);
+        assert(!memcmp(ut.cachedSounds[0], adpcm, sizeof(adpcm)));
+        ofVtable.resumeAll(&ut.base);
+        int32_t again[30] = {0};
+        mixVoice(&ut, &ut.voices[0], again, 30);
+        mixVoice(&ut, &ut.voices[1], again, 30);
+        assert(memcmp(expected, again, sizeof(again)) == 0);
+    }
+    /* A sound that cannot be read once the load is final stops its voice
+     * (the load can no longer be refused); the music goes on. */
+    {
+        FILE *pack = ut.file;
+        ut.file = tmpfile(); assert(ut.file);
+        free(ut.cachedSounds[0]); ut.cachedSounds[0] = NULL; ut.cachedBytes = 0;
+        void *q = ofAudioPrepareSnapshot(&ut.base, bytes, size, &reason);
+        assert(q);
+        ofAudioApplySnapshot(&ut.base, q); ofAudioFreeSnapshot(q);
+        ofAudioLoadSnapshotSounds(&ut.base);
+        assert(!ut.voices[0].active && ut.voices[0].data == NULL);
+        assert(ut.voices[1].active && ut.voices[1].data == ut.streamBuffers[0]);
+        assert(ut.cachedSounds[0] == NULL && ut.cachedBytes == 0);
+        fclose(ut.file); ut.file = pack;
+        /* Back to the state the rest of this test starts from. */
+        void *r2 = ofAudioPrepareSnapshot(&ut.base, bytes, size, &reason);
+        assert(r2);
+        ofAudioApplySnapshot(&ut.base, r2); ofAudioFreeSnapshot(r2);
+        ofAudioLoadSnapshotSounds(&ut.base);
+        ofVtable.resumeAll(&ut.base);
+        int32_t again[30] = {0};
+        mixVoice(&ut, &ut.voices[0], again, 30);
+        mixVoice(&ut, &ut.voices[1], again, 30);
+        assert(memcmp(expected, again, sizeof(again)) == 0);
+    }
+    puts("audio Memory load reads no file before completion: passed");
     /* A Pocket state request must reach the frame boundary without issuing
      * another music read. Preserve read-ahead and decoder state until then. */
     OfVoice deferred = ut.voices[1];

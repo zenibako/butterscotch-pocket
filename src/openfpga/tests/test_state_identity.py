@@ -58,6 +58,7 @@ static void *ofSaveFsPrepareSnapshot(void *r, const uint8_t *d, size_t n, const 
 static bool ofSaveFsApplySnapshot(void *r, void *p) { (void)r; (void)p; return true; }
 static void Runner_snapshotApply(Runner *r, RunnerSnapshot *p) { (void)p; r->state++; }
 static void ofAudioApplySnapshot(void *r, void *p) { (void)r; (void)p; }
+static void ofAudioLoadSnapshotSounds(void *r) { (void)r; }
 static void ofPlatformSnapshotResumed(Runner *r, const uint32_t *v) { (void)r; (void)v; }
 static void Runner_snapshotFree(RunnerSnapshot *p) { (void)p; }
 static void ofAudioFreeSnapshot(void *p) { (void)p; }

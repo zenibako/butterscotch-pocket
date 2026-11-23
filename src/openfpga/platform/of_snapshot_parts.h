@@ -9,6 +9,9 @@ bool ofAudioSnapshot(AudioSystem *audio, uint8_t **data, size_t *size, const cha
 void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t size, const char **reason);
 void ofAudioApplySnapshot(AudioSystem *audio, void *prepared);
 void ofAudioFreeSnapshot(void *prepared);
+/* After ofAudioApplySnapshot and the host's completion: reads the restored
+ * short sounds the cache lacks (a file read before completion stalls). */
+void ofAudioLoadSnapshotSounds(AudioSystem *audio);
 /* Stops idle-hook mixing while a snapshot is captured or prepared. */
 void ofAudioSnapshotLock(bool locked);
 #ifdef OF_PC

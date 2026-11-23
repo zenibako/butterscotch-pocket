@@ -1996,7 +1996,6 @@ typedef struct {
     OfStream streams[OF_MAX_STREAMS];
     OfVoice voices[OF_MAX_VOICES];
     uint8_t streamBuffers[OF_MAX_STREAMED][OF_READAHEAD];
-    uint8_t **sounds;
     uint32_t trackCount;
     AudioGroupGain *gains;
     uint32_t gainCount;
@@ -2149,9 +2148,8 @@ bad:
 void ofAudioFreeSnapshot(void *ptr) {
     OfAudioSnapshot *p = ptr;
     if (!p) return;
-    if (p->sounds) for (uint32_t i = 0; i < p->trackCount; i++) free(p->sounds[i]);
     for (int v = 0; v < OF_MAX_VOICES; v++) free(p->hwPcm[v]);
-    free(p->sounds); free(p->gains); free(p->pcm); free(p);
+    free(p->gains); free(p->pcm); free(p);
 }
 
 void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t size, const char **reason) {
@@ -2163,8 +2161,6 @@ void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t siz
     p = calloc(1, sizeof(*p));
     if (!p) goto bad;
     p->trackCount = ut->trackCount;
-    p->sounds = calloc(p->trackCount ? p->trackCount : 1, sizeof(uint8_t *));
-    if (!p->sounds) goto bad;
     p->nextInstanceId = (int32_t)ofSnapGetU32(&r);
     if (p->nextInstanceId < OF_INSTANCE_ID_BASE || p->nextInstanceId >= OF_STREAM_INDEX_BASE) goto bad;
     p->masterGain = ofSnapGetFloat(&r); uint32_t paused = ofSnapGetU32(&r);
@@ -2225,18 +2221,9 @@ void *ofAudioPrepareSnapshot(AudioSystem *audio, const uint8_t *data, size_t siz
             if (!ofSnapRead(&r, p->streamBuffers[v->streamSlot], remaining)) goto bad;
             v->bufferLen = remaining; v->bufferPos = 0;
         } else {
+            /* The sound itself is not read here: see ofAudioLoadSnapshotSounds. */
             uint32_t bytes = trackBytes(&ut->tracks[v->track]);
             if (v->bufferLen > bytes || v->bufferPos > bytes || !ut->file || !ut->cachedSounds) goto bad;
-            if (!p->sounds[v->track]) {
-                p->sounds[v->track] = malloc(bytes ? bytes : 1);
-                if (!p->sounds[v->track]) goto bad;
-                bool locked = g_snapshotLocked; g_snapshotLocked = true;
-                ofBgReadSettle();
-                bool ok = fseek(ut->file, (long)ut->tracks[v->track].offset, SEEK_SET) == 0 &&
-                    fread(p->sounds[v->track], 1, bytes, ut->file) == bytes;
-                g_snapshotLocked = locked;
-                if (!ok) goto bad;
-            }
         }
     }
     p->pcmPairs = ofSnapGetU32(&r);
@@ -2287,17 +2274,11 @@ void ofAudioApplySnapshot(AudioSystem *audio, void *ptr) {
         ut->hwRestoreCarryValue[v] = p->hwCarryValue[v];
     }
     ut->hwStartAfterNanos = 0;
-    for (uint32_t i = 0; i < p->trackCount; i++) if (p->sounds[i]) {
-        if (ut->cachedSounds[i]) { free(ut->cachedSounds[i]); ut->cachedBytes -= trackBytes(&ut->tracks[i]); }
-        ut->cachedSounds[i] = p->sounds[i]; p->sounds[i] = NULL;
-        if (ut->cachedSilentFrom)
-            ut->cachedSilentFrom[i] = silentSuffix(ut->cachedSounds[i], trackBytes(&ut->tracks[i]));
-        ut->cachedBytes += trackBytes(&ut->tracks[i]);
-    }
     memcpy(ut->streamBuffers, p->streamBuffers, sizeof(ut->streamBuffers));
     memcpy(ut->voices, p->voices, sizeof(ut->voices)); memcpy(ut->streams, p->streams, sizeof(ut->streams));
     for (unsigned i = 0; i < OF_MAX_VOICES; i++) {
         OfVoice *v = &ut->voices[i];
+        /* A short sound not in the cache is NULL until ofAudioLoadSnapshotSounds. */
         if (v->active) v->data = v->streamSlot >= 0 ? ut->streamBuffers[v->streamSlot] : ut->cachedSounds[v->track];
     }
     ut->masterGain = p->masterGain; ut->nextInstanceId = p->nextInstanceId; ut->allPaused = p->allPaused;
@@ -2317,4 +2298,51 @@ void ofAudioApplySnapshot(AudioSystem *audio, void *ptr) {
             if (ut->hwMixer) ut->hwStartAfterNanos = nowNanos() + (uint64_t) written * 1000000000ull / OF_AUDIO_RATE;
         }
     }
+}
+
+/* Reads the short sounds a just-applied Memory plays that are not in the
+ * cache, as their first play would have. Called only once the Pocket has
+ * been told the load succeeded (of_savestate_finish): until then its host
+ * is still busy with the load and a file read waits on it. On a Pocket a
+ * Memory loaded in a battle spent 7.7 s reading these while preparing (its
+ * audio phase), and the Pocket said "loading failed" before the state
+ * appeared; a load at wake read them in 14 ms. The pack never changes, so a sound
+ * already cached is the same bytes a read would give; most loads made in the
+ * game read nothing at all. A sound that cannot be read now cannot refuse
+ * the load any more: its voice is stopped. Snapshot lock held: nothing mixes
+ * a voice whose data is still NULL. */
+void ofAudioLoadSnapshotSounds(AudioSystem *audio) {
+    OfAudioSystem *ut = (OfAudioSystem *)audio;
+    unsigned cached = 0, read = 0, dropped = 0;
+    uint64_t started = nowNanos();
+    for (int i = 0; i < OF_MAX_VOICES; i++) {
+        OfVoice *v = &ut->voices[i];
+        if (!v->active || v->streamSlot >= 0) continue;
+        if (v->data != NULL) {
+            /* As a read would: a sound's silent-tail proof goes with it. */
+            if (ut->cachedSilentFrom && ut->cachedSilentFrom[v->track] == UINT32_MAX)
+                ut->cachedSilentFrom[v->track] = silentSuffix(v->data, trackBytes(&ut->tracks[v->track]));
+            cached++; continue;
+        }
+        bool wasCached = ut->cachedSounds[v->track] != NULL;
+        uint8_t *data = cachedSound(ut, v->track);
+        if (data != NULL) {
+            if (wasCached) cached++; else read++;
+            /* Every voice playing this track shares the one copy. */
+            for (int j = i; j < OF_MAX_VOICES; j++) {
+                OfVoice *w = &ut->voices[j];
+                if (w->active && w->streamSlot < 0 && w->track == v->track && w->data == NULL) w->data = data;
+            }
+            continue;
+        }
+        for (int j = i; j < OF_MAX_VOICES; j++) {
+            OfVoice *w = &ut->voices[j];
+            if (!w->active || w->streamSlot >= 0 || w->track != v->track || w->data != NULL) continue;
+            hwStopVoice(ut, j);
+            memset(w, 0, sizeof(*w));
+            dropped++;
+        }
+    }
+    logInfo("State audio sounds: %u voices cached, %u read after completion, %u dropped, %llu ms\n", cached, read, dropped,
+            (unsigned long long)((nowNanos() - started) / 1000000));
 }
