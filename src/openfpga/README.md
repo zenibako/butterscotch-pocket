@@ -317,7 +317,9 @@ when the OS can prove the reserve fits, otherwise retaining the original probe.
 The first reserve check logs the allocation and query timings for comparison.
 State-request logs include refusal reasons and separate load receive,
 preparation, application and cleanup times. Successful loads notify the Pocket
-after committing restored state, before freeing the state they replace.
+after committing restored state, before freeing the state they replace. A load
+reads no file before that notice: the Pocket's host is still busy with the load
+until then, so short sounds missing from the cache are read just after it.
 Native builds automatically write the log to the existing spare log slot before
 publishing a captured or refused save. This records sleep
 capture attempts before power-down; a failed diagnostic write does not change
