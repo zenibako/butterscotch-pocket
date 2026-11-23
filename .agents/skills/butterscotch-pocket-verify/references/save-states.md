@@ -91,6 +91,31 @@ cmp "$pair_out/ref.ppm" "$pair_out/restored.ppm"
 Stop on any failed command. On macOS set
 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib` if SDL cannot find its runtime.
 
+### Check the Chapter 1 battle pair in both modes
+
+The [battle input script](../assets/deltarune-battle.script) walks room 52
+(`room_field2`) into a Rudinn encounter and stops on "Rudinn is glimmering
+plainly." Speed draws the TP bar from a half-size copy, so this pair also
+catches renderer state that a Memory cannot carry (issue #61: the copy's
+block phase came from the first draw, which a restore skips). From
+`src/openfpga`, after building `deltarune_pc`:
+
+```bash
+for mode in accuracy speed; do
+  extra=(); [ "$mode" = speed ] && extra=(-e BS_SMOOTH=1)
+  tools/state-coverage.sh -g deltarune -x 972 \
+    -s ../../.agents/skills/butterscotch-pocket-verify/assets/deltarune-battle.script \
+    -e BS_GOTO=35:52 -e 'BS_SET=34:darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0' \
+    ${extra[@]+"${extra[@]}"} 850:970
+done
+```
+
+Both lines must read `identical`. `BS_SMOOTH` selects Speed whenever it is
+set, even to 0, so leave it out for Accuracy. This uses the coverage tool's
+policy bypass; repeat with the direct three-process pair above for production
+acceptance. The asset-free `sprite-clipping-fixture` covers the renderer half
+of the same bug.
+
 ## Snapshot lifecycle regressions
 
 Draw/GUI runs after Step's destroyed-instance cleanup. A dialogue instance

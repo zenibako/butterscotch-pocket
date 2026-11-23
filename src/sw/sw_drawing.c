@@ -51,18 +51,28 @@ bool swrFavorSpeed = false;
 //
 // The blocks start where the draw's source rectangle starts, which for a
 // tileset with a one-texel border around each tile is an odd position. So a
-// copy is made for one phase (0 or 1 each way), that of the first draw to
-// need it; a draw at the other phase keeps the averaging path. A block cut
-// by the texture's edge is whatever part of it there is. Full-size texel x
-// belongs to half-size texel (x + phase) / 2.
+// copy is made for one phase (0 or 1 each way); a draw at the other phase
+// keeps the averaging path. A block cut by the texture's edge is whatever
+// part of it there is. Full-size texel x belongs to half-size texel
+// (x + phase) / 2.
+//
+// The phase is the texture's own (texture->halfPhaseX/Y, set when it is
+// loaded: where a TPAG item's art starts inside its one-texel border), not
+// that of the first draw to need a copy. The two paths do not always give
+// the same picture (an odd-sized source halves to a size that is not exactly
+// 2:1), so a phase taken from the first draw made a sprite's look depend on
+// how it was first drawn: the Deltarune TP bar, first drawn clipped while it
+// slides in, came out different after a Memory restored it already in place
+// (issue #61).
 MAYBE_UNUSED static bool swrHalfTexture(SWTexture* texture, int wantX, int wantY)
 {
 #if PIXEL_SIZE != 16
     (void) texture; (void) wantX; (void) wantY;
     return false;
 #else
+    (void) wantX; (void) wantY;
     if (texture->halfBuffer != NULL) return true;
-    int phaseX = wantX & 1, phaseY = wantY & 1;
+    int phaseX = texture->halfPhaseX & 1, phaseY = texture->halfPhaseY & 1;
     int halfW = (texture->width + phaseX + 1) / 2, halfH = (texture->height + phaseY + 1) / 2;
     size_t texels = (size_t) halfW * halfH;
     // One allocation: the texels, each row's bounds, then room for the coverage should it be needed.

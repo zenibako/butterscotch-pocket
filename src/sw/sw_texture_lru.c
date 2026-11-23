@@ -412,7 +412,9 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->immutable = true;
     texture->halfCoverage = NULL;
     texture->solid = texture->halfSolid = 0;
-    texture->halfPhaseX = texture->halfPhaseY = 0;
+    // Half-size copies start their blocks where the item's art starts (see swrHalfTexture).
+    texture->halfPhaseX = (uint8_t) ((tpag->sourceX - left) & 1);
+    texture->halfPhaseY = (uint8_t) ((tpag->sourceY - top) & 1);
     texture->originX = (uint16_t) left;
     texture->originY = (uint16_t) top;
     return texture;
