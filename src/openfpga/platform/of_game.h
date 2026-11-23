@@ -16,7 +16,7 @@
 #include "vm.h"
 
 #define OF_PREFETCH_WARMUP (-1) /* common assets in overworld spare time */
-#define OF_PREFETCH_ROOM (-2) /* the next room's first textures, read from the room before it, in spare time */
+#define OF_PREFETCH_ROOM (-2) /* the next room's first textures, read from the room before it, in spare time, then the warm-up's */
 
 /* A sound in battlePrefetch's entries, and back. */
 #define OF_PREFETCH_SOUND(index) (-1 - (int32_t) (index))

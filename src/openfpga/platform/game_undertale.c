@@ -515,6 +515,18 @@ static int roomAheadPrefetch(Runner *runner, int32_t *entries, int max, int *bat
     return count;
 }
 
+/* The common battle items and sounds warmed in the overworld's spare time,
+ * appended to entries after count. */
+static int commonWarmup(int32_t *entries, int count, int max) {
+    for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
+        entries[count++] = g_prefetchCommon[i];
+    for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
+        int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
+        if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
+    }
+    return count;
+}
+
 static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
     bool encounter = encounterGoingOn(runner, left);
     if (!runner->dataWin || !runner->vmContext || !runner->vmContext->globalScopeInstance ||
@@ -526,18 +538,15 @@ static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle
         if (battleUiActive(runner)) return 0;
         resolveSpeedVars(runner);
         if (!instanceOf(runner, g_prefetchCharaObject)) return 0;
+        /* On the bridge before Snowdin Town, the town's first textures, then
+         * the common warm-up as anywhere else: the next room's burst takes the
+         * warm-up in, so the town, whose own burst is the warm-up, does not
+         * read it again in its first steps (see OF_PREFETCH_ROOM). */
         int ahead = roomAheadPrefetch(runner, entries, max, battle, left);
-        if (ahead > 0) return ahead;
+        if (ahead > 0) return commonWarmup(entries, ahead, max);
         *battle = OF_PREFETCH_WARMUP;
         *left = -1;
-        int count = 0;
-        for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
-            entries[count++] = g_prefetchCommon[i];
-        for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
-            int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
-            if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
-        }
-        return count;
+        return commonWarmup(entries, 0, max);
     }
     VMContext *ctx = runner->vmContext;
     RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);

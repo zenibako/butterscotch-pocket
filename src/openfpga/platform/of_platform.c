@@ -1548,7 +1548,13 @@ static void prefetchCheck(void) {
         g_prefetchArmed = true;
         return;
     }
-    if (!g_prefetchArmed && battleId != g_prefetchBattle) {
+    /* A next room's burst holds the common warm-up after its own items, so
+     * the warm-up asked for in that room goes on with it rather than starting
+     * over (BsTown5, 2026-11-22: restarting it read the warm-up again in Snowdin
+     * Town's first steps, its slowest frame 92.9 -> 154.3 ms). */
+    bool sameBurst = battleId == g_prefetchBattle ||
+                     (battleId == OF_PREFETCH_WARMUP && g_prefetchBattle == OF_PREFETCH_ROOM);
+    if (!g_prefetchArmed && !sameBurst) {
         // The actual encounter takes over from common-asset warming. Keep
         // completed cache entries; cancel private partial/read-ahead work.
         prefetchEnd();
