@@ -16,6 +16,7 @@
 #include "vm.h"
 
 #define OF_PREFETCH_WARMUP (-1) /* common assets in overworld spare time */
+#define OF_PREFETCH_ROOM (-2) /* the next room's first textures, read from the room before it, in spare time, then the warm-up's */
 
 /* A sound in battlePrefetch's entries, and back. */
 #define OF_PREFETCH_SOUND(index) (-1 - (int32_t) (index))
@@ -111,7 +112,9 @@ typedef struct {
      * battle starts (at least 1); the platform now reads in the background and
      * keeps the pace either way, so it does not use left. 0 when no battle is
      * starting. OF_PREFETCH_WARMUP in battle requests common assets in spare
-     * time before an encounter. NULL: none ahead. */
+     * time before an encounter, OF_PREFETCH_ROOM the textures the room the
+     * player is heading for draws on its first frame, in spare time too.
+     * NULL: none ahead. */
     int (*battlePrefetch)(Runner *runner, int32_t *entries, int max, int *battle, int *left);
 
     /* The built-in benchmark (see of_bench.h). */
@@ -170,6 +173,14 @@ typedef struct {
     int townJumpCount;
     const OfBenchSection *townSections;
     int townSectionCount;
+    /* Optional bridge walk ("--bench-bridge"), run with the frame limit on as in play, so what is
+     * loaded ahead in spare time is: Undertale's room 67 bridge, then into Snowdin Town cold. */
+    const char *bridgeTitle;
+    const char *bridgeScript;
+    const OfJump *bridgeJumps;
+    int bridgeJumpCount;
+    const OfBenchSection *bridgeSections;
+    int bridgeSectionCount;
     /* The SD read tests read megabyte n of the audio pack as n / ioDivisor, and the
      * async ones megabyte ioAsyncBase + i * ioAsyncStep, to stay inside a smaller pack. */
     uint32_t ioDivisor;

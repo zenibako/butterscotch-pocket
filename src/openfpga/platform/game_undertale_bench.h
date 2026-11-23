@@ -57,6 +57,30 @@ static const OfBenchSection g_townSections[] = {
     { "walk: library to houses", 1376, "walk2", "room_tundra_town", NULL, NULL },
 };
 
+/* Room 67 (room_tundra_dangerbridge) into Snowdin Town, with the frame limit on (--bench-bridge): the
+ * run jumps onto the bridge from the intro, past the gauntlet (plot 67, which the gauntlet leaves), so
+ * the town's textures have not been read; stands there about 15 s (spare time, in which the town's
+ * first textures are loaded ahead: roomAheadPrefetch); then walks right off the bridge into the town
+ * and on. The town's entry frame and the loads at it are the measure; --no-prefetch, or a build
+ * without the prefetch, for comparison. Holding right straight after the jump leaves the player
+ * standing (found on desktop, cause not looked into), so the player turns about first. */
+static const char g_bridgeScript[] = "520:L*60,600:U*20,630:D*20,660:R*300";
+
+static const OfJump g_bridgeJumps[] = {
+    { 59, -1, "plot=67,interact=0", NULL },
+    { 60, 67, NULL, NULL },
+    { 70, -1, "encounter=-100000", NULL },
+};
+
+/* Drawn frames: 59 is the bridge's first picture (script 61), 817 the town's (script 820). */
+static const OfBenchSection g_bridgeSections[] = {
+    { "boot and intro", 58, "boot", NULL, NULL, NULL },
+    { "standing on the bridge", 517, "stand", "room_tundra_dangerbridge", NULL, NULL },
+    { "walking off the bridge", 816, "walk", "room_tundra_dangerbridge", NULL, NULL },
+    { "into town (4 frames)", 820, "entry", "room_tundra_town", NULL, NULL },
+    { "walking into the town", 958, "town", "room_tundra_town", NULL, NULL },
+};
+
 /* Key presses that walk from boot to the first battle; see runInputScript()
  * in of_platform.c for the syntax. Frame numbers assume a fresh save state. */
 static const char g_script[] =

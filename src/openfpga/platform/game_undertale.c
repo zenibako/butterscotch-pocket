@@ -481,6 +481,52 @@ static int32_t prefetchListEntry(const PrefetchList *list) {
     return sound < 0 ? 0 : OF_PREFETCH_SOUND(sound);
 }
 
+/* roomAheadPrefetch: entering Snowdin Town (room 68) cold draws 31 texture
+ * items on its first frame, about 1.3 s of card reads on the Pocket (BsTown3,
+ * 2026-11-22: 73 reads of 571 KB in 1.0 s for the 22 it timed, about half the
+ * card's speed in 1 MB reads), all in the one update. They are read while the
+ * player is still on the bridge before it (room 67, whose east door leads
+ * there), in the background and in spare time, as the common battle textures
+ * are: the TPAG indices below, in order of first use, recorded on desktop with
+ * BS_ITEM_LOG from --bench-town's cold jump. A data file whose three checked
+ * items are other items gets none. Nothing drawn changes, only when the reads
+ * happen; without a frame limit (desktop runs, the benchmark) nothing is
+ * loaded ahead, as for the battle textures' warm-up. */
+static const int16_t g_townEntryItems[] = {
+    6494, 6379, 6358, 3148, 3383, 6373, 6363, 6362, 6361, 6481, 4612, 3088, 4860, 3114, 4573, 3081,
+    3126, 3151, 3098, 5058, 3158, 3213, 3163, 4723, 3175, 3699, 3140, 3091, 2892, 3179, 3249,
+};
+static const int16_t g_townEntryCheck[][4] = { { 6494, 10, 653, 240 }, { 6379, 6, 186, 1500 }, { 3158, 10, 212, 203 } };
+#define UT_ROOM_DANGERBRIDGE 67
+
+static int roomAheadPrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
+    if (runner->currentRoomIndex != UT_ROOM_DANGERBRIDGE) return 0;
+    const DataWin *dw = runner->dataWin;
+    for (size_t i = 0; i < sizeof(g_townEntryCheck) / sizeof(g_townEntryCheck[0]); ++i) {
+        const int16_t *c = g_townEntryCheck[i];
+        const TexturePageItem *item = (uint32_t) c[0] < dw->tpag.count ? &dw->tpag.items[c[0]] : NULL;
+        if (item == NULL || item->texturePageId != c[1] || item->sourceWidth != c[2] || item->sourceHeight != c[3]) return 0;
+    }
+    int count = 0;
+    for (size_t i = 0; i < sizeof(g_townEntryItems) / sizeof(g_townEntryItems[0]) && count < max; ++i)
+        entries[count++] = g_townEntryItems[i];
+    *battle = OF_PREFETCH_ROOM;
+    *left = -1;
+    return count;
+}
+
+/* The common battle items and sounds warmed in the overworld's spare time,
+ * appended to entries after count. */
+static int commonWarmup(int32_t *entries, int count, int max) {
+    for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
+        entries[count++] = g_prefetchCommon[i];
+    for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
+        int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
+        if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
+    }
+    return count;
+}
+
 static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle, int *left) {
     bool encounter = encounterGoingOn(runner, left);
     if (!runner->dataWin || !runner->vmContext || !runner->vmContext->globalScopeInstance ||
@@ -492,16 +538,15 @@ static int battlePrefetch(Runner *runner, int32_t *entries, int max, int *battle
         if (battleUiActive(runner)) return 0;
         resolveSpeedVars(runner);
         if (!instanceOf(runner, g_prefetchCharaObject)) return 0;
+        /* On the bridge before Snowdin Town, the town's first textures, then
+         * the common warm-up as anywhere else: the next room's burst takes the
+         * warm-up in, so the town, whose own burst is the warm-up, does not
+         * read it again in its first steps (see OF_PREFETCH_ROOM). */
+        int ahead = roomAheadPrefetch(runner, entries, max, battle, left);
+        if (ahead > 0) return commonWarmup(entries, ahead, max);
         *battle = OF_PREFETCH_WARMUP;
         *left = -1;
-        int count = 0;
-        for (size_t i = 0; i < sizeof(g_prefetchCommon) / sizeof(g_prefetchCommon[0]) && count < max; ++i)
-            entries[count++] = g_prefetchCommon[i];
-        for (size_t i = 0; i < sizeof(g_prefetchCommonSounds) && count < max; ++i) {
-            int32_t sound = g_prefetchSoundIndex[g_prefetchCommonSounds[i]];
-            if (sound >= 0) entries[count++] = OF_PREFETCH_SOUND(sound);
-        }
-        return count;
+        return commonWarmup(entries, 0, max);
     }
     VMContext *ctx = runner->vmContext;
     RValue group = Instance_getSelfVar(ctx->globalScopeInstance, g_speedGroupVar);
@@ -672,6 +717,12 @@ const OfGame ofGame = {
     .townJumpCount = (int) (sizeof(g_townJumps) / sizeof(g_townJumps[0])),
     .townSections = g_townSections,
     .townSectionCount = (int) (sizeof(g_townSections) / sizeof(g_townSections[0])),
+    .bridgeTitle = "Undertale room 67 bridge into Snowdin Town",
+    .bridgeScript = g_bridgeScript,
+    .bridgeJumps = g_bridgeJumps,
+    .bridgeJumpCount = (int) (sizeof(g_bridgeJumps) / sizeof(g_bridgeJumps[0])),
+    .bridgeSections = g_bridgeSections,
+    .bridgeSectionCount = (int) (sizeof(g_bridgeSections) / sizeof(g_bridgeSections[0])),
     .ioDivisor = 1u,
     .ioAsyncBase = 110u,
     .ioAsyncStep = 2u,

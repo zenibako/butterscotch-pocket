@@ -31,6 +31,11 @@ bool ofBenchStartFloweyTour(bool livePacing);
 bool ofBenchStartRoom(void);
 /* "--bench-town": the game's town walk, if it has one: Undertale's room 68 Snowdin Town. */
 bool ofBenchStartTown(void);
+/* "--bench-bridge": the game's bridge walk, if it has one, with the frame limit on (see OfGame.bridgeScript).
+ * Section times then include the limiter's waits; the slowest frames and the loads are the measure. */
+bool ofBenchStartBridge(void);
+/* Whether the run keeps the frame limit on (a live-paced tour or the bridge walk). */
+bool ofBenchPaced(void);
 bool ofBenchLivePacing(void);
 /* Interactive sleep checkpoints, with ordinary progress kept in memory. */
 void ofPlatformStartSleepTest(void);

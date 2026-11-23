@@ -1193,6 +1193,12 @@ void ofPlatformSetPrefetch(bool on) {
     g_prefetchOn = on;
 }
 
+/* Loaded strictly in an update's spare time, and not at all without a frame limit:
+ * what is loaded ahead of nothing in particular (see OF_PREFETCH_WARMUP). */
+static bool prefetchSpareOnly(int battle) {
+    return battle == OF_PREFETCH_WARMUP || battle == OF_PREFETCH_ROOM;
+}
+
 static bool prefetchOn(void) {
     if (g_prefetchOn < 0) {
         const char *env = getenv("BS_PREFETCH");
@@ -1392,7 +1398,7 @@ static void prefetchLoadReady(uint64_t until) {
         uint64_t now = nowNanos();
         uint64_t guess = prefetchGuess(g_prefetchEntries[g_prefetchNext], true);
         bool spare = now + guess <= spareEnd;
-        if (!spare && (g_prefetchBattle == OF_PREFETCH_WARMUP ||
+        if (!spare && (prefetchSpareOnly(g_prefetchBattle) ||
                        g_lateUsed + guess > OF_PREFETCH_LATE_NANOS)) break;
         prefetchLoad();
         uint64_t end = nowNanos();
@@ -1435,6 +1441,7 @@ static void prefetchEnd(void) {
     g_burst.settleNanos = settleNanos - g_burstSettleNanos;
     char label[32];
     if (g_prefetchBattle == OF_PREFETCH_WARMUP) snprintf(label, sizeof(label), "common");
+    else if (g_prefetchBattle == OF_PREFETCH_ROOM) snprintf(label, sizeof(label), "next room");
     else snprintf(label, sizeof(label), "battle %d", g_prefetchBattle);
     logInfo("Prefetch: %s: %u of %u items loaded (%u there, %u no room, %u not reached), %u reads in the background "
             "(%u ms; others waited %u ms for them) and %u at loading, %u ms of loading, %u ms past update times over %u of %u updates\n",
@@ -1535,13 +1542,19 @@ static void prefetchCheck(void) {
     g_lateUsed = 0;
     // Until the old burst is settled its read state still refers to its list.
     int count = ofGame.battlePrefetch(g_runner, entries, OF_PREFETCH_MAX, &battleId, &left);
-    if (g_uncapped && battleId == OF_PREFETCH_WARMUP) count = 0;
+    if (g_uncapped && prefetchSpareOnly(battleId)) count = 0;
     if (count == 0) {
         prefetchEnd();
         g_prefetchArmed = true;
         return;
     }
-    if (!g_prefetchArmed && battleId != g_prefetchBattle) {
+    /* A next room's burst holds the common warm-up after its own items, so
+     * the warm-up asked for in that room goes on with it rather than starting
+     * over (BsTown5, 2026-11-22: restarting it read the warm-up again in Snowdin
+     * Town's first steps, its slowest frame 92.9 -> 154.3 ms). */
+    bool sameBurst = battleId == g_prefetchBattle ||
+                     (battleId == OF_PREFETCH_WARMUP && g_prefetchBattle == OF_PREFETCH_ROOM);
+    if (!g_prefetchArmed && !sameBurst) {
         // The actual encounter takes over from common-asset warming. Keep
         // completed cache entries; cancel private partial/read-ahead work.
         prefetchEnd();
@@ -1566,7 +1579,7 @@ static void prefetchCheck(void) {
         if (g_prefetchEntries[i] >= 0) ++g_prefetchItemCount;
         else ++g_prefetchSoundCount;
     }
-    if (g_uncapped && battleId != OF_PREFETCH_WARMUP) {
+    if (g_uncapped && !prefetchSpareOnly(battleId)) {
         prefetchAll();
         return;
     }
