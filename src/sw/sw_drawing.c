@@ -3960,9 +3960,13 @@ void swrDrawDoubledGlyph(Renderer* renderer, float dx, float dy, float dw, float
         return;
     }
     swrTransformPosIfNeeded(swr, &dx, &dy);
+    // Pinned across the flush too: a replayed grid cell may load a texture (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), sw / 2, sh / 2,
                           texture, sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha), true, SWR_CONTRAST_NONE);
+    swr->texturePins = pin.next;
 }
 
 // Build a tiny derivative once per immutable source lifetime. Source identity
@@ -4058,10 +4062,14 @@ void swrDrawContrastSprite(Renderer* renderer, float dx, float dy, float dw, flo
         return;
     }
     swrTransformPosIfNeeded(swr, &dx, &dy);
+    // Pinned across the flush too: a replayed grid cell may load a texture (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     bool fullTexels = contrast == SWR_CONTRAST_BUTTON || contrast == SWR_CONTRAST_UI_GLYPH || contrast == SWR_CONTRAST_BUBBLE_GLYPH;
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(screenW), swrCeiling(screenH),
                           texture, sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha), fullTexels, contrast);
+    swr->texturePins = pin.next;
 }
 
 // ===[ Tiled sprites ]===
@@ -5244,9 +5252,13 @@ bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float d
     half.immutable = false;
     swrTransformPosIfNeeded(swr, &dx, &dy);
     swrTransformSizeIfNeeded(swr, &dw, &dh);
+    // The view reads the source's halfBuffer: the source stays pinned (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
                           &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(color), 256, false, SWR_CONTRAST_NONE);
+    swr->texturePins = pin.next;
     return true;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
@@ -5396,7 +5408,12 @@ bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, fl
 #else
     (void) pose;
 #endif
-    return swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
+    // The view reads the source's halfBuffer: the source stays pinned (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
+    bool drawn = swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
+    swr->texturePins = pin.next;
+    return drawn;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy;
     (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color; (void) pose;
