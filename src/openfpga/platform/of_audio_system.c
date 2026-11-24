@@ -2335,9 +2335,11 @@ void ofAudioLoadSnapshotSounds(AudioSystem *audio) {
             }
             continue;
         }
+        /* Kept apart: the first voice cleared below is v itself. */
+        int track = v->track;
         for (int j = i; j < OF_MAX_VOICES; j++) {
             OfVoice *w = &ut->voices[j];
-            if (!w->active || w->streamSlot >= 0 || w->track != v->track || w->data != NULL) continue;
+            if (!w->active || w->streamSlot >= 0 || w->track != track || w->data != NULL) continue;
             hwStopVoice(ut, j);
             memset(w, 0, sizeof(*w));
             dropped++;

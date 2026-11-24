@@ -179,10 +179,42 @@ static void testGroupVolume(void) {
     free(ut.base.groupGains);
 }
 
+/* A sound that cannot be read after a Memory load stops only the voices
+ * playing that sound. The first voice stopped is the one whose read failed,
+ * so its track is kept apart before the voice is cleared: voice 0 on an
+ * unreadable track 1 must not drop voice 1 on a readable, uncached track 0. */
+static void testLoadSoundsDropsOnlyFailedTrack(void) {
+    OfAudioSystem ut = {0};
+    ut.base.vtable = &ofVtable;
+    OfMusicTrack tracks[2] = {{0}};
+    uint8_t adpcm[64];
+    for (unsigned i = 0; i < sizeof(adpcm); i++) adpcm[i] = (uint8_t)(i * 7 + 3);
+    strcpy(tracks[0].name, "readable"); tracks[0].sampleCount = 128; tracks[0].sampleRate = 32000;
+    strcpy(tracks[1].name, "unreadable"); tracks[1].sampleCount = 128; tracks[1].sampleRate = 32000;
+    tracks[1].offset = 4096; /* past the end of the pack */
+    ut.tracks = tracks; ut.trackCount = 2; ut.masterGain = 1;
+    ut.file = tmpfile(); assert(ut.file);
+    assert(fwrite(adpcm, 1, sizeof(adpcm), ut.file) == sizeof(adpcm));
+    ut.cachedSounds = calloc(2, sizeof(uint8_t *));
+    ut.cachedLastUse = calloc(2, sizeof(uint32_t));
+    ut.voices[0].active = true; ut.voices[0].streamSlot = -1; ut.voices[0].track = 1;
+    ut.voices[1].active = true; ut.voices[1].streamSlot = -1; ut.voices[1].track = 0;
+    ofAudioLoadSnapshotSounds(&ut.base);
+    assert(!ut.voices[0].active && ut.voices[0].data == NULL);
+    assert(ut.voices[1].active && ut.voices[1].track == 0);
+    assert(ut.voices[1].data != NULL && ut.voices[1].data == ut.cachedSounds[0]);
+    assert(!memcmp(ut.cachedSounds[0], adpcm, sizeof(adpcm)));
+    assert(ut.cachedSounds[1] == NULL);
+    free(ut.cachedSounds[0]); free(ut.cachedSounds); free(ut.cachedLastUse);
+    fclose(ut.file);
+    puts("audio Memory load drops only the unreadable sound: passed");
+}
+
 int main(void) {
     testRingAppend();
     testAcceptedPrefix();
     testGroupVolume();
+    testLoadSoundsDropsOnlyFailedTrack();
     OfAudioSystem ut = {0};
     ut.base.vtable = &ofVtable;
     OfMusicTrack track = {0};

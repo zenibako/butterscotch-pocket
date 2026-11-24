@@ -103,7 +103,7 @@ block phase came from the first draw, which a restore skips). From
 ```bash
 for mode in accuracy speed; do
   extra=(); [ "$mode" = speed ] && extra=(-e BS_SMOOTH=1)
-  tools/state-coverage.sh -g deltarune -x 972 \
+  env -u BS_SMOOTH tools/state-coverage.sh -g deltarune -x 972 \
     -s ../../.agents/skills/butterscotch-pocket-verify/assets/deltarune-battle.script \
     -e BS_GOTO=35:52 -e 'BS_SET=34:darkzone=1,char[1]=2,char[2]=3,plot=60,interact=0' \
     ${extra[@]+"${extra[@]}"} 850:970
@@ -111,9 +111,11 @@ done
 ```
 
 Both lines must read `identical`. `BS_SMOOTH` selects Speed whenever it is
-set, even to 0, so leave it out for Accuracy. This uses the coverage tool's
-policy bypass; repeat with the direct three-process pair above for production
-acceptance. The asset-free `sprite-clipping-fixture` covers the renderer half
+set, even to 0, so the loop unsets any inherited one for Accuracy. This uses
+the coverage tool's policy bypass; for production acceptance repeat it with
+the direct three-process pair above, using this battle's script, `BS_GOTO`,
+`BS_SET` and mode instead of Toriel's: reference dump at 970, Memory saved at
+850, loaded and dumped at 970. The asset-free `sprite-clipping-fixture` covers the renderer half
 of the same bug.
 
 ## Snapshot lifecycle regressions
