@@ -73,7 +73,7 @@ set -eu
 pair_out=$(mktemp -d "$PWD/restore-pair.XXXXXX")
 route=$(cat "$CHECKOUT/.claude/skills/butterscotch-pocket-verify/assets/deltarune-cutscene.script")
 run_pair() {
-  env -u BS_STATE_PROBE_BYPASS BS_SEED=7 BS_UNCAPPED=1 BS_NOFLIP=1 \
+  env -u BS_STATE_PROBE_BYPASS -u BS_SMOOTH BS_SEED=7 BS_UNCAPPED=1 BS_NOFLIP=1 \
     BS_SCRIPT="$route" "$@" "$CHECKOUT/src/openfpga/deltarune_pc" --bench-sleep
 }
 run_pair BS_DUMP_FRAME=800 BS_DUMP_PATH="$pair_out/ref.ppm" > "$pair_out/ref.log" 2>&1
@@ -115,7 +115,8 @@ set, even to 0, so the loop unsets any inherited one for Accuracy. This uses
 the coverage tool's policy bypass; for production acceptance repeat it with
 the direct three-process pair above, changed for this battle: `route` reads
 `deltarune-battle.script`, `run_pair` adds `BS_GOTO=35:52` and the `BS_SET`
-above to its environment (and `BS_SMOOTH=1` for Speed) and drops
+above to its environment (and `BS_SMOOTH=1` for Speed; `run_pair` unsets any
+inherited `BS_SMOOTH`, so Accuracy needs nothing) and drops
 `--bench-sleep`, both dumps are at frame 970, and the capture saves at 850
 with `BS_EXIT_FRAME=852`. The asset-free `sprite-clipping-fixture` covers the renderer half
 of the same bug.
