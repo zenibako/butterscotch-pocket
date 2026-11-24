@@ -113,9 +113,11 @@ done
 Both lines must read `identical`. `BS_SMOOTH` selects Speed whenever it is
 set, even to 0, so the loop unsets any inherited one for Accuracy. This uses
 the coverage tool's policy bypass; for production acceptance repeat it with
-the direct three-process pair above, using this battle's script, `BS_GOTO`,
-`BS_SET` and mode instead of Toriel's: reference dump at 970, Memory saved at
-850, loaded and dumped at 970. The asset-free `sprite-clipping-fixture` covers the renderer half
+the direct three-process pair above, changed for this battle: `route` reads
+`deltarune-battle.script`, `run_pair` adds `BS_GOTO=35:52` and the `BS_SET`
+above to its environment (and `BS_SMOOTH=1` for Speed) and drops
+`--bench-sleep`, both dumps are at frame 970, and the capture saves at 850
+with `BS_EXIT_FRAME=852`. The asset-free `sprite-clipping-fixture` covers the renderer half
 of the same bug.
 
 ## Snapshot lifecycle regressions
