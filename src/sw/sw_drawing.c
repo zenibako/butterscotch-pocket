@@ -51,18 +51,28 @@ bool swrFavorSpeed = false;
 //
 // The blocks start where the draw's source rectangle starts, which for a
 // tileset with a one-texel border around each tile is an odd position. So a
-// copy is made for one phase (0 or 1 each way), that of the first draw to
-// need it; a draw at the other phase keeps the averaging path. A block cut
-// by the texture's edge is whatever part of it there is. Full-size texel x
-// belongs to half-size texel (x + phase) / 2.
+// copy is made for one phase (0 or 1 each way); a draw at the other phase
+// keeps the averaging path. A block cut by the texture's edge is whatever
+// part of it there is. Full-size texel x belongs to half-size texel
+// (x + phase) / 2.
+//
+// The phase is the texture's own (texture->halfPhaseX/Y, set when it is
+// loaded: where a TPAG item's art starts inside its one-texel border), not
+// that of the first draw to need a copy. The two paths do not always give
+// the same picture (an odd-sized source halves to a size that is not exactly
+// 2:1), so a phase taken from the first draw made a sprite's look depend on
+// how it was first drawn: the Deltarune TP bar, first drawn clipped while it
+// slides in, came out different after a Memory restored it already in place
+// (issue #61).
 MAYBE_UNUSED static bool swrHalfTexture(SWTexture* texture, int wantX, int wantY)
 {
 #if PIXEL_SIZE != 16
     (void) texture; (void) wantX; (void) wantY;
     return false;
 #else
+    (void) wantX; (void) wantY;
     if (texture->halfBuffer != NULL) return true;
-    int phaseX = wantX & 1, phaseY = wantY & 1;
+    int phaseX = texture->halfPhaseX & 1, phaseY = texture->halfPhaseY & 1;
     int halfW = (texture->width + phaseX + 1) / 2, halfH = (texture->height + phaseY + 1) / 2;
     size_t texels = (size_t) halfW * halfH;
     // One allocation: the texels, each row's bounds, then room for the coverage should it be needed.
@@ -1501,7 +1511,26 @@ static void swrBlitHalfPointRows(SWRenderer* swr, const SWTexture* texture,
  * Clip a sprite's source and destination rectangles and draw with the requested sampling and blend.
  * A cached half-size texture can supply the coverage of each sampled pixel.
  */
+static void swrDrawSpriteUnpinned(
+    Renderer* renderer, int dx, int dy, int dw, int dh,
+    SWTexture* texture, int sx, int sy, int sw, int sh,
+    uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast
+);
+
 static void swrDrawSpriteInternal(
+    Renderer* renderer, int dx, int dy, int dw, int dh,
+    SWTexture* texture, int sx, int sy, int sw, int sh,
+    uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast
+)
+{
+    SWRenderer* swr = (SWRenderer*) renderer;
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
+    swrDrawSpriteUnpinned(renderer, dx, dy, dw, dh, texture, sx, sy, sw, sh, tintColor, alpha, pointSample, contrast);
+    swr->texturePins = pin.next;
+}
+
+static void swrDrawSpriteUnpinned(
     Renderer* renderer, int dx, int dy, int dw, int dh,
     SWTexture* texture, int sx, int sy, int sw, int sh,
     uintpixel_t tintColor, int alpha, MAYBE_UNUSED bool pointSample, MAYBE_UNUSED int contrast
@@ -3931,9 +3960,13 @@ void swrDrawDoubledGlyph(Renderer* renderer, float dx, float dy, float dw, float
         return;
     }
     swrTransformPosIfNeeded(swr, &dx, &dy);
+    // Pinned across the flush too: a replayed grid cell may load a texture (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), sw / 2, sh / 2,
                           texture, sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha), true, SWR_CONTRAST_NONE);
+    swr->texturePins = pin.next;
 }
 
 // Build a tiny derivative once per immutable source lifetime. Source identity
@@ -4029,10 +4062,14 @@ void swrDrawContrastSprite(Renderer* renderer, float dx, float dy, float dw, flo
         return;
     }
     swrTransformPosIfNeeded(swr, &dx, &dy);
+    // Pinned across the flush too: a replayed grid cell may load a texture (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     bool fullTexels = contrast == SWR_CONTRAST_BUTTON || contrast == SWR_CONTRAST_UI_GLYPH || contrast == SWR_CONTRAST_BUBBLE_GLYPH;
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(screenW), swrCeiling(screenH),
                           texture, sx, sy, sw, sh, swrConvertPixel(tintColor), swrIntAlpha(alpha), fullTexels, contrast);
+    swr->texturePins = pin.next;
 }
 
 // ===[ Tiled sprites ]===
@@ -5215,9 +5252,13 @@ bool swrDrawFloweyTrim(Renderer* renderer, SWTexture* texture, float dx, float d
     half.immutable = false;
     swrTransformPosIfNeeded(swr, &dx, &dy);
     swrTransformSizeIfNeeded(swr, &dw, &dh);
+    // The view reads the source's halfBuffer: the source stays pinned (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
     swrOverlayFlush(swr);
     swrDrawSpriteInternal(renderer, swrFloor(dx), swrFloor(dy), swrCeiling(dw), swrCeiling(dh),
                           &half, sx, sy, (sw + 1) / 2, (sh + 1) / 2, swrConvertPixel(color), 256, false, SWR_CONTRAST_NONE);
+    swr->texturePins = pin.next;
     return true;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy; (void) dw; (void) dh;
@@ -5367,7 +5408,12 @@ bool swrDrawFloweyStalkHalf(Renderer* renderer, SWTexture* texture, float dx, fl
 #else
     (void) pose;
 #endif
-    return swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
+    // The view reads the source's halfBuffer: the source stays pinned (#103).
+    SWTexturePin pin = { texture, swr->texturePins };
+    swr->texturePins = &pin;
+    bool drawn = swrDrawFloweyStalkPixels(renderer, &half, dx, dy, sx, sy, sw / 2, sh / 2, mirrored, color);
+    swr->texturePins = pin.next;
+    return drawn;
 #else
     (void) renderer; (void) texture; (void) dx; (void) dy;
     (void) sx; (void) sy; (void) sw; (void) sh; (void) mirrored; (void) color; (void) pose;

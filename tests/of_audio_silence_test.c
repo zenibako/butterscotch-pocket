@@ -135,7 +135,7 @@ static void testCacheLifecycleAndAllocationFailure(void) {
     ut->voices[0]=a;uint8_t *snapshot=NULL;size_t snapshotSize=0;const char *reason=NULL;
     assert(ofAudioSnapshot(&ut->base,&snapshot,&snapshotSize,&reason));
     void *prepared=ofAudioPrepareSnapshot(&ut->base,snapshot,snapshotSize,&reason);assert(prepared);
-    ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared);free(snapshot);
+    ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared); ofAudioLoadSnapshotSounds(&ut->base);free(snapshot);
     a=ut->voices[0];b=a;assert(compareChunk(ut,&a,&b,128)==0);ofDestroy(&ut->base);
     makePack();ut=systemForPack();a=tailVoice(ut,0);assert(cachedSound(ut,1));
     ut->voices[0]=a;evictSounds(ut,OF_SOUND_CACHE_BYTES);
@@ -168,14 +168,19 @@ static void testMemoryReplacementAndFailure(void) {
     assert(!memcmp(&ut->voices[0],&original,sizeof(original)));
     ut->cachedSilentFrom[0]=UINT32_MAX; /* restored allocation must regain proof */
     ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared);
-    assert(ut->cachedSounds[0]!=oldData && ut->voices[0].data==ut->cachedSounds[0]);
+    /* The pack never changes: the cached sound is kept, not read again. */
+    assert(ut->cachedSounds[0]==oldData && ut->voices[0].data==ut->cachedSounds[0]);
+    ofAudioLoadSnapshotSounds(&ut->base);
+    assert(ut->cachedSounds[0]==oldData && ut->voices[0].data==oldData);
     assert(ut->cachedBytes==oldBytes && ut->cachedSilentFrom[0]==17 && ut->cachedSilentFrom[1]==UINT32_MAX);
     OfVoice scalar=ut->voices[0],candidate=scalar;
     assert(compareChunk(ut,&scalar,&candidate,128)==128);
-    /* Failure after sound preparation, and allocation failure, are atomic. */
+    /* A refused preparation is atomic, and preparing allocates no sound
+     * (it is read only after the load is final: ofAudioLoadSnapshotSounds). */
     oldData=ut->cachedSounds[0];OfVoice live=ut->voices[0];uint32_t oldMeta=ut->cachedSilentFrom[0];
     assert(!ofAudioPrepareSnapshot(&ut->base,bytes,size-1,&reason));
-    failMallocSize=SOUND_BYTES;assert(!ofAudioPrepareSnapshot(&ut->base,bytes,size,&reason));failMallocSize=0;
+    failMallocSize=SOUND_BYTES;prepared=ofAudioPrepareSnapshot(&ut->base,bytes,size,&reason);failMallocSize=0;
+    assert(prepared);ofAudioFreeSnapshot(prepared);
     assert(ut->cachedSounds[0]==oldData && ut->cachedBytes==oldBytes && ut->cachedSilentFrom[0]==oldMeta);
     assert(!memcmp(&ut->voices[0],&live,sizeof(live)));
     /* Persisted Memory bytes survive repeated restore and scalar continuation. */
@@ -184,6 +189,7 @@ static void testMemoryReplacementAndFailure(void) {
     for(int cycle=0;cycle<3;++cycle) {
         prepared=ofAudioPrepareSnapshot(&ut->base,disk,size,&reason);assert(prepared);
         ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared);
+        ofAudioLoadSnapshotSounds(&ut->base);
         scalar=ut->voices[0];candidate=scalar;
         for(int chunk=0;chunk<20 && scalar.active;++chunk) compareChunk(ut,&scalar,&candidate,127);
     }
@@ -227,7 +233,7 @@ static void testRealTrack(OfAudioSystem *ut, const char *name) {
                     ut->voices[0]=b;uint8_t *bytes=NULL;size_t size=0;const char *reason=NULL;
                     assert(ofAudioSnapshot(&ut->base,&bytes,&size,&reason));
                     void *prepared=ofAudioPrepareSnapshot(&ut->base,bytes,size,&reason);assert(prepared);
-                    ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared);free(bytes);
+                    ofAudioApplySnapshot(&ut->base,prepared);ofAudioFreeSnapshot(prepared); ofAudioLoadSnapshotSounds(&ut->base);free(bytes);
                     a.data=ut->cachedSounds[track];b=ut->voices[0];
                 }
             }

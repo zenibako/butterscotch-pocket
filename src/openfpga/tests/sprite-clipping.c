@@ -163,6 +163,62 @@ static bool checkRotatedDraw(SWRenderer* renderer, SWTexture* texture, float ang
     return true;
 }
 
+/**
+ * A half-size draw must not depend on how the texture was first drawn. The
+ * half-size copy's block phase used to come from the first draw to need one,
+ * so a texture first drawn clipped (an even source start) and one first drawn
+ * in place (its art's odd start) gave different pictures for the same later
+ * draw: the Deltarune TP bar after a Memory restore (issue #61).
+ */
+static bool checkHalfCopyHistory(void)
+{
+    enum { TW = 27, TH = 22, SIZE = 32, SW = TW - 2, SH = TH - 2 };
+    const uintpixel_t ink = 0x8010, under = 0x8421;
+    uintpixel_t art[TW * TH] = { 0 };
+    // Bordered like a TPAG item: a one-texel transparent frame, then a slanted bar.
+    for (int y = 1; y < TH - 1; y++)
+        for (int x = 1; x < TW - 1; x++)
+            if (x >= 1 + (TH - 1 - y) / 2 && x < 14 + (TH - 1 - y) / 2) art[y * TW + x] = ink;
+    uintpixel_t pictures[2][SIZE * SIZE];
+    bool ok = true;
+    swrFavorSpeed = swrSmoothMinify = true;
+    for (int clippedFirst = 0; clippedFirst < 2; clippedFirst++) {
+        uintpixel_t pixels[TW * TH];
+        memcpy(pixels, art, sizeof(pixels));
+        SWTexture texture = { 0 };
+        texture.buffer = pixels;
+        texture.width = TW;
+        texture.height = TH;
+        texture.immutable = true;
+        texture.halfPhaseX = texture.halfPhaseY = 1; // as loadItem sets for a bordered item
+        SWRenderer renderer;
+        setup(&renderer, SIZE);
+        if (clippedFirst) {
+            // Sliding in from the left: the clip moves the source start to an even texel.
+            swrFillPixels(renderer.fb, SIZE * SIZE, under);
+            swrDrawSprite((Renderer*) &renderer, -1.0f, 4.0f, 13.0f, 10.0f, &texture, 1, 1, SW, SH, 0xffffff, 1.0f);
+            swrOverlayFlush(&renderer);
+        }
+        swrFillPixels(renderer.fb, SIZE * SIZE, under);
+        swrDrawSprite((Renderer*) &renderer, 4.0f, 4.0f, 13.0f, 10.0f, &texture, 1, 1, SW, SH, 0xffffff, 1.0f);
+        swrOverlayFlush(&renderer);
+        memcpy(pictures[clippedFirst], renderer.fb, sizeof(pictures[0]));
+        free(texture.halfBuffer);
+        free(texture.halfSpans);
+        free(texture.rowBounds);
+        free(renderer.fb);
+    }
+    for (int i = 0; i < SIZE * SIZE; i++) {
+        if (pictures[0][i] != pictures[1][i]) {
+            fprintf(stderr, "FAIL: half-size draw depends on the first draw, pixel %d,%d\n", i % SIZE, i / SIZE);
+            ok = false;
+            break;
+        }
+    }
+    swrFavorSpeed = swrSmoothMinify = false;
+    return ok;
+}
+
 /** Run the clipped sprite matrix and the sparse half-size coverage regression. */
 int main(void)
 {
@@ -220,8 +276,10 @@ int main(void)
     free(texture.rowBounds);
     free(texture.buffer);
     if (!checkSparseHalfDraw(1.0f) || !checkSparseHalfDraw(0.5f)) return 1;
+    if (!checkHalfCopyHistory()) return 1;
     printf("PASS: %u clipped sprite cases match the unclipped crop\n", checked);
     puts("PASS: clipped sparse half-size sprite matches expected coverage");
     puts("PASS: clipped rotated sprites match scalar sampling and blending");
+    puts("PASS: a half-size draw does not depend on how the texture was first drawn");
     return 0;
 }

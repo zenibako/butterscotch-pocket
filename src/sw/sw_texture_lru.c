@@ -77,6 +77,8 @@ static void evictItem(SWRenderer* swr, size_t index)
     swrFreeTexture(texture);
 }
 
+static bool isPinned(const SWRenderer* swr, const SWTexture* t){ for (const SWTexturePin* p = swr->texturePins; p; p = p->next) if (p->texture == t) return true; return false; }
+
 // Evicts the least recently used page or item texture. Returns false if nothing qualified.
 static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
 {
@@ -88,6 +90,7 @@ static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
         const SWTexture* texture = swr->textures[i];
         if (!texture) continue;
         if (!includeCurrentFrame && texture->lastUsedFrame == swr->frameCounter) continue;
+        if (isPinned(swr, texture)) continue;
         
         uint32_t age = swr->frameCounter - texture->lastUsedFrame;
         if (victim == -1 || age > oldest) {
@@ -99,6 +102,7 @@ static bool evictLeastRecentlyUsed(SWRenderer* swr, bool includeCurrentFrame)
         const SWTexture* texture = swr->itemTextures[j];
         if (!texture) continue;
         if (!includeCurrentFrame && texture->lastUsedFrame == swr->frameCounter) continue;
+        if (isPinned(swr, texture)) continue;
         
         uint32_t age = swr->frameCounter - texture->lastUsedFrame;
         if (victim == -1 || age > oldest) {
@@ -408,7 +412,9 @@ static SWTexture* loadItem(SWRenderer* swr, const TexturePageItem* tpag, uint32_
     texture->immutable = true;
     texture->halfCoverage = NULL;
     texture->solid = texture->halfSolid = 0;
-    texture->halfPhaseX = texture->halfPhaseY = 0;
+    // Half-size copies start their blocks where the item's art starts (see swrHalfTexture).
+    texture->halfPhaseX = (uint8_t) ((tpag->sourceX - left) & 1);
+    texture->halfPhaseY = (uint8_t) ((tpag->sourceY - top) & 1);
     texture->originX = (uint16_t) left;
     texture->originY = (uint16_t) top;
     return texture;

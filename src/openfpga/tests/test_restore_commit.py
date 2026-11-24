@@ -45,6 +45,10 @@ static bool ofSaveFsApplySnapshot(void *r,void*p) {(void)r;(void)p;if(failure==4
 static void Runner_snapshotApply(Runner*r,RunnerSnapshot*p){(void)p;r->state|=2;}
 static void ofAudioApplySnapshot(void*r,void*p){(void)r;(void)p;live.state|=4;}
 static void ofPlatformSnapshotResumed(Runner*r,const uint32_t*v){(void)v;r->state|=8;}
+static int sounds, expectCallback;
+/* File reads wait until the host has been told the load succeeded. */
+static void ofAudioLoadSnapshotSounds(void*r){(void)r;assert(live.state==15);assert(locked);assert(frees==0);
+ assert(callbacks==expectCallback);sounds++;}
 static void Runner_snapshotFree(RunnerSnapshot *p){if(p)frees++;}
 static void ofAudioFreeSnapshot(void*p){if(p)frees++;}
 static void ofSaveFsFreeSnapshot(void*p){if(p)frees++;}
@@ -53,14 +57,14 @@ static void committed(void){assert(live.state==15);assert(frees==0);assert(locke
 post=r'''
 int main(void){uint8_t payload[4]={'U','T','S','1'};
  for(failure=0;failure<6;failure++){
-  const char *reason=NULL;live.state=callbacks=frees=locked=0;
+  const char *reason=NULL;live.state=callbacks=frees=locked=sounds=0;expectCallback=1;
   bool ok=restoreState(&live,payload,4,&reason,committed);
-  assert(ok==(failure==0));assert(callbacks==(failure==0));assert(!locked);
+  assert(ok==(failure==0));assert(callbacks==(failure==0));assert(!locked);assert(sounds==(failure==0));
   if(failure)assert(reason);
  }
- failure=0;live.state=callbacks=frees=locked=0;const char*reason=NULL;
- assert(restoreState(&live,payload,4,&reason,NULL));assert(callbacks==0&&live.state==15&&frees==3);
- puts("PASS: completion follows committed state, precedes cleanup, never acknowledges rejection");
+ failure=0;live.state=callbacks=frees=locked=sounds=expectCallback=0;const char*reason=NULL;
+ assert(restoreState(&live,payload,4,&reason,NULL));assert(callbacks==0&&live.state==15&&frees==3&&sounds==1);
+ puts("PASS: completion follows committed state, precedes sound reads and cleanup, never acknowledges rejection");
 }
 '''
 with tempfile.TemporaryDirectory() as d:

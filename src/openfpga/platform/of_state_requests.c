@@ -275,6 +275,10 @@ static bool restoreState(Runner *r, const uint8_t *data, size_t size,
      * freeing the displaced graph. No operation after this point can refuse
      * the load; a new request during cleanup must retain its own completion. */
     if (ok && committed) committed();
+    /* The host serves file reads again only after that notice. */
+    uint64_t soundsStarted = nowNanos();
+    if (ok) ofAudioLoadSnapshotSounds(r->audioSystem);
+    uint64_t soundsNanos = nowNanos() - soundsStarted;
     Runner_snapshotFree(core); ofAudioFreeSnapshot(audio); ofSaveFsFreeSnapshot(files);
     ofAudioSnapshotLock(false);
     phases[5] = nowNanos();
@@ -283,12 +287,13 @@ static bool restoreState(Runner *r, const uint8_t *data, size_t size,
         (unsigned long long)((applyPhases[2] - applyPhases[1]) / 1000000),
         (unsigned long long)((applyPhases[3] - applyPhases[2]) / 1000000),
         (unsigned long long)((applyPhases[4] - applyPhases[3]) / 1000000));
-    logInfo("State restore phases: game %llu audio %llu files %llu apply %llu cleanup %llu ms; %s%s%s\n",
+    logInfo("State restore phases: game %llu audio %llu files %llu apply %llu sounds %llu cleanup %llu ms; %s%s%s\n",
         (unsigned long long)((phases[1] - phases[0]) / 1000000),
         (unsigned long long)((phases[2] - phases[1]) / 1000000),
         (unsigned long long)((phases[3] - phases[2]) / 1000000),
         (unsigned long long)((phases[4] - phases[3]) / 1000000),
-        (unsigned long long)((phases[5] - phases[4]) / 1000000),
+        (unsigned long long)(soundsNanos / 1000000),
+        (unsigned long long)((phases[5] - phases[4] - soundsNanos) / 1000000),
         ok ? "ok" : "refused", !ok && *reason ? ": " : "", !ok && *reason ? *reason : "");
     return ok;
 }
