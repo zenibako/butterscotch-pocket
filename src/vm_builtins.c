@@ -3732,9 +3732,9 @@ static RValue builtin_game_get_speed(VMContext* ctx, MAYBE_UNUSED RValue* args, 
 
 static RValue builtin_game_set_speed(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
     if (2 > argCount) return RValue_makeUndefined();
-
-    int32_t type = RValue_toInt32(args[0]);
-    GMLReal speedValue = RValue_toReal(args[1]);
+//correct arg order based off of the gm manual.
+    GMLReal speedValue = RValue_toReal(args[0]);
+    int32_t type = RValue_toInt32(args[1]);  
     GMLReal fps = (type == 0) ? speedValue : (speedValue > 0.0 ? (GMLReal) (1000000.0 / speedValue) : 0.0);
 
     ctx->runner->gameSpeedOverride = fps;
@@ -9812,6 +9812,30 @@ static RValue builtinDeviceMouseCheckButton(VMContext* ctx, RValue* args, int32_
 
     int32_t button = RValue_toInt32(args[1]);
     return RValue_makeBool(RunnerMouse_checkButton(runner->mouse, button));
+}
+
+static RValue builtinDeviceMouseCheckButtonPressed(VMContext* ctx, RValue* args, int32_t argCount) {
+    REQUIRE_ARGC_AT_LEAST("device_mouse_check_button_pressed", 2, RValue_makeBool(false));
+    Runner* runner = (Runner*) ctx->runner;
+    
+    // We only support mouse 0 for now (device 0)
+    int32_t device = RValue_toInt32(args[0]);
+    if (device != 0) return RValue_makeBool(false);
+    
+    int32_t button = RValue_toInt32(args[1]);
+    return RValue_makeBool(RunnerMouse_checkButtonPressed(runner->mouse, button));
+}
+
+static RValue builtinDeviceMouseCheckButtonReleased(VMContext* ctx, RValue* args, int32_t argCount) {
+    REQUIRE_ARGC_AT_LEAST("device_mouse_check_button_pressed", 2, RValue_makeBool(false));
+    Runner* runner = (Runner*) ctx->runner;
+    
+    // We only support mouse 0 for now (device 0)
+    int32_t device = RValue_toInt32(args[0]);
+    if (device != 0) return RValue_makeBool(false);
+    
+    int32_t button = RValue_toInt32(args[1]);
+    return RValue_makeBool(RunnerMouse_checkButtonReleased(runner->mouse, button));
 }
 
 static RValue builtinMouseCheckButton(VMContext* ctx, RValue* args, int32_t argCount) {
@@ -25675,6 +25699,8 @@ void VMBuiltins_registerAll(VMContext* ctx) {
 
     // Devices
     VM_registerBuiltin(ctx, "device_mouse_check_button", builtinDeviceMouseCheckButton);
+    VM_registerBuiltin(ctx, "device_mouse_check_button_pressed", builtinDeviceMouseCheckButtonPressed);
+    VM_registerBuiltin(ctx, "device_mouse_check_button_released", builtinDeviceMouseCheckButtonReleased);
     VM_registerBuiltin(ctx, "device_mouse_x", builtinDeviceMouseX);
     VM_registerBuiltin(ctx, "device_mouse_y", builtinDeviceMouseY);
     VM_registerBuiltin(ctx, "device_mouse_x_to_gui", builtinDeviceMouseXToGui);
